@@ -61,9 +61,9 @@ if __name__ == '__main__':
     ### Update 6th Dec 2023
     ### This is a simulation from Chet, it's only for comparison purposes.
     ### Please comment out all previous codes when doing the following simulation
-    save_dir = './data/node_timeseries/simulation_rukuang/state_8/'
+    save_dir = './data/node_timeseries/simulation_rukuang/state_5/'
     n_samples = 25600
-    n_states = 8
+    n_states = 5
     n_channels = 25
     n_subjects = 50
     stay_prob = 0.9
@@ -72,21 +72,28 @@ if __name__ == '__main__':
     if not os.path.exists(f'{save_dir}truth/'):
         os.makedirs(f'{save_dir}truth/')
     from osl_dynamics import data, simulation
+
+
+    from osl_dynamics.data import Data
+    # Create Data object for training
+
     sim = simulation.HMM_MVN(
-        n_samples=n_samples,
+        n_samples=n_samples*n_subjects,
         n_states=n_states,
         n_channels=n_channels,
         trans_prob="sequence",
         stay_prob=stay_prob,
         means="zero",
         covariances="random",
-        random_seed=123,
     )
+    data = sim.time_series
+    time_course = sim.state_time_course
+    data = data.reshape(n_subjects, -1, n_channels)
+    time_course = time_course.reshape(n_subjects,-1,n_channels)
 
-    from osl_dynamics.data import Data
-    # Create Data object for training
-    data = Data(sim.time_series)
+    np.save(f'{save_dir}truth/state_covariances.npy', sim.obs_mod.covariances)
+
     for i in range(n_subjects):
-        np.savetxt(f'{save_dir}{10001+i}.txt', sim.time_series)
-        np.save(f'{save_dir}truth/{10001+i}_state_time_course.npy', sim.state_time_course)
-        np.save(f'{save_dir}truth/{10001+i}_state_covariances.npy',sim.obs_mod.covariances)
+        np.savetxt(f'{save_dir}{10001+i}.txt', data[i])
+        np.save(f'{save_dir}truth/{10001+i}_state_time_course.npy', time_course[i])
+
