@@ -87,6 +87,6 @@ if __name__ == '__main__':
     # Create Data object for training
     data = Data(sim.time_series)
     for i in range(n_subjects):
-        np.savetxt(f'{save_dir}10001.txt', sim.time_series)
-        np.save(f'{save_dir}{truth}/10001_state_time_course.npy', sim.state_time_course)
-        np.save(f'{save_dir}{truth}/10001_state_covariances.npy',sim.obs_mod.covariances)
+        np.savetxt(f'{save_dir}{10001+i}.txt', sim.time_series)
+        np.save(f'{save_dir}truth/{10001+i}_state_time_course.npy', sim.state_time_course)
+        np.save(f'{save_dir}truth/{10001+i}_state_covariances.npy',sim.obs_mod.covariances)
