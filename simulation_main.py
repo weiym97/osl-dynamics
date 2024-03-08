@@ -57,20 +57,27 @@ if __name__ == '__main__':
                                       means=means,
                                       covariances=perturb_covariances(covariances,perturbation_factor=perturbation_factor),
                                       subj_name = str(i))
-    '''
+
     ### Update 6th Dec 2023
     ### This is a simulation from Chet, it's only for comparison purposes.
     ### Please comment out all previous codes when doing the following simulation
-    save_dir = './data/node_timeseries/simulation_toy_8/'
+    save_dir = './data/node_timeseries/simulation_rukuang/state_5/'
+    n_samples = 25600
+    n_states = 5
+    n_channels = 25
+    n_subjects = 50
+    stay_prob = 0.9
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
+    if not os.path.exists(f'{save_dir}truth/'):
+        os.makedirs(f'{save_dir}truth/')
     from osl_dynamics import data, simulation
     sim = simulation.HMM_MVN(
-        n_samples=25600,
-        n_states=5,
-        n_channels=11,
+        n_samples=n_samples,
+        n_states=n_states,
+        n_channels=n_channels,
         trans_prob="sequence",
-        stay_prob=0.9,
+        stay_prob=stay_prob,
         means="zero",
         covariances="random",
         random_seed=123,
@@ -79,7 +86,7 @@ if __name__ == '__main__':
     from osl_dynamics.data import Data
     # Create Data object for training
     data = Data(sim.time_series)
-    np.savetxt(f'{save_dir}10001.txt', sim.time_series)
-    np.save(f'{save_dir}10001_state_time_course.npy', sim.state_time_course)
-    np.save(f'{save_dir}10001_state_covariances.npy',sim.obs_mod.covariances)
-    '''
+    for i in range(n_subjects):
+        np.savetxt(f'{save_dir}10001.txt', sim.time_series)
+        np.save(f'{save_dir}{truth}/10001_state_time_course.npy', sim.state_time_course)
+        np.save(f'{save_dir}{truth}/10001_state_covariances.npy',sim.obs_mod.covariances)
