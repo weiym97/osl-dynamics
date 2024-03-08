@@ -61,9 +61,9 @@ if __name__ == '__main__':
     ### Update 6th Dec 2023
     ### This is a simulation from Chet, it's only for comparison purposes.
     ### Please comment out all previous codes when doing the following simulation
-    save_dir = './data/node_timeseries/simulation_rukuang/state_5/'
+    save_dir = './data/node_timeseries/simulation_rukuang/state_8/'
     n_samples = 25600
-    n_states = 5
+    n_states = 8
     n_channels = 25
     n_subjects = 50
     stay_prob = 0.9
