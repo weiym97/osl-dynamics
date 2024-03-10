@@ -87,7 +87,8 @@ class Config(BaseModelConfig):
 
     initial_trans_prob : np.ndarray or str
         Initialisation for the transition probability matrix.
-        string works for the :code: 'random'.
+        string works for the :code: 'random'
+        or specify a file to read
     learn_trans_prob : bool
         Should we make the transition probability matrix trainable?
     state_probs_t0: np.ndarray
@@ -150,6 +151,9 @@ class Config(BaseModelConfig):
             self.initial_means = np.load(self.initial_means)
         if isinstance(self.initial_covariances,str):
             self.initial_covariances = np.load(self.initial_covariances)
+        if isinstance(self.initial_trans_prob,str):
+            if '.npy' in self.initial_trans_prob:
+                self.initial_trans_prob = np.load(self.initial_trans_prob)
         self.validate_observation_model_parameters()
         self.validate_trans_prob_parameters()
         self.validate_dimension_parameters()
