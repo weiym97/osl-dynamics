@@ -191,7 +191,7 @@ class BatchTrain:
                 yaml.safe_dump(config,file, default_flow_style=False)
         self.config = config
 
-    def model_train(self,cv_ratio=0.8):
+    def model_train(self,cv_ratio=0.25):
         '''
         Batch model train method
         cv_ration: float,optional
@@ -231,20 +231,30 @@ class BatchTrain:
 
 
         elif "cv" in self.config["mode"]:
-            indice_1, indice_2 = self.select_indice(ratio=cv_ratio)
+            indice_all = self.select_indice(ratio=cv_ratio)
 
             # Save the selected and remaining indices to JSON files
-            with open(f'{self.config["save_dir"]}indices_train.json', 'w') as json_file:
-                json.dump(indice_1, json_file)
-            with open(f'{self.config["save_dir"]}indices_validate.json', 'w') as json_file:
-                json.dump(indice_2, json_file)
+            for i in range(len(indice_all)):
+                with open(f'{self.config["save_dir"]}indices_{i+1}.json', 'w') as json_file:
+                    json.dump(indice_all[i], json_file)
 
+            for i in range(0,2):
+                temp_save_dir = f'{self.config["save_dir"]}half_{i+1}/'
+                if not os.path.exists(temp_save_dir):
+                    os.makedirs(temp_save_dir)
+                prepare_config['keep_list'] = f'{self.config["save_dir"]}indices_{i+1}.json'
+                with open(f'{temp_save_dir}prepared_config.yaml', 'w') as file:
+                    yaml.safe_dump(prepare_config, file, default_flow_style=False)
+                run_pipeline_from_file(f'{temp_save_dir}prepared_config.yaml',
+                                      temp_save_dir)
+
+            '''
             prepare_config['keep_list'] = f'{self.config["save_dir"]}indices_train.json'
             with open(f'{self.config["save_dir"]}prepared_config.yaml', 'w') as file:
                 yaml.safe_dump(prepare_config, file, default_flow_style=False)
             run_pipeline_from_file(f'{self.config["save_dir"]}prepared_config.yaml',
                                    self.config['save_dir'])
-
+            '''
 
         else:
             with open(f'{self.config["save_dir"]}prepared_config.yaml', 'w') as file:
@@ -261,15 +271,20 @@ class BatchTrain:
             n_sessions = self.config["n_sessions"]
 
         all_indices = list(range(n_sessions))
-        # Calculate the number of indices to select (half of the total)
-        n_selected_sessions = int(n_sessions * ratio)
 
-        # Randomly select indices without replacement
-        selected_indices = random.sample(all_indices, n_selected_sessions)
-
-        # Calculate the remaining indices
-        remaining_indices = list(set(all_indices) - set(selected_indices))
-        return selected_indices,remaining_indices
+        # Check if the ratio is 0.5
+        if ratio == 0.5:
+            # Randomly select indices without replacement
+            selected_indices = random.sample(all_indices, int(n_sessions * ratio))
+            # Calculate the remaining indices
+            remaining_indices = list(set(all_indices) - set(selected_indices))
+            return selected_indices, remaining_indices
+        elif ratio == 0.25:
+            # Randomly split indices into four chunks
+            random.shuffle(all_indices)
+            chunk_size = int(n_sessions * ratio)
+            chunks = [all_indices[i:i + chunk_size] for i in range(0, n_sessions, chunk_size)]
+            return chunks
 
 def batch_check(config:dict):
     '''
