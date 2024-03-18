@@ -24,17 +24,17 @@ class BICVkmeans():
         self.partition_columns = partition_columns
 
 
-        def partition_indices(self):
-            # Generate random row and column indices
-            row_indices = np.arange(self.n_samples)
-            column_indices = np.arange(self.n_channels)
-            np.random.shuffle(row_indices)
-            np.random.shuffle(column_indices)
+    def partition_indices(self):
+        # Generate random row and column indices
+        row_indices = np.arange(self.n_samples)
+        column_indices = np.arange(self.n_channels)
+        np.random.shuffle(row_indices)
+        np.random.shuffle(column_indices)
 
-            # Divide rows into partitions
-            row_indices = np.array_split(row_indices, self.partition_rows)
+        # Divide rows into partitions
+        row_indices = np.array_split(row_indices, self.partition_rows)
 
-            # Divide columns into partitions
-            column_indices = np.array_split(column_indices, self.partition_columns)
+        # Divide columns into partitions
+        column_indices = np.array_split(column_indices, self.partition_columns)
 
-            return row_indices, column_indices
+        return row_indices, column_indices
