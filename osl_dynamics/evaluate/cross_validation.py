@@ -25,6 +25,7 @@ class BICVkmeans():
         self.n_channels = n_channels
         self.partition_rows = partition_rows
         self.partition_columns = partition_columns
+        self.partition_indices()
 
 
     def partition_indices(self,save_dir=None):
@@ -137,6 +138,27 @@ class BICVkmeans():
 
         return temporal_X_test
 
-    
+    def Y_test(self,data,row_test,column_Y,temporal_X_test,spatial_Y_train):
+        data = data[row_test][:,column_Y]
+
+        centroids = spatial_Y_train[temporal_X_test]
+
+        # Compute squared differences between data and centroids
+        mean_squared_diff = np.mean(np.sum((data - centroids) ** 2,axis=-1),axis=0)
+
+        return mean_squared_diff
+
+    def validate(self,data):
+        metrics = []
+        for i in range(self.partition_rows):
+            for j in range(self.partition_columns):
+                row_train, row_test, column_X, column_Y = self.fold_indices(i, j)
+                spatial_Y_train, temporal_Y_train = self.Y_train(data, row_train, column_Y)
+                spatial_X_train = self.X_train(data, row_train, column_X, temporal_Y_train)
+                temporal_X_test = self.X_test(data, row_test, column_X, spatial_X_train)
+                metric = float(self.Y_test(data, row_test, column_Y, temporal_X_test, spatial_Y_train))
+                metrics.append(metric)
+
+        return metrics
 
 
