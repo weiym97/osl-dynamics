@@ -111,9 +111,22 @@ class BICVkmeans():
         kmeans.fit(data)
 
         # Get the cluster centroids
-        centroids = kmeans.cluster_centers_
+        spatial_Y_train = kmeans.cluster_centers_
 
         # Get the cluster labels for each data point
-        labels = kmeans.labels_
+        temporal_Y_train = kmeans.labels_
 
-        return centroids, labels
+        return spatial_Y_train, temporal_Y_train
+
+    def X_train(self,data,row_train,column_X,temporal_Y_train):
+        data = data[row_train][:,column_X]
+
+        spatial_X_train = np.array([np.mean(data[temporal_Y_train == cluster_label], axis=0)
+                              for cluster_label in range(self.n_clusters)])
+
+        return spatial_X_train
+
+    def X_test(self,data,row_test,column_X,spatial_X_train):
+        data = data[row_test][:,column_X]
+
+
