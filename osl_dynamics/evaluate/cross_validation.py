@@ -1,5 +1,6 @@
 import os
 import numpy as np
+from sklearn.cluster import KMeans
 
 class BICVkmeans():
     def __init__(self,n_clusters,n_samples,n_channels,partition_rows=2,partition_columns=2):
@@ -99,3 +100,20 @@ class BICVkmeans():
                 column_X.extend(column_index)
 
         return row_train, row_test, column_X, column_Y
+
+    def Y_train(self,data,row_train,column_Y):
+        data = data[row_train][:,column_Y]
+
+        # Initialize the KMeans model with the number of clusters
+        kmeans = KMeans(n_clusters=self.n_clusters)
+
+        # Fit the model to the data
+        kmeans.fit(data)
+
+        # Get the cluster centroids
+        centroids = kmeans.cluster_centers_
+
+        # Get the cluster labels for each data point
+        labels = kmeans.labels_
+
+        return centroids, labels
