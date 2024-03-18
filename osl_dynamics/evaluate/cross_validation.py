@@ -1,6 +1,7 @@
 import os
 import numpy as np
 from sklearn.cluster import KMeans
+from scipy.spatial.distance import cdist
 
 class BICVkmeans():
     def __init__(self,n_clusters,n_samples,n_channels,partition_rows=2,partition_columns=2):
@@ -128,5 +129,14 @@ class BICVkmeans():
 
     def X_test(self,data,row_test,column_X,spatial_X_train):
         data = data[row_test][:,column_X]
+        # Compute distances between data points and centroids
+        distances = cdist(data, spatial_X_train, metric='euclidean')
+
+        # Assign each data point to the nearest centroid
+        temporal_X_test = np.argmin(distances, axis=1)
+
+        return temporal_X_test
+
+    
 
 
