@@ -1,7 +1,10 @@
 import os
+import yaml
 import numpy as np
 from sklearn.cluster import KMeans
 from scipy.spatial.distance import cdist
+
+from ..config_api.pipeline import run_pipeline_from_file
 
 class BICVkmeans():
     def __init__(self,n_clusters,n_samples,n_channels,partition_rows=2,partition_columns=2):
@@ -160,5 +163,194 @@ class BICVkmeans():
                 metrics.append(metric)
 
         return metrics
+
+class BICVHMM():
+    def __init__(self,n_samples,n_channels,save_dir=None,partition_rows=2,partition_columns=2,):
+        '''
+        Initialisation of BICVkmeans
+        Parameters
+        ----------
+        n_samples: int
+            the number of samples
+        n_channels: int
+            the number of channels (the length of each sample)
+        partition_rows: int
+            the number of rows partition
+        partition_columns: int
+            the number of columns partition
+
+        '''
+        self.n_samples = n_samples
+        self.n_channels = n_channels
+        self.partition_rows = partition_rows
+        self.partition_columns = partition_columns
+        self.save_dir = save_dir
+        self.partition_indices()
+
+
+    def partition_indices(self):
+        '''
+        Generate partition indices, if save_dir is not None,
+        save the indices.
+        Parameters
+        ----------
+        save_dir: str,optional
+            the directory to save the indices
+
+        '''
+        # Generate random row and column indices
+        row_indices = np.arange(self.n_samples)
+        column_indices = np.arange(self.n_channels)
+        np.random.shuffle(row_indices)
+        np.random.shuffle(column_indices)
+
+        # Divide rows into partitions
+        self.row_indices = np.array_split(row_indices, self.partition_rows)
+
+        # Divide columns into partitions
+        self.column_indices = np.array_split(column_indices, self.partition_columns)
+
+
+        if self.save_dir is not None:
+            np.savez(os.path.join(self.save_dir,'row_indices.npz'), *self.row_indices)
+            np.savez(os.path.join(self.save_dir, 'column_indices.npz'), *self.column_indices)
+
+    def fold_indices(self,r,s):
+        """
+        Given the paritions, return the indices of fold (r,s).
+        Fold (r,s) treats the rth row subset as "test", and the sth column
+        subset as response.
+        The parition should be in the format:
+        (X_train, Y_train,
+         X_test,  Y_test  )
+        Parameters
+        ----------
+        r: int
+            the row index
+        s: int
+            the column index
+
+        Returns
+        -------
+        row_train: list
+            row indices for X_train and Y_train
+        row_test: list
+            row indices for X_test and Y_test
+        column_X: list
+            column indices for X_train and X_test
+        column_Y: list
+            column indices for Y_train and Y_test
+        """
+
+        # Assuming row_indices and column_indices are available
+        row_train = []
+        row_test = []
+        column_X = []
+        column_Y = []
+
+        # Assign row indices for X_train and Y_train based on r
+        for i, row_index in enumerate(self.row_indices):
+            if i == r:
+                row_test.extend(row_index)
+            else:
+                row_train.extend(row_index)
+
+        # Assign column indices for X_train and X_test based on s
+        for j, column_index in enumerate(self.column_indices):
+            if j == s:
+                column_Y.extend(column_index)
+            else:
+                column_X.extend(column_index)
+
+        return row_train, row_test, column_X, column_Y
+
+    def Y_train(self,config,train_keys,row_train,column_Y):
+        # Specify the save directory
+        save_dir = os.path.join(config['save_dir'],'Y_train/')
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
+        prepare_config = {}
+        prepare_config['load_data'] = self.config['load_data']
+        prepare_config['load_data']['prepare']['select']['channels'] = column_Y
+
+        prepare_config[f'train_{self.config["model"]}'] = {
+            'config_kwargs':
+                {key: self.config[key] for key in train_keys if key in self.config},
+            'init_kwargs':
+                self.config['init_kwargs']
+        }
+        prepare_config['keep_list'] = row_train
+
+        with open(f'{save_dir}/prepared_config.yaml', 'w') as file:
+            yaml.safe_dump(prepare_config, file, default_flow_style=False)
+        run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
+                               save_dir)
+
+        return
+        '''
+        # Initialize the KMeans model with the number of clusters
+        kmeans = KMeans(n_clusters=self.n_clusters)
+
+        # Fit the model to the data
+        kmeans.fit(data)
+
+        # Get the cluster centroids
+        spatial_Y_train = kmeans.cluster_centers_
+
+        # Get the cluster labels for each data point
+        temporal_Y_train = kmeans.labels_
+
+        return spatial_Y_train, temporal_Y_train
+        '''
+    def X_train(self,config,train_keys,row_train,column_X,temporal_Y_train):
+        #data = data[row_train][:,column_X]
+        return
+        '''
+        spatial_X_train = np.array([np.mean(data[temporal_Y_train == cluster_label], axis=0)
+                              for cluster_label in range(self.n_clusters)])
+
+        return spatial_X_train
+        '''
+    def X_test(self,config,train_keys,column_X,spatial_X_train):
+        #data = data[row_test][:,column_X]
+        return
+        '''
+        # Compute distances between data points and centroids
+        distances = cdist(data, spatial_X_train, metric='euclidean')
+
+        # Assign each data point to the nearest centroid
+        temporal_X_test = np.argmin(distances, axis=1)
+
+        return temporal_X_test
+        '''
+    def Y_test(self,config,train_keys,row_test,column_Y,temporal_X_test,spatial_Y_train):
+        #data = data[row_test][:,column_Y]
+        return
+        '''
+        centroids = spatial_Y_train[temporal_X_test]
+
+        # Compute squared differences between data and centroids
+        mean_squared_diff = np.mean(np.sum((data - centroids) ** 2,axis=-1),axis=0)
+
+        return mean_squared_diff
+        '''
+    def validate(self,config,train_keys):
+        metrics = []
+        for i in range(self.partition_rows):
+            for j in range(self.partition_columns):
+                row_train, row_test, column_X, column_Y = self.fold_indices(i, j)
+
+
+                spatial_Y_train, temporal_Y_train = self.Y_train(config, train_keys,row_train, column_Y)
+                raise ValueError('For test only!')
+                spatial_X_train = self.X_train(config, train_keys,row_train, column_X, temporal_Y_train)
+                temporal_X_test = self.X_test(config, train_keys,row_test, column_X, spatial_X_train)
+                metric = float(self.Y_test(config, train_keys,row_test, column_Y, temporal_X_test, spatial_Y_train))
+                metrics.append(metric)
+
+        return metrics
+
+
 
 

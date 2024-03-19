@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 from .pipeline import run_pipeline_from_file
 from ..data.base import Data
+from ..evaluate.cross_validation import BICVHMM
 from ..utils.misc import override_dict_defaults
 class IndexParser:
 
@@ -231,6 +232,18 @@ class BatchTrain:
 
 
         elif "cv" in self.config["mode"]:
+            # Find the number of sessions to work with
+            self.config['n_sessions'] = 500
+            if "n_sessions" not in self.config:
+                data = Data(self.config["load_data"]["inputs"])
+                n_sessions = len(data.arrays)
+            else:
+                n_sessions = self.config["n_sessions"]
+            # Find the number of channels
+            n_channels = self.config['n_channels']
+            cv = BICVHMM(n_samples=n_sessions,n_channels=n_channels,save_dir = self.config['save_dir'])
+            cv.validate(self.config,self.train_keys)
+            '''
             indice_all = self.select_indice(ratio=cv_ratio)
 
             # Save the selected and remaining indices to JSON files
@@ -248,7 +261,7 @@ class BatchTrain:
                 run_pipeline_from_file(f'{temp_save_dir}prepared_config.yaml',
                                       temp_save_dir)
 
-            '''
+            
             prepare_config['keep_list'] = f'{self.config["save_dir"]}indices_train.json'
             with open(f'{self.config["save_dir"]}prepared_config.yaml', 'w') as file:
                 yaml.safe_dump(prepare_config, file, default_flow_style=False)
