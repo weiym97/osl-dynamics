@@ -271,14 +271,14 @@ class BICVHMM():
             os.makedirs(save_dir)
 
         prepare_config = {}
-        prepare_config['load_data'] = self.config['load_data']
+        prepare_config['load_data'] = config['load_data']
         prepare_config['load_data']['prepare']['select']['channels'] = column_Y
 
-        prepare_config[f'train_{self.config["model"]}'] = {
+        prepare_config[f'train_{config["model"]}'] = {
             'config_kwargs':
-                {key: self.config[key] for key in train_keys if key in self.config},
+                {key: config[key] for key in train_keys if key in config},
             'init_kwargs':
-                self.config['init_kwargs']
+                config['init_kwargs']
         }
         prepare_config['keep_list'] = row_train
 
