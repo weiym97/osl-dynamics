@@ -151,7 +151,7 @@ class BICVkmeans():
 
         return mean_squared_diff
 
-    def validate(self,data):
+    def validate(self,data,save_dir=None):
         metrics = []
         for i in range(self.partition_rows):
             for j in range(self.partition_columns):
@@ -159,6 +159,11 @@ class BICVkmeans():
                 spatial_Y_train, temporal_Y_train = self.Y_train(data, row_train, column_Y)
                 spatial_X_train = self.X_train(data, row_train, column_X, temporal_Y_train)
                 temporal_X_test = self.X_test(data, row_test, column_X, spatial_X_train)
+                if save_dir is not None:
+                    np.save(os.path.join(save_dir,f'fold_{i+1}_{j+1}_spatial_Y_train.npy'),spatial_Y_train)
+                    np.save(os.path.join(save_dir, f'fold_{i + 1}_{j + 1}_temporal_Y_train.npy'), temporal_Y_train)
+                    np.save(os.path.join(save_dir, f'fold_{i + 1}_{j + 1}_spatial_X_train.npy'), spatial_X_train)
+                    np.save(os.path.join(save_dir, f'fold_{i + 1}_{j + 1}_temporal_X_test.npy'), temporal_X_test)
                 metric = float(self.Y_test(data, row_test, column_Y, temporal_X_test, spatial_Y_train))
                 metrics.append(metric)
 
@@ -262,6 +267,11 @@ class BICVHMM():
             else:
                 column_X.extend(column_index)
 
+        row_train = list(map(int, row_train))
+        row_test = list(map(int, row_test))
+        column_X = list(map(int, column_X))
+        column_Y = list(map(int, column_Y))
+
         return row_train, row_test, column_X, column_Y
 
     def Y_train(self,config,train_keys,row_train,column_Y):
@@ -272,6 +282,7 @@ class BICVHMM():
 
         prepare_config = {}
         prepare_config['load_data'] = config['load_data']
+
         prepare_config['load_data']['prepare']['select']['channels'] = column_Y
 
         prepare_config[f'train_{config["model"]}'] = {
@@ -280,7 +291,10 @@ class BICVHMM():
             'init_kwargs':
                 config['init_kwargs']
         }
+        prepare_config[f'train_{config["model"]}']['config_kwargs']['n_channels'] = len(column_Y)
         prepare_config['keep_list'] = row_train
+
+        print(prepare_config)
 
         with open(f'{save_dir}/prepared_config.yaml', 'w') as file:
             yaml.safe_dump(prepare_config, file, default_flow_style=False)
@@ -342,7 +356,7 @@ class BICVHMM():
                 row_train, row_test, column_X, column_Y = self.fold_indices(i, j)
 
 
-                spatial_Y_train, temporal_Y_train = self.Y_train(config, train_keys,row_train, column_Y)
+                self.Y_train(config, train_keys,row_train, column_Y)
                 raise ValueError('For test only!')
                 spatial_X_train = self.X_train(config, train_keys,row_train, column_X, temporal_Y_train)
                 temporal_X_test = self.X_test(config, train_keys,row_test, column_X, spatial_X_train)
