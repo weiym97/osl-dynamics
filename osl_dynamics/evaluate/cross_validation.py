@@ -1,10 +1,14 @@
 import os
+import pickle
 import yaml
+import json
 import numpy as np
 from sklearn.cluster import KMeans
 from scipy.spatial.distance import cdist
 
 from ..config_api.pipeline import run_pipeline_from_file
+from ..config_api.wrappers import load_data
+from ..inference.modes import argmax_time_courses
 
 class BICVkmeans():
     def __init__(self,n_clusters,n_samples,n_channels,partition_rows=2,partition_columns=2):
@@ -103,6 +107,11 @@ class BICVkmeans():
                 column_Y.extend(column_index)
             else:
                 column_X.extend(column_index)
+
+        row_train = sorted(list(map(int, row_train)))
+        row_test = sorted(list(map(int, row_test)))
+        column_X = sorted(list(map(int, column_X)))
+        column_Y = sorted(list(map(int, column_Y)))
 
         return row_train, row_test, column_X, column_Y
 
@@ -267,14 +276,14 @@ class BICVHMM():
             else:
                 column_X.extend(column_index)
 
-        row_train = list(map(int, row_train))
-        row_test = list(map(int, row_test))
-        column_X = list(map(int, column_X))
-        column_Y = list(map(int, column_Y))
+        row_train = sorted(list(map(int, row_train)))
+        row_test = sorted(list(map(int, row_test)))
+        column_X = sorted(list(map(int, column_X)))
+        column_Y = sorted(list(map(int, column_Y)))
 
         return row_train, row_test, column_X, column_Y
 
-    def Y_train(self,config,train_keys,row_train,column_Y):
+    def Y_train(self,config,train_keys,row_train,column_Y,):
         # Specify the save directory
         save_dir = os.path.join(config['save_dir'],'Y_train/')
         if not os.path.exists(save_dir):
@@ -294,73 +303,167 @@ class BICVHMM():
         prepare_config[f'train_{config["model"]}']['config_kwargs']['n_channels'] = len(column_Y)
         prepare_config['keep_list'] = row_train
 
-        print(prepare_config)
+        with open(f'{save_dir}/prepared_config.yaml', 'w') as file:
+            yaml.safe_dump(prepare_config, file, default_flow_style=False)
+        run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
+                               save_dir)
+        params_dir = f'{save_dir}/inf_params/'
+        return f'{save_dir}/model/', f'{params_dir}alp.pkl'
+
+    def X_train(self,config,row_train,column_X,temporal_Y_train):
+        save_dir = os.path.join(config['save_dir'], 'X_train/')
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
+        # Read in the temporal_Y_train
+        if isinstance(temporal_Y_train,str):
+            # Open the pickle file in binary mode
+            with open(temporal_Y_train, 'rb') as f:
+                # Load the object from the file
+                alpha = pickle.load(f)
+
+        # Specify the load data configuration
+        load_data_kwargs = config['load_data']
+        load_data_kwargs['prepare']['select']['channels'] = column_X
+
+        # Build up the data object
+        data = load_data(**load_data_kwargs)
+        ts = data.time_series(prepared=True,concatenate=False)
+
+        means, covs = self._set_state_stats_using_alpha(ts,row_train,alpha)
+
+        np.save(f'{save_dir}/means.npy',means)
+        np.save(f'{save_dir}/covs.npy',covs)
+
+        return {'means':f'{save_dir}/means.npy','covs':f'{save_dir}covs.npy'}
+
+    def _set_state_stats_using_alpha(self, ts, row_train, alpha):
+        """Sets the means/covariances using specified state time course.
+
+        Parameters
+        ----------
+        ts : list of np.ndarray
+            Timeseries. Returned from osl_dynamics.data.Data.time_series()
+        row_train: list
+            Indices to use on the ts.
+        alpha: list
+            The corresponding state time courses.
+        """
+
+        # Mean and covariance for each state
+        if isinstance(ts,np.ndarray):
+            n_channels = ts.shape[-1]
+        elif isinstance(ts,list):
+            n_channels = ts[0].shape[-1]
+        else:
+            raise TypeError('The variable ts type is incorrect!')
+        n_states = alpha[0].shape[-1]
+        means = np.zeros(
+            [n_states, n_channels], dtype=np.float32
+        )
+        covariances = np.zeros(
+            [n_states, n_channels, n_channels],
+            dtype=np.float32,
+        )
+
+        # If ts is a list, turn into numpy.ndarray first
+        if isinstance(ts,list):
+            ts = np.stack(ts,axis=0)
+        ts = ts[row_train]
+        ts_1,ts_2,ts_3 = ts.shape
+        data_concat = np.reshape(ts,(ts_1*ts_2,ts_3))
+        # You need hard parcellation first!
+        alpha = argmax_time_courses(alpha)
+        alpha = np.concatenate(alpha,axis=0)
+        for j in range(n_states):
+            x = data_concat[alpha[:,j] == 1]
+            means[j,:] = np.mean(x, axis=0)
+            covariances[j,:,:] = np.cov(x, rowvar=False)
+
+        return means, covariances
+
+    def X_test(self,config,train_keys,row_test,column_X,spatial_X_train):
+        # Specify the save directory
+        save_dir = os.path.join(config['save_dir'], 'X_test/')
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
+        prepare_config = {}
+        prepare_config['load_data'] = config['load_data']
+
+        prepare_config['load_data']['prepare']['select']['channels'] = column_X
+
+        prepare_config[f'train_{config["model"]}'] = {
+            'config_kwargs':
+                {key: config[key] for key in train_keys if key in config},
+            'init_kwargs':
+                config['init_kwargs']
+        }
+        # Fix the means and covariances
+        prepare_config[f'train_{config["model"]}']['config_kwargs']['learn_means'] = False
+        prepare_config[f'train_{config["model"]}']['config_kwargs']['learn_covariances'] = False
+        prepare_config[f'train_{config["model"]}']['config_kwargs']['initial_means'] = spatial_X_train['means']
+        prepare_config[f'train_{config["model"]}']['config_kwargs']['initial_covariances'] = spatial_X_train['covs']
+
+        prepare_config[f'train_{config["model"]}']['config_kwargs']['n_channels'] = len(column_X)
+        prepare_config['keep_list'] = row_test
 
         with open(f'{save_dir}/prepared_config.yaml', 'w') as file:
             yaml.safe_dump(prepare_config, file, default_flow_style=False)
         run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
                                save_dir)
+        params_dir = f'{save_dir}/inf_params/'
+        return f'{params_dir}/alp.pkl'
 
-        return
-        '''
-        # Initialize the KMeans model with the number of clusters
-        kmeans = KMeans(n_clusters=self.n_clusters)
+    def Y_test(self,config,row_test,column_Y,temporal_X_test,spatial_Y_train):
+        # Specify the save directory
+        save_dir = os.path.join(config['save_dir'], 'Y_test/')
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
 
-        # Fit the model to the data
-        kmeans.fit(data)
+        # Read in the temporal_Y_train
+        if isinstance(temporal_X_test, str):
+            # Open the pickle file in binary mode
+            with open(temporal_X_test, 'rb') as f:
+                # Load the object from the file
+                alpha = pickle.load(f)
 
-        # Get the cluster centroids
-        spatial_Y_train = kmeans.cluster_centers_
+            # Specify the load data configuration
+        load_data_kwargs = config['load_data']
+        load_data_kwargs['prepare']['select']['channels'] = column_Y
 
-        # Get the cluster labels for each data point
-        temporal_Y_train = kmeans.labels_
+        # Build up the data object
+        data = load_data(**load_data_kwargs)
 
-        return spatial_Y_train, temporal_Y_train
-        '''
-    def X_train(self,config,train_keys,row_train,column_X,temporal_Y_train):
-        #data = data[row_train][:,column_X]
-        return
-        '''
-        spatial_X_train = np.array([np.mean(data[temporal_Y_train == cluster_label], axis=0)
-                              for cluster_label in range(self.n_clusters)])
+        from osl_dynamics.models import load
+        model = load(spatial_Y_train)
+        with data.set_keep(row_test):
+            metrics = model.free_energy(data)
 
-        return spatial_X_train
-        '''
-    def X_test(self,config,train_keys,column_X,spatial_X_train):
-        #data = data[row_test][:,column_X]
-        return
-        '''
-        # Compute distances between data points and centroids
-        distances = cdist(data, spatial_X_train, metric='euclidean')
+        return metrics
 
-        # Assign each data point to the nearest centroid
-        temporal_X_test = np.argmin(distances, axis=1)
 
-        return temporal_X_test
-        '''
-    def Y_test(self,config,train_keys,row_test,column_Y,temporal_X_test,spatial_Y_train):
-        #data = data[row_test][:,column_Y]
-        return
-        '''
-        centroids = spatial_Y_train[temporal_X_test]
 
-        # Compute squared differences between data and centroids
-        mean_squared_diff = np.mean(np.sum((data - centroids) ** 2,axis=-1),axis=0)
 
-        return mean_squared_diff
-        '''
     def validate(self,config,train_keys):
         metrics = []
         for i in range(self.partition_rows):
             for j in range(self.partition_columns):
                 row_train, row_test, column_X, column_Y = self.fold_indices(i, j)
 
+                # Save the dictionary as a pickle file
+                with open(os.path.join(config['save_dir'],'fold_indices.json'), 'w') as f:
+                    json.dump({
+                        'row_train':row_train,
+                        'row_test':row_test,
+                        'column_X':column_X,
+                        'column_Y':column_Y
+                    }, f)
 
-                self.Y_train(config, train_keys,row_train, column_Y)
-                raise ValueError('For test only!')
-                spatial_X_train = self.X_train(config, train_keys,row_train, column_X, temporal_Y_train)
+                spatial_Y_train,temporal_Y_train = self.Y_train(config, train_keys,row_train, column_Y)
+                spatial_X_train = self.X_train(config, row_train, column_X, temporal_Y_train)
                 temporal_X_test = self.X_test(config, train_keys,row_test, column_X, spatial_X_train)
-                metric = float(self.Y_test(config, train_keys,row_test, column_Y, temporal_X_test, spatial_Y_train))
+                metric = float(self.Y_test(config, row_test, column_Y, temporal_X_test, spatial_Y_train))
                 metrics.append(metric)
 
         return metrics

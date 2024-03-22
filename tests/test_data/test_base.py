@@ -37,7 +37,7 @@ def test_data_list_nparray():
     npt.assert_almost_equal(data.arrays[0],input_1)
     npt.assert_almost_equal(data.arrays[1],input_2)
     # Test @property self.n_arrays
-    npt.assert_equal(data.n_arrays,2)
+    npt.assert_equal(data.n_sessions,2)
 
     # Test data.set_keep
     with data.set_keep([0]):
@@ -49,6 +49,14 @@ def test_data_list_nparray():
         npt.assert_equal(data.keep,[1])
         for element in data.dataset(sequence_length=3,batch_size=1):
             npt.assert_almost_equal(element['data'].numpy(),np.array([input_2]))
+
+    with data.set_keep([1,0]):
+        npt.assert_equal(data.keep,[1,0])
+        for element in data.dataset(sequence_length=3,batch_size=2):
+            print(element['data'].numpy().shape)
+            print(element['data'].numpy())
+
+            npt.assert_almost_equal(element['data'].numpy(),np.array([input_2,input_1]))
 
     # Test self.select
     data.select(channels=[1])
