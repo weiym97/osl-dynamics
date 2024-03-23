@@ -272,7 +272,7 @@ def test_Y_train():
     npt.assert_almost_equal(np.squeeze(covs), np.array(vars_X), decimal=3)
     '''
 
-def test_X_train():
+def test_X_test():
     import os
     import yaml
     from osl_dynamics.evaluate.cross_validation import BICVHMM
