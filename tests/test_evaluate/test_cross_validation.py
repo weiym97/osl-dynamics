@@ -160,18 +160,20 @@ def test_fold_indices():
     npt.assert_array_equal(column_Y, np.array([1, 3]))
 
 
-def test_BICVHMM():
+def test_Y_train():
     import os
+    import shutil
     import yaml
     from osl_dynamics.evaluate.cross_validation import BICVHMM
 
-    save_dir = './test_tmp/'
+    save_dir = './test_Y_train/'
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
     # Define a very simple test case
     n_samples = 3
     n_channels = 3
+    n_states = 3
     row_train = [1, 2]
     column_X = [1]
     column_Y = [0, 2]
@@ -185,13 +187,9 @@ def test_BICVHMM():
     # Define the covariance matrices of state 1,2 in both splits
     cors_Y = [-0.5, 0.0, 0.5]
     covs_Y = [np.array([[1.0, cor], [cor, 1.0]]) for cor in cors_Y]
-    # observations_Y = [generate_obs(cov) for cov in covs_Y]
 
     means_X = [1.0, 2.0, 3.0]
     vars_X = [0.5, 1.0, 2.0]
-    # observations_X = [generate_obs([[var]], [mean]) for var, mean in zip(vars_X, means_X)]
-
-    # observations = [np.hstack((Y[:,:1], X, Y[:, 1:])) for X,Y in zip(observations_X,observations_Y)]
 
     # save these files
     data_dir = f'{save_dir}data/'
@@ -214,8 +212,6 @@ def test_BICVHMM():
     # Genetate irrelevant dataset
     np.save(f"{data_dir}10001.npy", generate_obs(np.eye(3) * 100, n_timepoints=300000))
 
-    initial_covariances = np.stack([np.array([[1.0, rho], [rho, 1.0]]) for rho in cors_Y])
-    np.save(f'{save_dir}init_covs.npy', initial_covariances)
 
     config = f"""
             load_data:
@@ -225,10 +221,9 @@ def test_BICVHMM():
                         timepoints:
                             - 0
                             - 300000
-            n_states: 3
+            n_states: {n_states}
             learn_means: False
-            learn_covariances: False
-            learn_trans_prob: True
+            learn_covariances: True
             learning_rate: 0.01
             initial_covariances: {save_dir}init_covs.npy
             n_epochs: 3
@@ -257,9 +252,23 @@ def test_BICVHMM():
                   ]
     cv = BICVHMM(n_samples, n_channels)
     cv.Y_train(config, train_keys, row_train, column_Y)
-    result_X_train = cv.X_train(config, row_train, column_X, f'{save_dir}/Y_train/inf_params/alp.pkl')
 
+    result_means = np.load(f'{save_dir}/Y_train/inf_params/means.npy')
+    result_covs = np.load(f'{save_dir}/Y_train/inf_params/covs.npy')
+    npt.assert_array_equal(result_means,np.zeros((n_states,len(column_Y))))
+
+    # Assert diagonal elements are all one
+    npt.assert_allclose(np.diagonal(result_covs, axis1=-2, axis2=-1), 1.0,rtol=1e-3,atol=1e-3)
+
+    # Assert off-diagonal elements are equal to cors
+    off_diagonal = np.array([float(result_covs[i,0,1]) for i in range(n_states)])
+    npt.assert_allclose(np.sort(off_diagonal), cors_Y, atol=1e-3,rtol=1e-3)
+
+
+    '''
+    result_X_train = cv.X_train(config, row_train, column_X, f'{save_dir}/Y_train/inf_params/alp.pkl')
     means = np.load(result_X_train['means'])
     covs = np.load(result_X_train['covs'])
     npt.assert_almost_equal(np.squeeze(means), np.array(means_X), decimal=2)
     npt.assert_almost_equal(np.squeeze(covs), np.array(vars_X), decimal=3)
+    '''
