@@ -231,7 +231,7 @@ class BICVHMM():
 
     def fold_indices(self,r,s):
         """
-        Given the paritions, return the indices of fold (r,s).
+        Given the partitions, return the indices of fold (r,s).
         Fold (r,s) treats the rth row subset as "test", and the sth column
         subset as response.
         The parition should be in the format:
