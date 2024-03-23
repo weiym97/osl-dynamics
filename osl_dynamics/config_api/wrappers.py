@@ -59,6 +59,61 @@ def load_data(inputs, kwargs=None, prepare=None):
     data.prepare(prepare)
     return data
 
+def build_hmm(
+    data,
+    output_dir,
+    config_kwargs,
+):
+    """Build up a `Hidden Markov Model <https://osl-dynamics.readthedocs.io/en\
+       /latest/autoapi/osl_dynamics/models/hmm/index.html>`_.
+
+       This function will:
+
+       1. Build an :code:`hmm.Model` object.
+       2. Save the model in :code:`<output_dir>/model`
+
+       This function will create two directories:
+
+       - :code:`<output_dir>/model`, which contains the model.
+
+       Parameters
+       ----------
+       data : osl_dynamics.data.Data
+           Data object. Serves as a place holder.
+       output_dir : str
+           Path to output directory.
+       config_kwargs : dict
+           Keyword arguments to pass to `hmm.Config <https://osl-dynamics\
+           .readthedocs.io/en/latest/autoapi/osl_dynamics/models/hmm/index.html\
+           #osl_dynamics.models.hmm.Config>`_. Defaults to::
+
+               {'sequence_length': 2000,
+                'batch_size': 32,
+                'learning_rate': 0.01,
+                'n_epochs': 20}.
+    """
+
+    from osl_dynamics.models import hmm
+    # Directories
+    model_dir = output_dir + "/model"
+
+    # Create the model object
+    _logger.info("Building model")
+    default_config_kwargs = {
+        "n_channels": data.n_channels,
+        "sequence_length": 2000,
+        "batch_size": 32,
+        "learning_rate": 0.01,
+        "n_epochs": 20,
+    }
+    config_kwargs = override_dict_defaults(default_config_kwargs, config_kwargs)
+    _logger.info(f"Using config_kwargs: {config_kwargs}")
+    config = hmm.Config(**config_kwargs)
+    model = hmm.Model(config)
+    # Save trained model
+    _logger.info(f"Saving model to: {model_dir}")
+    model.save(model_dir)
+
 
 def train_hmm(
     data,
