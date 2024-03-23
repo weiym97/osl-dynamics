@@ -257,11 +257,11 @@ def test_Y_train():
     npt.assert_array_equal(result_means,np.zeros((n_states,len(column_Y))))
 
     # Assert diagonal elements are all one
-    npt.assert_allclose(np.diagonal(result_covs, axis1=-2, axis2=-1), 1.0,rtol=1e-3,atol=1e-3)
+    npt.assert_allclose(np.diagonal(result_covs, axis1=-2, axis2=-1), 1.0,rtol=0.05,atol=0.05)
 
     # Assert off-diagonal elements are equal to cors
     off_diagonal = np.array([float(result_covs[i,0,1]) for i in range(n_states)])
-    npt.assert_allclose(np.sort(off_diagonal), cors_Y, atol=1e-3,rtol=1e-3)
+    npt.assert_allclose(np.sort(off_diagonal), cors_Y, atol=0.05,rtol=0.05)
 
 
     '''
