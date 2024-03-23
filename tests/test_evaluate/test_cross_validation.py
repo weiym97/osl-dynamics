@@ -277,7 +277,7 @@ def test_X_test():
     import yaml
     from osl_dynamics.evaluate.cross_validation import BICVHMM
 
-    save_dir = './test_X_train/'
+    save_dir = './test_X_test/'
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
