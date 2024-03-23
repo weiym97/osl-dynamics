@@ -310,7 +310,32 @@ class BICVHMM():
         params_dir = f'{save_dir}/inf_params/'
         return f'{save_dir}/model/', f'{params_dir}alp.pkl'
 
-    def X_train(self,config,row_train,column_X,temporal_Y_train):
+    def X_train(self,config,train_keys,row_train,column_X,temporal_Y_train):
+        # Update 23rd March 2024
+        # A completely new implementation of X_train
+
+        save_dir = os.path.join(config['save_dir'], 'X_train/')
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
+        prepare_config = {}
+        prepare_config['load_data'] = config['load_data']
+
+        prepare_config['load_data']['prepare']['select']['channels'] = column_X
+
+        prepare_config[f'build_{config["model"]}'] = {
+            'config_kwargs':
+                {key: config[key] for key in train_keys if key in config},
+        }
+        prepare_config[f'build_{config["model"]}']['config_kwargs']['n_channels'] = len(column_X)
+        prepare_config['keep_list'] = row_train
+
+        with open(f'{save_dir}/prepared_config.yaml', 'w') as file:
+            yaml.safe_dump(prepare_config, file, default_flow_style=False)
+        run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
+                               save_dir)
+        #########################################################3
+        '''
         save_dir = os.path.join(config['save_dir'], 'X_train/')
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
@@ -336,6 +361,7 @@ class BICVHMM():
         np.save(f'{save_dir}/covs.npy',covs)
 
         return {'means':f'{save_dir}/means.npy','covs':f'{save_dir}covs.npy'}
+        '''
 
     def _set_state_stats_using_alpha(self, ts, row_train, alpha):
         """Sets the means/covariances using specified state time course.
@@ -472,7 +498,7 @@ class BICVHMM():
                     }, f)
 
                 spatial_Y_train,temporal_Y_train = self.Y_train(config, train_keys,row_train, column_Y)
-                spatial_X_train = self.X_train(config, row_train, column_X, temporal_Y_train)
+                spatial_X_train = self.X_train(config, train_keys, row_train, column_X, temporal_Y_train)
                 temporal_X_test = self.X_test(config, train_keys,row_test, column_X, spatial_X_train)
                 metric = self.Y_test(config, row_test, column_Y, temporal_X_test, spatial_Y_train)
                 metrics.append(metric)
