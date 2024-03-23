@@ -322,20 +322,20 @@ def test_X_test():
                 [np.hstack((X[:, :1], Y, X[:, 1:])) for X, Y in zip(observations_X, observations_Y)], axis=0)
             obs.append(observations)
 
-            obs = np.concatenate(obs, axis=0)
-            np.save(f"{data_dir}{10002 + i}.npy", obs)
+        obs = np.concatenate(obs, axis=0)
+        np.save(f"{data_dir}{10002 + i}.npy", obs)
 
-        # Genetate irrelevant dataset
-        np.save(f"{data_dir}10001.npy", generate_obs(np.eye(3) * 100, n_timepoints=300000))
+    # Genetate irrelevant dataset
+    np.save(f"{data_dir}10001.npy", generate_obs(np.eye(3) * 100, n_timepoints=300000))
 
-        config = f"""
-                load_data:
-                    inputs: {data_dir}
-                    prepare:
-                        select:
-                            timepoints:
-                                - 0
-                                - 300000
+    config = f"""
+            load_data:
+                inputs: {data_dir}
+                prepare:
+                    select:
+                        timepoints:
+                            - 0
+                            - 300000
                 n_states: {n_states}
                 learn_means: False
                 learn_covariances: True
@@ -347,23 +347,22 @@ def test_X_test():
                     n_epochs: 1
                 save_dir: {save_dir}
                 model: hmm
+            """
+    config = yaml.safe_load(config)
 
-                """
-        config = yaml.safe_load(config)
-
-        train_keys = ['n_channels',
-                      'n_states',
-                      'learn_means',
-                      'learn_covariances',
-                      'learn_trans_prob',
-                      'initial_means',
-                      'initial_covariances',
-                      'initial_trans_prob',
-                      'sequence_length',
-                      'batch_size',
-                      'learning_rate',
-                      'n_epochs',
-                      ]
-        cv = BICVHMM(n_samples, n_channels)
-        cv.X_test(config, train_keys, row_test, column_X,spatial_X_train)
+    train_keys = ['n_channels',
+                  'n_states',
+                  'learn_means',
+                  'learn_covariances',
+                  'learn_trans_prob',
+                  'initial_means',
+                  'initial_covariances',
+                  'initial_trans_prob',
+                  'sequence_length',
+                  'batch_size',
+                  'learning_rate',
+                  'n_epochs',
+                  ]
+    cv = BICVHMM(n_samples, n_channels)
+    cv.X_test(config, train_keys, row_test, column_X, spatial_X_train)
 
