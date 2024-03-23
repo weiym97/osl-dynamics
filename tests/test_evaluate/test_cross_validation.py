@@ -336,17 +336,17 @@ def test_X_test():
                         timepoints:
                             - 0
                             - 300000
-                n_states: {n_states}
-                learn_means: False
-                learn_covariances: True
-                learning_rate: 0.01
-                n_epochs: 10
-                sequence_length: 600
-                init_kwargs:
-                    n_init: 1
-                    n_epochs: 1
-                save_dir: {save_dir}
-                model: hmm
+            n_states: {n_states}
+            learn_means: False
+            learn_covariances: True
+            learning_rate: 0.01
+            n_epochs: 10
+            sequence_length: 600
+            init_kwargs:
+                n_init: 1
+                n_epochs: 1
+            save_dir: {save_dir}
+            model: hmm
             """
     config = yaml.safe_load(config)
 
