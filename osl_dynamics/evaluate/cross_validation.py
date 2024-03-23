@@ -427,6 +427,7 @@ class BICVHMM():
             with open(temporal_X_test, 'rb') as f:
                 # Load the object from the file
                 alpha = pickle.load(f)
+        alpha = np.stack(alpha,axis=0)
 
             # Specify the load data configuration
         load_data_kwargs = config['load_data']
@@ -434,22 +435,32 @@ class BICVHMM():
 
         # Build up the data object
         data = load_data(**load_data_kwargs)
+        ts = np.stack(data.time_series(prepared=True, concatenate=False),axis=0)[row_test]
 
         from osl_dynamics.models import load
         model = load(spatial_Y_train)
-        with data.set_keep(row_test):
-            metrics = model.free_energy(data)
+        metrics = float(model.get_posterior_expected_log_likelihood(ts,alpha))
+
+        # Write metrics data into the JSON file
+        with open(f'{save_dir}/metrics.json', 'w') as json_file:
+            json.dump({'log_likelihood':metrics}, json_file)
 
         return metrics
 
 
 
 
-    def validate(self,config,train_keys):
+    def validate(self,original_config,train_keys):
         metrics = []
         for i in range(self.partition_rows):
             for j in range(self.partition_columns):
                 row_train, row_test, column_X, column_Y = self.fold_indices(i, j)
+                config = original_config.copy()
+                config['save_dir'] = os.path.join(original_config['save_dir'],f'fold_{i+1}_{j+1}')
+
+                if not os.path.exists(config['save_dir']):
+                    os.makedirs(config['save_dir'])
+
 
                 # Save the dictionary as a pickle file
                 with open(os.path.join(config['save_dir'],'fold_indices.json'), 'w') as f:
@@ -463,10 +474,12 @@ class BICVHMM():
                 spatial_Y_train,temporal_Y_train = self.Y_train(config, train_keys,row_train, column_Y)
                 spatial_X_train = self.X_train(config, row_train, column_X, temporal_Y_train)
                 temporal_X_test = self.X_test(config, train_keys,row_test, column_X, spatial_X_train)
-                metric = float(self.Y_test(config, row_test, column_Y, temporal_X_test, spatial_Y_train))
+                metric = self.Y_test(config, row_test, column_Y, temporal_X_test, spatial_Y_train)
                 metrics.append(metric)
 
-        return metrics
+        # Write metrics data into the JSON file
+        with open(os.path.join(original_config['save_dir'],'metrics.json'), 'w') as json_file:
+            json.dump(metrics, json_file)
 
 
 

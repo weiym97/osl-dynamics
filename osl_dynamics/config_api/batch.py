@@ -233,7 +233,6 @@ class BatchTrain:
 
         elif "cv" in self.config["mode"]:
             # Find the number of sessions to work with
-            self.config['n_sessions'] = 500
             if "n_sessions" not in self.config:
                 data = Data(self.config["load_data"]["inputs"])
                 n_sessions = len(data.arrays)
