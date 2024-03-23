@@ -271,3 +271,99 @@ def test_Y_train():
     npt.assert_almost_equal(np.squeeze(means), np.array(means_X), decimal=2)
     npt.assert_almost_equal(np.squeeze(covs), np.array(vars_X), decimal=3)
     '''
+
+def test_X_train():
+    import os
+    import yaml
+    from osl_dynamics.evaluate.cross_validation import BICVHMM
+
+    save_dir = './test_X_train/'
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+
+    # Define a very simple test case
+    n_samples = 3
+    n_channels = 3
+    n_states = 3
+    row_test = [1, 2]
+    column_X = [0,2]
+    column_Y = [1]
+
+    # Construct the data
+    def generate_obs(cov, mean=None, n_timepoints=100):
+        if mean is None:
+            mean = np.zeros(len(cov))
+        return np.random.multivariate_normal(mean, cov, n_timepoints)
+
+    # Define the covariance matrices of state 1,2 in both splits
+    cors_X = [-0.5, 0.0, 0.5]
+    covs_X = [np.array([[1.0, cor], [cor, 1.0]]) for cor in cors_X]
+
+    means_Y = [1.0, 2.0, 3.0]
+    vars_Y = [0.5, 1.0, 2.0]
+
+    np.save(f'{save_dir}/fixed_means.npy',np.zeros((3,2)))
+    np.save(f'{save_dir}/fixed_covs.npy',np.stack(covs_X))
+    spatial_X_train = {'means':f'{save_dir}/fixed_means.npy','covs':f'{save_dir}/fixed_covs.npy'}
+
+
+    # save these files
+    data_dir = f'{save_dir}data/'
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+
+    for i in range(0, 2):
+        obs = []
+        for j in range(1500):
+            observations_X = [generate_obs(covs_X[i]), generate_obs(covs_X[i + 1])]
+            observations_Y = [generate_obs([[vars_Y[i]]], [means_Y[i]]),
+                              generate_obs([[vars_Y[i + 1]]], [means_Y[i + 1]])]
+            observations = np.concatenate(
+                [np.hstack((X[:, :1], Y, X[:, 1:])) for X, Y in zip(observations_X, observations_Y)], axis=0)
+            obs.append(observations)
+
+            obs = np.concatenate(obs, axis=0)
+            np.save(f"{data_dir}{10002 + i}.npy", obs)
+
+        # Genetate irrelevant dataset
+        np.save(f"{data_dir}10001.npy", generate_obs(np.eye(3) * 100, n_timepoints=300000))
+
+        config = f"""
+                load_data:
+                    inputs: {data_dir}
+                    prepare:
+                        select:
+                            timepoints:
+                                - 0
+                                - 300000
+                n_states: {n_states}
+                learn_means: False
+                learn_covariances: False
+                learning_rate: 0.01
+                n_epochs: 10
+                sequence_length: 600
+                init_kwargs:
+                    n_init: 1
+                    n_epochs: 1
+                save_dir: {save_dir}
+                model: hmm
+
+                """
+        config = yaml.safe_load(config)
+
+        train_keys = ['n_channels',
+                      'n_states',
+                      'learn_means',
+                      'learn_covariances',
+                      'learn_trans_prob',
+                      'initial_means',
+                      'initial_covariances',
+                      'initial_trans_prob',
+                      'sequence_length',
+                      'batch_size',
+                      'learning_rate',
+                      'n_epochs',
+                      ]
+        cv = BICVHMM(n_samples, n_channels)
+        cv.X_test(config, train_keys, row_test, column_X,spatial_X_train)
+
