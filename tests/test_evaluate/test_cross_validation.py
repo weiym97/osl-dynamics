@@ -225,7 +225,6 @@ def test_Y_train():
             learn_means: False
             learn_covariances: True
             learning_rate: 0.01
-            initial_covariances: {save_dir}init_covs.npy
             n_epochs: 3
             sequence_length: 600
             init_kwargs:
