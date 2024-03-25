@@ -825,7 +825,7 @@ def dual_estimation(data, output_dir, n_jobs=1,concatenate=False):
     save(f"{dual_estimates_dir}/means.npy", means)
     save(f"{dual_estimates_dir}/covs.npy", covs)
 
-def log_likelihood(data, output_dir, ):
+def log_likelihood(data, output_dir ):
     """Log-likelihood estimation for the data.
 
     This function expects a model has already been trained and the following
@@ -868,7 +868,7 @@ def log_likelihood(data, output_dir, ):
     # between data and alpha.
     ts = [ts[i] for i in data.keep]
 
-    if len(alpha) != len(data):
+    if len(alpha) != len(ts):
         raise ValueError(
             "len(alpha) and training_data.n_sessions must be the same."
         )
@@ -877,8 +877,8 @@ def log_likelihood(data, output_dir, ):
     alpha = np.stack(alpha)
     ts = np.stack(ts)
 
-    # Dual estimation
-    metrics = float(model.get_posterior_expected_log_likelihood(ts,alpha)) /  len(ts)
+    # Get posterior expected log-likelihood (averaged over session)
+    metrics = float(model.get_posterior_expected_log_likelihood(ts,alpha)) / len(ts)
 
     # Save
     with open(f"{output_dir}metrics.json", "w") as file:

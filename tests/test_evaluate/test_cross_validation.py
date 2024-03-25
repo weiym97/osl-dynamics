@@ -167,8 +167,9 @@ def test_Y_train():
     from osl_dynamics.evaluate.cross_validation import BICVHMM
 
     save_dir = './test_Y_train/'
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
+    if os.path.exists(save_dir):
+        shutil.rmtree(save_dir)
+    os.makedirs(save_dir)
 
     # Define a very simple test case
     n_samples = 3
@@ -271,8 +272,9 @@ def test_X_train():
     from osl_dynamics.evaluate.cross_validation import BICVHMM
 
     save_dir = './test_X_train/'
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
+    if os.path.exists(save_dir):
+        shutil.rmtree(save_dir)
+    os.makedirs(save_dir)
 
     # Define a very simple test case
     n_samples = 3
@@ -364,6 +366,11 @@ def test_X_train():
     config = yaml.safe_load(config)
     cv = BICVHMM(n_samples, n_channels)
     cv.X_train(config, train_keys, row_train, column_X,f'{data_dir}alp.pkl')
+
+    result_means = np.load(f'{save_dir}/X_train/dual_estimates/means.npy')
+    result_covs = np.load(f'{save_dir}/X_train/dual_estimates/covs.npy')
+    npt.assert_allclose(means_X,result_means,rtol=1e-2,atol=1e-2)
+    npt.assert_allclose(vars_X, result_covs, rtol=1e-2, atol=1e-2)
     '''
     result_X_train = cv.X_train(config, row_train, column_X, f'{save_dir}/Y_train/inf_params/alp.pkl')
     means = np.load(result_X_train['means'])
@@ -374,12 +381,14 @@ def test_X_train():
 
 def test_X_test():
     import os
+    import shutil
     import yaml
     from osl_dynamics.evaluate.cross_validation import BICVHMM
 
     save_dir = './test_X_test/'
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
+    if os.path.exists(save_dir):
+        shutil.rmtree(save_dir)
+    os.makedirs(save_dir)
 
     # Define a very simple test case
     n_samples = 3
@@ -466,7 +475,115 @@ def test_X_test():
     cv = BICVHMM(n_samples, n_channels)
     cv.X_test(config, train_keys, row_test, column_X, spatial_X_train)
 
+
 def test_Y_test():
+    import os
+    import shutil
+    import yaml
+    import pickle
     from osl_dynamics.evaluate.cross_validation import BICVHMM
+    from osl_dynamics.models.hmm import Config, Model
+
+    save_dir = './test_Y_test/'
+    if os.path.exists(save_dir):
+        shutil.rmtree(save_dir)
+
+    os.makedirs(save_dir)
+
+    # Define a very simple test case
+    n_samples = 3
+    n_channels = 3
+    n_states = 3
+    row_test = [1, 2]
+    column_Y = [0, 2]
+
+    # Generate the data
+    data_dir = f'{save_dir}data/'
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+
+    # Build up subject data
+    data_1 = np.zeros((2,3))
+    np.save(f'{data_dir}10001.npy',data_1)
+    data_2 = np.array([[1.,0.,1.,],[-1.,0.,0.]])
+    np.save(f'{data_dir}10002.npy',data_2)
+    data_3 = np.array([[-1.,0.,-1.],[1.,0.,0.]])
+    np.save(f'{data_dir}10003.npy',data_3)
+
+    def multivariate_gaussian_log_likelihood(x, mu, cov):
+        """
+        Calculate the log-likelihood for a multivariate Gaussian distribution.
+
+        Parameters:
+            x (ndarray): Observations (N, d), where N is the number of samples and d is the dimensionality.
+            mu (ndarray): Mean vector of the distribution (d,).
+            cov (ndarray): Covariance matrix of the distribution (d, d).
+
+        Returns:
+            float: Log-likelihood value.
+        """
+        # Dimensionality of the data
+        d = len(mu)
+
+        # Calculate the log determinant of the covariance matrix
+        log_det_cov = np.log(np.linalg.det(cov))
+
+        # Calculate the quadratic term in the exponent
+        quad_term = np.sum((x - mu) @ np.linalg.inv(cov) * (x - mu), axis=1)
+
+        # Calculate the log-likelihood
+        log_likelihood = -0.5 * (d * np.log(2 * np.pi) + log_det_cov + quad_term)
+
+        return log_likelihood
+
+    config = f"""
+                load_data:
+                    inputs: {data_dir}
+                    prepare:
+                        select:
+                            timepoints:
+                                - 0
+                                - 2
+                n_states: 3
+                learn_means: False
+                learn_covariances: True
+                learning_rate: 0.01
+                n_epochs: 10
+                sequence_length: 600
+                init_kwargs:
+                    n_init: 1
+                    n_epochs: 1
+                save_dir: {save_dir}
+                model: hmm
+                """
+    config = yaml.safe_load(config)
+
+    model = Model(Config(n_states=3,
+                       n_channels=len(column_Y),
+                       learn_means=False,
+                       learn_covariances=True,
+                       sequence_length=2,
+                       batch_size=1,
+                       n_epochs=1,
+                       learning_rate=0.01
+                       )
+                )
+
+    covs = np.array([[[1.0,0.0],[0.0,1.0]],
+                     [[1.5,0.8],[0.8,1.5]],
+                     [[0.5,-0.25],[-0.25,0.5]]])
+    model.set_covariances(covs)
+    model.save(f'{save_dir}/model/')
+
+    # Set up the alpha.pkl
+    alpha = [np.array([[1.,0.,0.],[0.0,0.5,0.5]]),
+             np.array([[0.5,0.5,0.0],[0.0,0.0,1.0]])]
+    with open(f'{data_dir}alp.pkl', "wb") as file:
+        pickle.dump(alpha, file)
+    # Set up the cross validation
+    cv = BICVHMM(n_samples, n_channels)
+    cv.Y_test(config, row_test, column_Y, f'{data_dir}alp.pkl',f'{save_dir}/model/')
+
+    #ll_1 = multi
 
 
