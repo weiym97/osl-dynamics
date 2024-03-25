@@ -496,9 +496,6 @@ def test_X_test():
         npt.assert_allclose(alpha[0],hidden_states[0],atol=1e-6)
 
 
-
-
-
 def test_Y_test():
     import os
     import json
