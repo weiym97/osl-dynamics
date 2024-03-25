@@ -2,7 +2,16 @@ import os
 import numpy as np
 from rotation.simulation import HMM_single_subject_simulation, perturb_covariances
 
+def create_covariance_matrix(n_channels, rho):
+    # Create a matrix with all elements equal to rho
+    covariance_matrix = np.full((n_channels, n_channels), rho)
+
+    # Set the diagonal elements to 1.0
+    np.fill_diagonal(covariance_matrix, 1.0)
+
+    return covariance_matrix
 if __name__ == '__main__':
+    '''
     save_dir ='./data/node_timeseries/simulation_202401/sigma_0.025/run_0/'
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
@@ -57,16 +66,64 @@ if __name__ == '__main__':
                                       means=means,
                                       covariances=perturb_covariances(covariances,perturbation_factor=perturbation_factor),
                                       subj_name = str(i))
+    '''
+    #############################################################
+    # Update 25th March 2024: Generate bi-cross validation simulation
+    from osl_dynamics import data, simulation
 
+    # Case 1: All the data are loosely correlated
+    save_dir = './data/node_timeseries/simulation_bicv/low_cor/'
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+
+    n_subjects = 500
+    n_states = 5
+    n_samples = 1200
+    n_channels = 25
+    stay_prob = 0.8
+
+    cors = [-0.2,-0.1,0.0,0.1,0.2]
+
+    covs = [create_covariance_matrix(n_channels,cor) for cor in cors]
+    covs = np.stack(covs)
+
+    sim = simulation.HMM_MVN(
+        n_samples=n_samples * n_subjects,
+        n_states=n_states,
+        n_channels=n_channels,
+        trans_prob="uniform",
+        stay_prob=stay_prob,
+        means="zero",
+        covariances=covs,
+    )
+    data = sim.time_series
+    time_course = sim.state_time_course
+    data = data.reshape(n_subjects, -1, n_channels)
+    time_course = time_course.reshape(n_subjects, -1, n_states)
+
+    np.save(f'{save_dir}truth/state_covariances.npy', sim.obs_mod.covariances)
+    np.save(f'{save_dir}truth/tpm.npy', sim.hmm.trans_prob)
+
+    for i in range(n_subjects):
+        np.savetxt(f'{save_dir}{10001 + i}.txt', data[i])
+        np.save(f'{save_dir}truth/{10001 + i}_state_time_course.npy', time_course[i])
+
+
+    #############################################################
+
+
+
+
+    '''
     ### Update 6th Dec 2023
     ### This is a simulation from Chet, it's only for comparison purposes.
     ### Please comment out all previous codes when doing the following simulation
-    save_dir = './data/node_timeseries/simulation_rukuang/state_5/'
+    save_dir = './data/node_timeseries/simulation_rukuang/state_100/'
     n_samples = 25600
-    n_states = 5
+    n_states = 100
     n_channels = 25
     n_subjects = 50
-    stay_prob = 0.9
+    stay_prob = 0.7
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
     if not os.path.exists(f'{save_dir}truth/'):
@@ -89,11 +146,12 @@ if __name__ == '__main__':
     data = sim.time_series
     time_course = sim.state_time_course
     data = data.reshape(n_subjects, -1, n_channels)
-    time_course = time_course.reshape(n_subjects,-1,n_channels)
+    time_course = time_course.reshape(n_subjects,-1,n_states)
 
     np.save(f'{save_dir}truth/state_covariances.npy', sim.obs_mod.covariances)
 
     for i in range(n_subjects):
         np.savetxt(f'{save_dir}{10001+i}.txt', data[i])
         np.save(f'{save_dir}truth/{10001+i}_state_time_course.npy', time_course[i])
+    '''
 
