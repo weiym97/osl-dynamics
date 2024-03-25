@@ -383,6 +383,7 @@ def test_X_test():
     import os
     import shutil
     import yaml
+    import pickle
     from osl_dynamics.evaluate.cross_validation import BICVHMM
 
     save_dir = './test_X_test/'
@@ -405,7 +406,7 @@ def test_X_test():
         return np.random.multivariate_normal(mean, cov, n_timepoints)
 
     # Define the covariance matrices of state 1,2 in both splits
-    means_X = [np.array([-10.0,-10.0]),np.array([0.0,0.0],np.array([10.0,10.0]))]
+    means_X = [np.array([-10.0,-10.0]),np.array([0.0,0.0]),np.array([10.0,10.0])]
     cors_X = [-0.5, 0.0, 0.5]
     covs_X = [np.array([[1.0, cor], [cor, 1.0]]) for cor in cors_X]
 
@@ -422,12 +423,23 @@ def test_X_test():
     if not os.path.exists(data_dir):
         os.makedirs(data_dir)
 
+    hidden_states = []
+    n_timepoints = 100
+
     for i in range(0, 2):
+
+        # Build up the hidden variable
+        hv_temp = np.zeros((n_timepoints * 2, n_states))
+        hv_temp[:, i] = np.array([1.0] * n_timepoints + [0.0] * n_timepoints)
+        hv_temp[:, i + 1] = np.array([0.0] * n_timepoints + [1.0] * n_timepoints)
+        hidden_states.append(np.tile(hv_temp, (1500, 1)))
+
         obs = []
         for j in range(1500):
-            observations_X = [generate_obs(covs_X[i],means_X[i]), generate_obs(covs_X[i + 1],means_X[i+1])]
-            observations_Y = [generate_obs([[vars_Y[i]]], [means_Y[i]]),
-                              generate_obs([[vars_Y[i + 1]]], [means_Y[i + 1]])]
+            observations_X = [generate_obs(covs_X[i],means_X[i],n_timepoints),
+                              generate_obs(covs_X[i + 1],means_X[i+1],n_timepoints)]
+            observations_Y = [generate_obs([[vars_Y[i]]], [means_Y[i]],n_timepoints),
+                              generate_obs([[vars_Y[i + 1]]], [means_Y[i + 1]]),n_timepoints]
             observations = np.concatenate(
                 [np.hstack((X[:, :1], Y, X[:, 1:])) for X, Y in zip(observations_X, observations_Y)], axis=0)
             obs.append(observations)
@@ -475,6 +487,16 @@ def test_X_test():
                   ]
     cv = BICVHMM(n_samples, n_channels)
     cv.X_test(config, train_keys, row_test, column_X, spatial_X_train)
+
+    # Read the alpha
+    with open(f'{save_dir}/X_test/inf_params/alp.pkl','rb') as file:
+        alpha = pickle.load(file)
+
+    for i in range(2):
+        npt.assert_allclose(alpha[0],hidden_states[0],rtol=None)
+
+
+
 
 
 def test_Y_test():

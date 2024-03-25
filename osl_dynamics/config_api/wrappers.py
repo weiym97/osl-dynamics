@@ -883,7 +883,6 @@ def log_likelihood(data, output_dir ):
     # Save
     with open(f"{output_dir}metrics.json", "w") as file:
         json.dump({'log_likelihood':metrics}, file)
-    return metrics
 
 
 def multitaper_spectra(data, output_dir, kwargs, nnmf_components=None):

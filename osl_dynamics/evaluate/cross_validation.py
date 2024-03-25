@@ -345,6 +345,9 @@ class BICVHMM():
             yaml.safe_dump(prepare_config, file, default_flow_style=False,sort_keys=False)
         run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
                                save_dir)
+
+        return {'means': f'{save_dir}/dual_estimates/means.npy',
+                'covs': f'{save_dir}/dual_estimates/covs.npy'}
         #########################################################3
         '''
         save_dir = os.path.join(config['save_dir'], 'X_train/')
@@ -483,6 +486,11 @@ class BICVHMM():
             yaml.safe_dump(prepare_config, file, default_flow_style=False, sort_keys=False)
         run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
                                 save_dir)
+
+        with open(f'{save_dir}/metrics.json', 'r') as file:
+            # Load the JSON data
+            metrics = json.load(file)
+        return metrics['log_likelihood']
 
 
         ################################################
