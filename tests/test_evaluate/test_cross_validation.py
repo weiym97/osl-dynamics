@@ -405,13 +405,14 @@ def test_X_test():
         return np.random.multivariate_normal(mean, cov, n_timepoints)
 
     # Define the covariance matrices of state 1,2 in both splits
+    means_X = [np.array([-10.0,-10.0]),np.array([0.0,0.0],np.array([10.0,10.0]))]
     cors_X = [-0.5, 0.0, 0.5]
     covs_X = [np.array([[1.0, cor], [cor, 1.0]]) for cor in cors_X]
 
     means_Y = [1.0, 2.0, 3.0]
     vars_Y = [0.5, 1.0, 2.0]
 
-    np.save(f'{save_dir}/fixed_means.npy',np.zeros((3,2)))
+    np.save(f'{save_dir}/fixed_means.npy',np.array(means_X))
     np.save(f'{save_dir}/fixed_covs.npy',np.stack(covs_X))
     spatial_X_train = {'means':f'{save_dir}/fixed_means.npy','covs':f'{save_dir}/fixed_covs.npy'}
 
@@ -424,7 +425,7 @@ def test_X_test():
     for i in range(0, 2):
         obs = []
         for j in range(1500):
-            observations_X = [generate_obs(covs_X[i]), generate_obs(covs_X[i + 1])]
+            observations_X = [generate_obs(covs_X[i],means_X[i]), generate_obs(covs_X[i + 1],means_X[i+1])]
             observations_Y = [generate_obs([[vars_Y[i]]], [means_Y[i]]),
                               generate_obs([[vars_Y[i + 1]]], [means_Y[i + 1]])]
             observations = np.concatenate(
@@ -478,6 +479,7 @@ def test_X_test():
 
 def test_Y_test():
     import os
+    import json
     import shutil
     import yaml
     import pickle
@@ -584,6 +586,18 @@ def test_Y_test():
     cv = BICVHMM(n_samples, n_channels)
     cv.Y_test(config, row_test, column_Y, f'{data_dir}alp.pkl',f'{save_dir}/model/')
 
-    #ll_1 = multi
+    ll_1 = multivariate_gaussian_log_likelihood(data_2[:1,[0,2]],np.array([0,0]),covs[0])
+    ll_2 = 0.5 * multivariate_gaussian_log_likelihood(data_2[1:2, [0, 2]], np.array([0, 0]), covs[1])+\
+           0.5 * multivariate_gaussian_log_likelihood(data_2[1:2, [0, 2]], np.array([0, 0]), covs[2])
+    ll_3 = 0.5 * multivariate_gaussian_log_likelihood(data_3[:1, [0, 2]], np.array([0, 0]), covs[0]) + \
+           0.5 * multivariate_gaussian_log_likelihood(data_3[:1, [0, 2]], np.array([0, 0]), covs[1])
+    ll_4 = multivariate_gaussian_log_likelihood(data_3[1:2, [0, 2]], np.array([0, 0]), covs[2])
+
+    ll = (ll_1 + ll_2 + ll_3 + ll_4) / 2
+    with open(f'{save_dir}/Y_test/metrics.json', 'r') as file:
+        # Load the JSON data
+        metrics = json.load(file)
+
+    npt.assert_almost_equal(ll,metrics['log_likelihood'],decimal=3)
 
 
