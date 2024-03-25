@@ -46,6 +46,7 @@ from osl_dynamics.models import obs_mod
 from osl_dynamics.models.mod_base import BaseModelConfig, ModelBase
 from osl_dynamics.simulation import HMM
 from osl_dynamics.utils.misc import set_logging_level
+from osl_dynamics.inference.modes import argmax_time_courses
 
 _logger = logging.getLogger("osl-dynamics")
 
@@ -1442,7 +1443,7 @@ class Model(ModelBase):
 
         return alpha, np.array(means), np.array(covariances)
 
-    def dual_estimation(self, training_data, alpha=None, n_jobs=1):
+    def dual_estimation(self, training_data, alpha=None, n_jobs=1,concatenate=False):
         """Dual estimation to get session-specific observation model parameters.
 
         Here, we estimate the state means and covariances for sessions
@@ -1457,6 +1458,8 @@ class Model(ModelBase):
             (n_sessions, n_samples, n_states).
         n_jobs : int, optional
             Number of jobs to run in parallel.
+        concatenate: bool, optional
+            Whether to concatenate the data before calculating estimating state stats
 
         Returns
         -------
@@ -1474,8 +1477,16 @@ class Model(ModelBase):
         if isinstance(alpha, np.ndarray):
             alpha = [alpha]
 
+        # Argmax time series
+        alpha = argmax_time_courses(alpha)
+
         # Get the session-specific data
         data = training_data.time_series(prepared=True, concatenate=False)
+
+        # Note training_data.keep is in order. You need to preserve the order
+        # between data and alpha.
+        data = [data[i] for i in training_data.keep]
+
 
         if len(alpha) != len(data):
             raise ValueError(
@@ -1484,6 +1495,11 @@ class Model(ModelBase):
 
         # Make sure the data and alpha have the same number of samples
         data = [d[: a.shape[0]] for d, a in zip(data, alpha)]
+
+        # Concatenate the variable if required.
+        if concatenate:
+            data = [np.concatenate(data,axis=0)]
+            alpha = [np.concatenate(alpha,axis=0)]
 
         n_states = self.config.n_states
         n_channels = self.config.n_channels

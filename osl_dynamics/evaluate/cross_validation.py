@@ -1,7 +1,9 @@
 import os
 import pickle
 import yaml
+import shutil
 import json
+from collections import OrderedDict
 import numpy as np
 from sklearn.cluster import KMeans
 from scipy.spatial.distance import cdist
@@ -318,6 +320,12 @@ class BICVHMM():
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
 
+        # Create a new directory "config['save_dir']/X_train/inf_params
+        if not os.path.exists(f'{save_dir}inf_params/'):
+            os.makedirs(f'{save_dir}inf_params/')
+
+        shutil.copy(temporal_Y_train, f'{save_dir}inf_params/')
+
         prepare_config = {}
         prepare_config['load_data'] = config['load_data']
 
@@ -328,10 +336,13 @@ class BICVHMM():
                 {key: config[key] for key in train_keys if key in config},
         }
         prepare_config[f'build_{config["model"]}']['config_kwargs']['n_channels'] = len(column_X)
+        prepare_config['dual_estimation'] = {'concatenate':True}
+
+        # Note the 'keep_list' value is in order (from small to large number)
         prepare_config['keep_list'] = row_train
 
         with open(f'{save_dir}/prepared_config.yaml', 'w') as file:
-            yaml.safe_dump(prepare_config, file, default_flow_style=False)
+            yaml.safe_dump(prepare_config, file, default_flow_style=False,sort_keys=False)
         run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
                                save_dir)
         #########################################################3
@@ -447,6 +458,15 @@ class BICVHMM():
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
 
+
+        #################################################
+        # Update 25th March 2024
+        # This is a new implementation of the Y_test using
+        # customised test function.
+
+
+        ################################################
+        '''
         # Read in the temporal_Y_train
         if isinstance(temporal_X_test, str):
             # Open the pickle file in binary mode
@@ -472,6 +492,7 @@ class BICVHMM():
             json.dump({'log_likelihood':metrics}, json_file)
 
         return metrics
+        '''
 
 
 

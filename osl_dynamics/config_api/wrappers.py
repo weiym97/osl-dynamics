@@ -776,7 +776,7 @@ def plot_state_psds(data, output_dir):
     )
 
 
-def dual_estimation(data, output_dir, n_jobs=1):
+def dual_estimation(data, output_dir, n_jobs=1,concatenate=False):
     """Dual estimation for session-specific observation model parameters.
 
     This function expects a model has already been trained and the following
@@ -798,6 +798,8 @@ def dual_estimation(data, output_dir, n_jobs=1):
         Path to output directory.
     n_jobs : int, optional
         Number of jobs to run in parallel.
+    concatenate: bool, optional
+        Whether to concatenate all the sessions before calculate state statistics.
     """
     if data is None:
         raise ValueError("data must be passed.")
@@ -817,7 +819,7 @@ def dual_estimation(data, output_dir, n_jobs=1):
     alpha = load(f"{inf_params_dir}/alp.pkl")
 
     # Dual estimation
-    means, covs = model.dual_estimation(data, alpha=alpha, n_jobs=n_jobs)
+    means, covs = model.dual_estimation(data, alpha=alpha, n_jobs=n_jobs,concatenate=concatenate)
 
     # Save
     save(f"{dual_estimates_dir}/means.npy", means)

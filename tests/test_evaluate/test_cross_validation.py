@@ -265,6 +265,7 @@ def test_Y_train():
 
 def test_X_train():
     import os
+    import pickle
     import shutil
     import yaml
     from osl_dynamics.evaluate.cross_validation import BICVHMM
@@ -294,17 +295,28 @@ def test_X_train():
     means_X = [1.0, 2.0, 3.0]
     vars_X = [0.5, 1.0, 2.0]
 
+    n_timepoints = 100
+
     # save these files
     data_dir = f'{save_dir}data/'
     if not os.path.exists(data_dir):
         os.makedirs(data_dir)
 
+    hidden_states = []
+
     for i in range(0, 2):
+        # Build up the hidden variable
+        hv_temp = np.zeros((n_timepoints*2,n_states))
+        hv_temp[:,i] = np.array([0.6] * n_timepoints + [0.4] * n_timepoints)
+        hv_temp[:, i+1] = np.array([0.4] * n_timepoints + [0.6] * n_timepoints)
+        hidden_states.append(np.tile(hv_temp,(1500,1)))
+
         obs = []
         for j in range(1500):
-            observations_Y = [generate_obs(covs_Y[i]), generate_obs(covs_Y[i + 1])]
-            observations_X = [generate_obs([[vars_X[i]]], [means_X[i]]),
-                              generate_obs([[vars_X[i + 1]]], [means_X[i + 1]])]
+            observations_Y = [generate_obs(covs_Y[i],n_timepoints=n_timepoints),
+                              generate_obs(covs_Y[i + 1],n_timepoints=n_timepoints)]
+            observations_X = [generate_obs([[vars_X[i]]], [means_X[i]],n_timepoints=n_timepoints),
+                              generate_obs([[vars_X[i + 1]]], [means_X[i + 1]],n_timepoints=n_timepoints)]
             observations = np.concatenate(
                 [np.hstack((Y[:, :1], X, Y[:, 1:])) for X, Y in zip(observations_X, observations_Y)], axis=0)
             obs.append(observations)
@@ -312,6 +324,8 @@ def test_X_train():
         obs = np.concatenate(obs, axis=0)
         np.save(f"{data_dir}{10002 + i}.npy", obs)
 
+    with open(f'{data_dir}alp.pkl', "wb") as file:
+        pickle.dump(hidden_states, file)
     # Genetate irrelevant dataset
     np.save(f"{data_dir}10001.npy", generate_obs(np.eye(3) * 100, n_timepoints=300000))
 
@@ -324,14 +338,11 @@ def test_X_train():
                             - 0
                             - 300000
             n_states: {n_states}
-            learn_means: False
+            learn_means: True
             learn_covariances: True
             learning_rate: 0.01
             n_epochs: 3
             sequence_length: 600
-            init_kwargs:
-                n_init: 1
-                n_epochs: 1
             save_dir: {save_dir}
             model: hmm
             """
@@ -352,7 +363,7 @@ def test_X_train():
 
     config = yaml.safe_load(config)
     cv = BICVHMM(n_samples, n_channels)
-    cv.X_train(config, train_keys, row_train, column_X,1)
+    cv.X_train(config, train_keys, row_train, column_X,f'{data_dir}alp.pkl')
     '''
     result_X_train = cv.X_train(config, row_train, column_X, f'{save_dir}/Y_train/inf_params/alp.pkl')
     means = np.load(result_X_train['means'])
@@ -454,4 +465,7 @@ def test_X_test():
                   ]
     cv = BICVHMM(n_samples, n_channels)
     cv.X_test(config, train_keys, row_test, column_X, spatial_X_train)
+
+def test_Y_test():
+    from osl_dynamics.
 
