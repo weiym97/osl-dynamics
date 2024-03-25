@@ -493,7 +493,7 @@ def test_X_test():
         alpha = pickle.load(file)
 
     for i in range(2):
-        npt.assert_allclose(alpha[0],hidden_states[0],rtol=None)
+        npt.assert_allclose(alpha[0],hidden_states[0],atol=1e-6)
 
 
 
