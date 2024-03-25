@@ -463,6 +463,26 @@ class BICVHMM():
         # Update 25th March 2024
         # This is a new implementation of the Y_test using
         # customised test function.
+        shutil.copy(spatial_Y_train,save_dir)
+
+        # Create a new directory "config['save_dir']/X_train/inf_params
+        # And copy the temporal info from X_test
+        if not os.path.exists(f'{save_dir}inf_params/'):
+            os.makedirs(f'{save_dir}inf_params/')
+
+        shutil.copy(temporal_X_test, f'{save_dir}inf_params/')
+
+        prepare_config = {}
+        prepare_config['load_data'] = config['load_data']
+        prepare_config['load_data']['prepare']['select']['channels'] = column_Y
+        prepare_config['log_likelihood'] = {'concatenate': True}
+        # Note the 'keep_list' value is in order (from small to large number)
+        prepare_config['keep_list'] = row_test
+
+        with open(f'{save_dir}/prepared_config.yaml', 'w') as file:
+            yaml.safe_dump(prepare_config, file, default_flow_style=False, sort_keys=False)
+        run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
+                                save_dir)
 
 
         ################################################

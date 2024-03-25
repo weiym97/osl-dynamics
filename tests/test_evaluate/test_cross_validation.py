@@ -467,5 +467,6 @@ def test_X_test():
     cv.X_test(config, train_keys, row_test, column_X, spatial_X_train)
 
 def test_Y_test():
-    from osl_dynamics.
+    from osl_dynamics.evaluate.cross_validation import BICVHMM
+
 

@@ -825,6 +825,66 @@ def dual_estimation(data, output_dir, n_jobs=1,concatenate=False):
     save(f"{dual_estimates_dir}/means.npy", means)
     save(f"{dual_estimates_dir}/covs.npy", covs)
 
+def log_likelihood(data, output_dir, ):
+    """Log-likelihood estimation for the data.
+
+    This function expects a model has already been trained and the following
+    directories to exist:
+
+    - :code:`<output_dir>/model`, which contains the trained model.
+    - :code:`<output_dir>/inf_params`, which contains the temporal dynamics.
+
+    This function will create the following file:
+
+    - :code:`<output_dir>/metrics.json`, which contains the average log-likelihood
+    per session
+
+    Parameters
+    ----------
+    data : osl_dynamics.data.Data
+        Data object.
+    output_dir : str
+        Path to output directory.
+    """
+    if data is None:
+        raise ValueError("data must be passed.")
+
+    # Directories
+    model_dir = f"{output_dir}/model"
+    inf_params_dir = f"{output_dir}/inf_params"
+
+    #  Load model
+    from osl_dynamics import models
+
+    model = models.load(model_dir)
+
+    # Load the inferred state probabilities
+    alpha = load(f"{inf_params_dir}/alp.pkl")
+
+    # Get the session-specific data
+    ts = data.time_series(prepared=True, concatenate=False)
+
+    # Note training_data.keep is in order. You need to preserve the order
+    # between data and alpha.
+    ts = [ts[i] for i in data.keep]
+
+    if len(alpha) != len(data):
+        raise ValueError(
+            "len(alpha) and training_data.n_sessions must be the same."
+        )
+
+    # Stack both ts and alpha
+    alpha = np.stack(alpha)
+    ts = np.stack(ts)
+
+    # Dual estimation
+    metrics = float(model.get_posterior_expected_log_likelihood(ts,alpha)) /  len(ts)
+
+    # Save
+    with open(f"{output_dir}metrics.json", "w") as file:
+        json.dump({'log_likelihood':metrics}, file)
+    return metrics
+
 
 def multitaper_spectra(data, output_dir, kwargs, nnmf_components=None):
     """Calculate multitaper spectra.
