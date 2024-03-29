@@ -189,3 +189,30 @@ def test_slice_length():
     s4 = slice(10, 10)
     expected_length4 = 0
     npt.assert_equal(slice_length(s4), expected_length4)
+
+def test_npz2list():
+    from osl_dynamics.array_ops import npz2list
+    # Create a list of numpy arrays
+    test_data = [np.array([1, 2, 3]), np.array([4, 5, 6]), np.array([7, 8, 9])]
+
+    # Save the npz file
+    np.savez('test_data.npz', *test_data)
+    # Load the test npz file
+    loaded_npz = np.load('test_data.npz')
+
+    # Test npz2list function with the list of numpy arrays
+    list_of_arrays = npz2list(loaded_npz)
+
+    # Assert that the returned list contains all arrays from the npz file
+    assert len(list_of_arrays) == len(test_data)
+    for arr1, arr2 in zip(list_of_arrays, test_data):
+        npt.assert_array_equal(arr1, arr2)
+
+    # Clean up the temporary npz file
+    import os
+    os.remove('test_data.npz')
+
+    x = np.array([1,2,3])
+    x_list = npz2list(x)
+    npt.assert_array_equal(x,x_list[0])
+

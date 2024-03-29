@@ -402,3 +402,22 @@ def list_stds(list_of_lists):
         Numpy array with the standard deviation of each list.
     """
     return apply_to_lists(list_of_lists, func=np.std)
+
+def npz2list(array):
+    '''
+    Convert npz instance to a list of numpy arrays.
+    Return a list of length one if array is a np.ndarray
+    Parameters
+    ----------
+    array: np.ndarray or np.lib.npyio.NpzFile
+        the input array to be converted
+
+    Returns
+    -------
+    list_of_array: list
+        the returned list of np.ndarrays
+    '''
+    if isinstance(array,np.ndarray):
+        return [array]
+    elif isinstance(array,np.lib.npyio.NpzFile):
+        return [array[key] for key in array.keys()]
