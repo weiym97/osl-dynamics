@@ -104,6 +104,18 @@ def test_partition_indices():
     npt.assert_array_equal(row_indices, np.arange(n_samples))
     npt.assert_array_equal(column_indices, np.arange(n_channels))
 
+    # Case 3: Use the results from case 1:
+    cv_3 = BICVHMM(n_samples=n_samples,
+                   n_channels=n_channels,
+                   row_indices = f'{save_dir}case_1/row_indices.npz',
+                   column_indices = f'{save_dir}case_1/column_indices.npz')
+
+    npt.assert_array_equal(cv_1.row_indices[0],cv_3.row_indices[0])
+    npt.assert_array_equal(cv_1.row_indices[1], cv_3.row_indices[1])
+    npt.assert_array_equal(cv_1.column_indices[0], cv_3.column_indices[0])
+    npt.assert_array_equal(cv_1.column_indices[1], cv_3.column_indices[1])
+
+
     # Delete the directory afterwards
     shutil.rmtree(save_dir)
 

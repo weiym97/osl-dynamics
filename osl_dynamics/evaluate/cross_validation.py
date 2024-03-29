@@ -11,6 +11,7 @@ from scipy.spatial.distance import cdist
 from ..config_api.pipeline import run_pipeline_from_file
 from ..config_api.wrappers import load_data
 from ..inference.modes import argmax_time_courses
+from ..array_ops import npz2list
 
 class BICVkmeans():
     def __init__(self,n_clusters,n_samples,n_channels,partition_rows=2,partition_columns=2):
@@ -181,15 +182,21 @@ class BICVkmeans():
         return metrics
 
 class BICVHMM():
-    def __init__(self,n_samples,n_channels,save_dir=None,partition_rows=2,partition_columns=2,):
+    def __init__(self,n_samples,n_channels,row_indices=None,column_indices=None,save_dir=None,partition_rows=2,partition_columns=2,):
         '''
-        Initialisation of BICVkmeans
+        Initialisation of BICVHMM.
+        If both row_indices and column indices are not None, use them to initialise BICVHMM.
+        Otherwise randomly generate row and column indices.
         Parameters
         ----------
         n_samples: int
             the number of samples
         n_channels: int
             the number of channels (the length of each sample)
+        row_indices: str or list
+            the list of row indices. Read from file if it's a string.
+        column_indices: str or list
+            the list of column indices. Read from file if it's a string.
         partition_rows: int
             the number of rows partition
         partition_columns: int
@@ -198,10 +205,23 @@ class BICVHMM():
         '''
         self.n_samples = n_samples
         self.n_channels = n_channels
-        self.partition_rows = partition_rows
-        self.partition_columns = partition_columns
         self.save_dir = save_dir
-        self.partition_indices()
+
+        # Initialise the class using row_indices/column_indices
+        if (row_indices is not None) and (column_indices is not None):
+            if isinstance(row_indices,str):
+                self.row_indices = npz2list(np.load(row_indices))
+            if isinstance(column_indices,str):
+                self.column_indices = npz2list(np.load(column_indices))
+            self.partition_rows = len(self.row_indices)
+            self.partition_columns = len(self.column_indices)
+            # Assert the number of samples and number of channels
+            assert self.n_samples == sum(len(arr) for arr in self.row_indices)
+            assert self.n_channels == sum(len(arr) for arr in self.column_indices)
+        else:
+            self.partition_rows = partition_rows
+            self.partition_columns = partition_columns
+            self.partition_indices()
 
 
     def partition_indices(self):
