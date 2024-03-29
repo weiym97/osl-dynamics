@@ -23,6 +23,7 @@ import numpy as np
 
 from osl_dynamics import array_ops
 from osl_dynamics.utils.misc import load, override_dict_defaults, save
+from osl_dynamics.utils.plotting import plot_line
 
 _logger = logging.getLogger("osl-dynamics")
 
@@ -207,6 +208,7 @@ def train_hmm(
     # Training
     history = model.fit(data, **fit_kwargs)
 
+
     # Get the variational free energy
     history["free_energy"] = model.free_energy(data)
 
@@ -248,7 +250,12 @@ def train_hmm(
         with open(f'{metric_dir}metrics.json', "w") as json_file:
             # Use json.dump to write the data to the file
             json.dump(metrics, json_file)
-
+    plot_line(x=np.arange(1, len(history['free_energy']) + 1),
+              y=history['free_energy'],
+              x_label='epochs',
+              y_label='free energy',
+              title='Training loss function',
+              filename=os.path.join(output_dir,'loss_function.jpg'))
 
 def train_dynemo(
     data,
