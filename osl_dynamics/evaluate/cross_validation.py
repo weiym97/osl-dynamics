@@ -61,6 +61,8 @@ class BICVkmeans():
         self.column_indices = np.array_split(column_indices, self.partition_columns)
 
         if save_dir is not None:
+            if not os.path.exists(save_dir):
+                os.makedirs(save_dir)
             np.savez(os.path.join(save_dir,'row_indices.npz'), *row_indices)
             np.savez(os.path.join(save_dir, 'row_indices.npz'), *column_indices)
 
@@ -248,6 +250,8 @@ class BICVHMM():
 
 
         if self.save_dir is not None:
+            if not os.path.exists(self.save_dir):
+                os.makedirs(self.save_dir)
             np.savez(os.path.join(self.save_dir,'row_indices.npz'), *self.row_indices)
             np.savez(os.path.join(self.save_dir, 'column_indices.npz'), *self.column_indices)
 
@@ -545,36 +549,32 @@ class BICVHMM():
 
 
 
-    def validate(self,original_config,train_keys):
-        metrics = []
-        for i in range(self.partition_rows):
-            for j in range(self.partition_columns):
-                row_train, row_test, column_X, column_Y = self.fold_indices(i, j)
-                config = original_config.copy()
-                config['save_dir'] = os.path.join(original_config['save_dir'],f'fold_{i+1}_{j+1}')
+    def validate(self,original_config,train_keys,i,j):
+        row_train, row_test, column_X, column_Y = self.fold_indices(i, j)
+        config = original_config.copy()
+        config['save_dir'] = os.path.join(original_config['save_dir'],f'fold_{i+1}_{j+1}')
 
-                if not os.path.exists(config['save_dir']):
-                    os.makedirs(config['save_dir'])
+        if not os.path.exists(config['save_dir']):
+            os.makedirs(config['save_dir'])
 
 
-                # Save the dictionary as a pickle file
-                with open(os.path.join(config['save_dir'],'fold_indices.json'), 'w') as f:
-                    json.dump({
-                        'row_train':row_train,
-                        'row_test':row_test,
-                        'column_X':column_X,
-                        'column_Y':column_Y
-                    }, f)
+        # Save the dictionary as a pickle file
+        with open(os.path.join(config['save_dir'],'fold_indices.json'), 'w') as f:
+            json.dump({
+                'row_train':row_train,
+                'row_test':row_test,
+                'column_X':column_X,
+                'column_Y':column_Y
+            }, f)
 
-                spatial_Y_train,temporal_Y_train = self.Y_train(config, train_keys,row_train, column_Y)
-                spatial_X_train = self.X_train(config, train_keys, row_train, column_X, temporal_Y_train)
-                temporal_X_test = self.X_test(config, train_keys,row_test, column_X, spatial_X_train)
-                metric = self.Y_test(config, row_test, column_Y, temporal_X_test, spatial_Y_train)
-                metrics.append(metric)
+        spatial_Y_train,temporal_Y_train = self.Y_train(config, train_keys,row_train, column_Y)
+        spatial_X_train = self.X_train(config, train_keys, row_train, column_X, temporal_Y_train)
+        temporal_X_test = self.X_test(config, train_keys,row_test, column_X, spatial_X_train)
+        metric = self.Y_test(config, row_test, column_Y, temporal_X_test, spatial_Y_train)
 
         # Write metrics data into the JSON file
         with open(os.path.join(original_config['save_dir'],'metrics.json'), 'w') as json_file:
-            json.dump(metrics, json_file)
+            json.dump({'log_likelihood':metric}, json_file)
 
 
 

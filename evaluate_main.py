@@ -8,7 +8,7 @@ def main(index,config_path,analysis_config_path=None):
     Parameters
     ----------
     index: int
-        index == -1 represents post training checkk or analysis.
+        index == -1 represents initialisation of the training
     config_path: str
         where read the config path.
     analysis_config_path: str
@@ -27,6 +27,8 @@ def main(index,config_path,analysis_config_path=None):
         batch_train = BatchTrain(config)
         batch_train.model_train()
     else:
+        index_parser = IndexParser(config_batch)
+        '''
         # Step 1: batch check whether training is successful
         #          return the list where training is not successful
         batch_check(config_batch)
@@ -34,7 +36,7 @@ def main(index,config_path,analysis_config_path=None):
         # Step 2: if analysis_config_path is not None, implement the analayis code.
         if analysis_config_path is not None:
             pass
-
+        '''
 
 
 
