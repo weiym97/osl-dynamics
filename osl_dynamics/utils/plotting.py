@@ -2454,3 +2454,127 @@ def plot_mode_pairing(
         save(fig, filename, tight_layout=True)
     elif create_fig:
         return fig, ax
+
+def plot_box(
+    data,
+    labels=None,
+    plot_samples=True,
+    y_range=None,
+    x_label=None,
+    y_label=None,
+    title=None,
+    plot_kwargs=None,
+    scatter_kwargs=None,
+    fig_kwargs=None,
+    ax=None,
+    filename=None,
+):
+    """Basic box plot.
+
+    Parameters
+    ----------
+    data : list of np.ndarray
+        Raw data to plot
+    labels : list of str or int, optional
+        Labels for each box plot
+    plot_samples: bool, optional
+        Whether to plot the original samples
+    y_range : list, optional
+        Minimum and maximum for y-axis.
+    x_label : str, optional
+        Label for x-axis.
+    y_label : str, optional
+        Label for y-axis.
+    title : str, optional
+        Figure title.
+    plot_kwargs : dict, optional
+        Arguments to pass to the `ax.boxplot <https://matplotlib.org/stable\
+        /api/_as_gen/matplotlib.axes.Axes.boxplot.html>`_ method.Defaults to
+        :code:`{"showmeans": True,'showfliers':False}`.
+    scatter_kwargs: dict, optional
+        Arguments to pass to the `ax.scatter <https://matplotlib.org/stable\
+        /api/_as_gen/matplotlib.axes.Axes.scatter.html>`_ method.Defaults to
+        :code:`{"alpha": 0.8,'s':10.0}`.
+    fig_kwargs : dict, optional
+        Arguments to pass to :code:`plt.subplots()`.
+    ax : plt.axes, optional
+        Axis object to plot on.
+    filename : str, optional
+        Output filename.
+
+    Returns
+    -------
+    fig : plt.figure
+        Matplotlib figure object. Only returned if :code:`ax=None` and
+        :code:`filename=None`.
+    ax : plt.axes
+        Matplotlib axis object(s). Only returned if :code:`ax=None` and
+        :code:`filename=None`.
+    """
+
+    # Validation
+    if labels is not None:
+        if isinstance(labels, str):
+            labels = [labels]
+        else:
+            if len(labels) != len(data):
+                raise ValueError("Incorrect number of labels or data passed.")
+    else:
+        labels = [None] * len(data)
+
+    if y_range is None:
+        y_range = [None, None]
+
+
+    if ax is not None:
+        if filename is not None:
+            raise ValueError(
+                "Please use plotting.save() to save the figure instead of the "
+                + "filename argument."
+            )
+        if isinstance(ax, np.ndarray):
+            raise ValueError("Only pass one axis.")
+
+    if fig_kwargs is None:
+        fig_kwargs = {}
+    default_fig_kwargs = {"figsize": (7, 4)}
+    fig_kwargs = override_dict_defaults(default_fig_kwargs, fig_kwargs)
+
+    if plot_kwargs is None:
+        plot_kwargs = {}
+    default_plot_kwargs = {"showmeans": True,'showfliers':False}
+    plot_kwargs = override_dict_defaults(default_plot_kwargs, plot_kwargs)
+
+    # Create figure
+    create_fig = ax is None
+    if create_fig:
+        fig, ax = create_figure(**fig_kwargs)
+
+    # Box plot
+    ax.boxplot(data, labels=labels, **plot_kwargs)
+
+    # Plot the original samples
+
+    if plot_samples:
+        cmap = plt.get_cmap('viridis')
+        default_scatter_kwargs = {'alpha':0.8,'s':10}
+        scatter_kwargs = override_dict_defaults(default_scatter_kwargs,scatter_kwargs)
+        for i, (label, data) in enumerate(zip(labels, data)):
+            x = np.random.normal(i + 1, 0.04, size=len(data))  # Add jitter to x-coordinates for better visualization
+            for j in range(len(x)):
+                ax.scatter(x[j], data[j], color=cmap(j / len(x)),**scatter_kwargs)
+
+    # Set axis range
+    ax.set_ylim(y_range[0], y_range[1])
+
+    # Set title and axis labels
+    ax.set_title(title)
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+
+
+    # Save the figure if a filename has been pass
+    if filename is not None:
+        save(fig, filename, tight_layout=True)
+    elif create_fig:
+        return fig, ax

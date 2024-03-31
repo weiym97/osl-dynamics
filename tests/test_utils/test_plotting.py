@@ -470,3 +470,22 @@ def test_plot_mode_pairing():
     indices = {'row':[3,2,4,5,1,7,0,8],'col':list(range(0,8))}
     plot_mode_pairing(metrics,indices,x_label='split_2',y_label='split_1',title='Pairing test',
                       filename=f'{plot_dir}/toy_example.png')
+
+def test_plot_box():
+    from osl_dynamics.utils.plotting import plot_box
+
+    plot_dir = "test_plot/plot_box"
+    if not os.path.exists(plot_dir):
+        os.makedirs(plot_dir)
+    else:
+        # Delete existing files in the directory
+        for file_name in os.listdir(plot_dir):
+            file_path = os.path.join(plot_dir, file_name)
+            os.remove(file_path)
+
+    data = [np.random.normal(loc=i*0.5, size=100) for i in range(1, 6)]
+    labels = range(1,6)
+    plot_box(data,labels=labels,x_label='Number of cluster',y_label='Metric',title='Box plot test',
+             filename=f'{plot_dir}/toy_example.png')
+
+
