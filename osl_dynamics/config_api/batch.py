@@ -381,4 +381,6 @@ class BatchAnalysis:
         with open(os.path.join(config_path,'config_root.yaml', 'r')) as file:
             config_root = yaml.safe_load(file)
         self.indexparser = IndexParser(config_root)
+        self.config_list = pd.read_csv(os.path.join(config_path,'config_list.csv', index_col=0))
+
 
