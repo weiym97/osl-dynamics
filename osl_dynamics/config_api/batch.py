@@ -409,7 +409,7 @@ class BatchAnalysis:
         # Plot
         for model in models:
             plot_box(data = metrics[model].values(),
-                     labels=metric[model].keys(),
+                     labels=metrics[model].keys(),
                      filename=os.path.join(self.analysis_path,f'{model}_metrics.jpg')
                      )
 
