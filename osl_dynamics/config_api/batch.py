@@ -87,7 +87,7 @@ batch_variable:
     """
     def __init__(self,config:dict):
 
-        # Sleep for random seconds, otherwise the batch job might contradicts
+        # Sleep for random seconds, otherwise the batch job might contradict
         time.sleep(random.uniform(0.,2.))
 
         self.save_dir = config['save_dir']
@@ -349,3 +349,16 @@ def batch_check(config:dict):
         raise ValueError(f'Some training cases failed, check {bad_dirs_save_path} for the list')
     else:
         print('All model training successful!')
+
+class BatchAnalysis:
+    '''
+    Analysis code after batch training. The config path in initialisation should contain
+    :code:`config_root.yaml` and :code:`config_list.csv`
+    '''
+
+    def __init__(self,config_path):
+        self.config_path = config_path
+        with open(os.path.join(config_path,'config_root.yaml', 'r')) as file:
+            config_root = yaml.safe_load(file)
+        self.indexparser = IndexParser(config_root)
+
