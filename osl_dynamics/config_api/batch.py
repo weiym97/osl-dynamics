@@ -396,7 +396,7 @@ class BatchAnalysis:
     def compare(self):
         models = self.config_root['batch_variable']['model']
         n_states = self.config_root['batch_variable']['n_states']
-        metrics = {model: {num: [] for num in n_states } for model in models}
+        metrics = {model: {str(int(num)): [] for num in n_states } for model in models}
         for i in range(len(self.config_list)):
             config = self.indexparser.parse(i)
             model = config['model']
@@ -404,7 +404,7 @@ class BatchAnalysis:
             save_dir = config['save_dir']
             with open(os.path.join(save_dir,'metrics.json'), 'r') as file:
                 metric = json.load(file)['log_likelihood']
-            metrics[model][n_states].append(metric)
+            metrics[model][str(int(n_states))].append(metric)
 
         # Plot
         for model in models:
