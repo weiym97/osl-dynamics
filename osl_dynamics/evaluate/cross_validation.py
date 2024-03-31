@@ -184,7 +184,7 @@ class BICVkmeans():
         return metrics
 
 class BICVHMM():
-    def __init__(self,n_samples,n_channels,row_indices=None,column_indices=None,save_dir=None,partition_rows=2,partition_columns=2,):
+    def __init__(self,n_samples=None,n_channels=None,row_indices=None,column_indices=None,save_dir=None,partition_rows=2,partition_columns=2,):
         '''
         Initialisation of BICVHMM.
         If both row_indices and column indices are not None, use them to initialise BICVHMM.
@@ -217,9 +217,9 @@ class BICVHMM():
                 self.column_indices = npz2list(np.load(column_indices))
             self.partition_rows = len(self.row_indices)
             self.partition_columns = len(self.column_indices)
-            # Assert the number of samples and number of channels
-            assert self.n_samples == sum(len(arr) for arr in self.row_indices)
-            assert self.n_channels == sum(len(arr) for arr in self.column_indices)
+            # Update the number of samples and number of channels
+            self.n_samples = sum(len(arr) for arr in self.row_indices)
+            self.n_channels = sum(len(arr) for arr in self.column_indices)
         else:
             self.partition_rows = partition_rows
             self.partition_columns = partition_columns
@@ -549,10 +549,8 @@ class BICVHMM():
 
 
 
-    def validate(self,original_config,train_keys,i,j):
-        row_train, row_test, column_X, column_Y = self.fold_indices(i, j)
-        config = original_config.copy()
-        config['save_dir'] = os.path.join(original_config['save_dir'],f'fold_{i+1}_{j+1}')
+    def validate(self,config,train_keys,i,j):
+        row_train, row_test, column_X, column_Y = self.fold_indices(i-1, j-1)
 
         if not os.path.exists(config['save_dir']):
             os.makedirs(config['save_dir'])
@@ -573,7 +571,7 @@ class BICVHMM():
         metric = self.Y_test(config, row_test, column_Y, temporal_X_test, spatial_Y_train)
 
         # Write metrics data into the JSON file
-        with open(os.path.join(original_config['save_dir'],'metrics.json'), 'w') as json_file:
+        with open(os.path.join(config['save_dir'],'metrics.json'), 'w') as json_file:
             json.dump({'log_likelihood':metric}, json_file)
 
 
