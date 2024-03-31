@@ -96,6 +96,10 @@ batch_variable:
         self.other_keys =  {key: value for key, value in config.items()
                                 if key not in ['batch_variable','non_batch_variable']}
 
+        # Check the number of channels is set correctly.
+        if 'cv_kwargs' in self.other_keys:
+            assert self.non_batch_variable['n_channels'] == self.other_keys['cv_kwargs']['n_channels']
+
         # Check whether the save_dir exists, make directory if not
         if not os.path.exists(config['save_dir']):
             os.makedirs(config['save_dir'])
@@ -131,9 +135,20 @@ batch_variable:
         new_config.update(bv)
         new_config.update(self.non_batch_variable)
 
+        root_save_dir = new_config['save_dir']
+
         new_config['save_dir'] = f'{new_config["save_dir"]}{new_config["model"]}' \
                              f'_ICA_{new_config["n_channels"]}_state_{new_config["n_states"]}/{new_config["mode"]}/'
 
+        # Deal with cross validation case
+        if 'cv' in new_config['mode']:
+            # Update the new_config['cv_kwargs']
+            new_config['cv_kwargs'] = {
+                'row_indices':f'{root_save_dir}/{new_config["mode"]}_partition/row_indices.npz',
+                'column_indices':f'{root_save_dir}/{new_config["mode"]}_partition/column_indices.npz'
+            }
+            if 'row_fold' in new_config.keys() and 'column_fold' in new_config.keys():
+                new_config['save_dir'] = f"{new_config['save_dir']}/fold_{new_config['row_fold']}_{new_config['column_fold']}/"
         return new_config
 
 
@@ -144,7 +159,19 @@ batch_variable:
         Returns
         -------
         """
+
         from itertools import product
+
+        # Deal with cross validation
+        cv_count = sum(1 for item in self.batch_variable['mode'] if 'cv' in item)
+        if cv_count > 0:
+            cv_kwargs = self.other_keys['cv_kwargs']
+
+            for i in range(cv_count):
+                cv_kwargs['save_dir'] = f'{self.save_dir}/cv_{i+1}_partition/'
+                cv = BICVHMM(**cv_kwargs)
+            self.batch_variable['row_fold'] = list(range(1,cv.partition_rows+1))
+            self.batch_variable['column_fold'] = list(range(1, cv.partition_columns + 1))
         combinations = list(product(*self.batch_variable.values()))
         # Create a DataFrame
         df = pd.DataFrame(combinations, columns=self.batch_variable.keys())
@@ -232,16 +259,9 @@ class BatchTrain:
 
 
         elif "cv" in self.config["mode"]:
-            # Find the number of sessions to work with
-            if "n_sessions" not in self.config:
-                data = Data(self.config["load_data"]["inputs"])
-                n_sessions = len(data.arrays)
-            else:
-                n_sessions = self.config["n_sessions"]
-            # Find the number of channels
-            n_channels = self.config['n_channels']
-            cv = BICVHMM(n_samples=n_sessions,n_channels=n_channels,save_dir = self.config['save_dir'])
-            cv.validate(self.config,self.train_keys)
+
+            cv = BICVHMM(**self.config['cv_kwargs'])
+            cv.validate(self.config,self.train_keys,self.config['row_fold'],self.config['column_fold'])
             '''
             indice_all = self.select_indice(ratio=cv_ratio)
 
