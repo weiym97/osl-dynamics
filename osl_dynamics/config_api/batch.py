@@ -19,8 +19,10 @@ from .pipeline import run_pipeline_from_file
 from ..data.base import Data
 from ..evaluate.cross_validation import BICVHMM
 from ..utils.misc import override_dict_defaults
-class IndexParser:
+from ..utils.plotting import plot_box
 
+
+class IndexParser:
     """
     Parse the training config file with index for batch training.
     Typically, a root config YAML file looks like the following, where
@@ -85,16 +87,17 @@ batch_variable:
     - cv_4
     - cv_5
     """
-    def __init__(self,config:dict):
+
+    def __init__(self, config: dict):
 
         # Sleep for random seconds, otherwise the batch job might contradict
-        time.sleep(random.uniform(0.,2.))
+        time.sleep(random.uniform(0., 2.))
 
         self.save_dir = config['save_dir']
         self.batch_variable = config['batch_variable']
         self.non_batch_variable = config['non_batch_variable']
-        self.other_keys =  {key: value for key, value in config.items()
-                                if key not in ['batch_variable','non_batch_variable']}
+        self.other_keys = {key: value for key, value in config.items()
+                           if key not in ['batch_variable', 'non_batch_variable']}
 
         # Check the number of channels is set correctly.
         if 'cv_kwargs' in self.other_keys:
@@ -111,7 +114,8 @@ batch_variable:
         # Check if the config list file exists, create if not
         if not os.path.exists(f'{self.save_dir}config_list.csv'):
             self._make_list()
-    def parse(self,index:int=0):
+
+    def parse(self, index: int = 0):
         """
         Given the index, parse the correct configuration file
         Parameters
@@ -138,19 +142,19 @@ batch_variable:
         root_save_dir = new_config['save_dir']
 
         new_config['save_dir'] = f'{new_config["save_dir"]}{new_config["model"]}' \
-                             f'_ICA_{new_config["n_channels"]}_state_{new_config["n_states"]}/{new_config["mode"]}/'
+                                 f'_ICA_{new_config["n_channels"]}_state_{new_config["n_states"]}/{new_config["mode"]}/'
 
         # Deal with cross validation case
         if 'cv' in new_config['mode']:
             # Update the new_config['cv_kwargs']
             new_config['cv_kwargs'] = {
-                'row_indices':f'{root_save_dir}/{new_config["mode"]}_partition/row_indices.npz',
-                'column_indices':f'{root_save_dir}/{new_config["mode"]}_partition/column_indices.npz'
+                'row_indices': f'{root_save_dir}/{new_config["mode"]}_partition/row_indices.npz',
+                'column_indices': f'{root_save_dir}/{new_config["mode"]}_partition/column_indices.npz'
             }
             if 'row_fold' in new_config.keys() and 'column_fold' in new_config.keys():
-                new_config['save_dir'] = f"{new_config['save_dir']}/fold_{new_config['row_fold']}_{new_config['column_fold']}/"
+                new_config[
+                    'save_dir'] = f"{new_config['save_dir']}/fold_{new_config['row_fold']}_{new_config['column_fold']}/"
         return new_config
-
 
     def _make_list(self):
         """
@@ -168,14 +172,15 @@ batch_variable:
             cv_kwargs = self.other_keys['cv_kwargs']
 
             for i in range(cv_count):
-                cv_kwargs['save_dir'] = f'{self.save_dir}/cv_{i+1}_partition/'
+                cv_kwargs['save_dir'] = f'{self.save_dir}/cv_{i + 1}_partition/'
                 cv = BICVHMM(**cv_kwargs)
-            self.batch_variable['row_fold'] = list(range(1,cv.partition_rows+1))
+            self.batch_variable['row_fold'] = list(range(1, cv.partition_rows + 1))
             self.batch_variable['column_fold'] = list(range(1, cv.partition_columns + 1))
         combinations = list(product(*self.batch_variable.values()))
         # Create a DataFrame
         df = pd.DataFrame(combinations, columns=self.batch_variable.keys())
         df.to_csv(f'{self.save_dir}config_list.csv', index=True)
+
 
 class BatchTrain:
     """
@@ -197,7 +202,8 @@ class BatchTrain:
                           'learning_rate',
                           'n_epochs',
                           ]
-    def __init__(self,config:dict,train_keys=None):
+
+    def __init__(self, config: dict, train_keys=None):
         self.train_keys = self.train_keys_default if train_keys is None else train_keys
 
         # Validate the configuration file
@@ -215,11 +221,11 @@ class BatchTrain:
         if not os.path.exists(config['save_dir']):
             os.makedirs(config['save_dir'])
         if not os.path.isfile(f'{config["save_dir"]}batch_config.yaml'):
-            with open(f'{config["save_dir"]}batch_config.yaml','w') as file:
-                yaml.safe_dump(config,file, default_flow_style=False)
+            with open(f'{config["save_dir"]}batch_config.yaml', 'w') as file:
+                yaml.safe_dump(config, file, default_flow_style=False)
         self.config = config
 
-    def model_train(self,cv_ratio=0.25):
+    def model_train(self, cv_ratio=0.25):
         '''
         Batch model train method
         cv_ration: float,optional
@@ -247,21 +253,21 @@ class BatchTrain:
             with open(f'{self.config["save_dir"]}indices_2.json', 'w') as json_file:
                 json.dump(indice_2, json_file)
 
-            for i in range(0,2):
-                temp_save_dir = f'{self.config["save_dir"]}half_{i+1}/'
+            for i in range(0, 2):
+                temp_save_dir = f'{self.config["save_dir"]}half_{i + 1}/'
                 if not os.path.exists(temp_save_dir):
                     os.makedirs(temp_save_dir)
-                prepare_config['keep_list'] = f'{self.config["save_dir"]}indices_{i+1}.json'
+                prepare_config['keep_list'] = f'{self.config["save_dir"]}indices_{i + 1}.json'
                 with open(f'{temp_save_dir}prepared_config.yaml', 'w') as file:
                     yaml.safe_dump(prepare_config, file, default_flow_style=False)
                 run_pipeline_from_file(f'{temp_save_dir}prepared_config.yaml',
-                                      temp_save_dir)
+                                       temp_save_dir)
 
 
         elif "cv" in self.config["mode"]:
 
             cv = BICVHMM(**self.config['cv_kwargs'])
-            cv.validate(self.config,self.train_keys,self.config['row_fold'],self.config['column_fold'])
+            cv.validate(self.config, self.train_keys, self.config['row_fold'], self.config['column_fold'])
             '''
             indice_all = self.select_indice(ratio=cv_ratio)
 
@@ -294,8 +300,7 @@ class BatchTrain:
             run_pipeline_from_file(f'{self.config["save_dir"]}prepared_config.yaml',
                                    self.config["save_dir"])
 
-
-    def select_indice(self,ratio=0.5):
+    def select_indice(self, ratio=0.5):
         if "n_sessions" not in self.config:
             data = Data(self.config["load_data"]["inputs"])
             n_sessions = len(data.arrays)
@@ -318,7 +323,8 @@ class BatchTrain:
             chunks = [all_indices[i:i + chunk_size] for i in range(0, n_sessions, chunk_size)]
             return chunks
 
-def batch_check(config:dict):
+
+def batch_check(config: dict):
     '''
     Check whether the batch training is successful, raise value Error
     and save the list if some batch training is not successful.
@@ -339,7 +345,7 @@ def batch_check(config:dict):
 
     for values in product(*config['batch_variable'].values()):
         combination = dict(zip(config['batch_variable'].keys(), values))
-        vars = override_dict_defaults(config['non_batch_variable'],combination)
+        vars = override_dict_defaults(config['non_batch_variable'], combination)
         check_dir = f'{config["save_dir"]}{vars["model"]}_ICA' \
                     f'_{vars["n_channels"]}_state_{vars["n_states"]}/{vars["mode"]}/'
 
@@ -362,13 +368,14 @@ def batch_check(config:dict):
         except AssertionError:
             bad_dirs.append(check_dir)
 
-    if len(bad_dirs)>0:
+    if len(bad_dirs) > 0:
         # Serialize and save the list to a file
         with open(bad_dirs_save_path, 'w') as file:
-            yaml.safe_dump(bad_dirs, file,default_flow_style=False)
+            yaml.safe_dump(bad_dirs, file, default_flow_style=False)
         raise ValueError(f'Some training cases failed, check {bad_dirs_save_path} for the list')
     else:
         print('All model training successful!')
+
 
 class BatchAnalysis:
     '''
@@ -376,11 +383,35 @@ class BatchAnalysis:
     :code:`config_root.yaml` and :code:`config_list.csv`
     '''
 
-    def __init__(self,config_path):
+    def __init__(self, config_path):
         self.config_path = config_path
-        with open(os.path.join(config_path,'config_root.yaml'), 'r') as file:
+        with open(os.path.join(config_path, 'config_root.yaml'), 'r') as file:
             self.config_root = yaml.safe_load(file)
         self.indexparser = IndexParser(self.config_root)
-        self.config_list = pd.read_csv(os.path.join(config_path,'config_list.csv'), index_col=0)
+        self.config_list = pd.read_csv(os.path.join(config_path, 'config_list.csv'), index_col=0)
+        self.analysis_path = os.path.join(config_path,'analysis')
+        if not os.path.exists(self.analysis_path):
+            os.makedirs(self.analysis_path)
+
+    def compare(self):
+        models = self.config_root['batch_variable']['model']
+        n_states = self.config_root['batch_variable']['n_states']
+        metrics = {model: {num: [] for num in n_states } for model in models}
+        for i in range(len(self.config_list)):
+            config = self.indexparser.parse(i)
+            model = config['model']
+            n_states = config['n_states']
+            save_dir = config['save_dir']
+            with open(os.path.join(save_dir,'metrics.json'), 'r') as file:
+                metric = json.load(file)['log_likelihood']
+            metrics[model][n_states].append(metric)
+
+        # Plot
+        for model in models:
+            plot_box(data = metrics[model].values(),
+                     labels=metric[model].keys(),
+                     filename=os.path.join(self.analysis_path,f'{model}_metrics.jpg')
+                     )
+
 
 
