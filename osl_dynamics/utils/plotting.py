@@ -2459,12 +2459,14 @@ def plot_box(
     data,
     labels=None,
     plot_samples=True,
+    mark_best=True,
     y_range=None,
     x_label=None,
     y_label=None,
     title=None,
     plot_kwargs=None,
     scatter_kwargs=None,
+    text_kwargs=None,
     fig_kwargs=None,
     ax=None,
     filename=None,
@@ -2479,6 +2481,8 @@ def plot_box(
         Labels for each box plot
     plot_samples: bool, optional
         Whether to plot the original samples
+    mark_best: bool, optional
+        Whether to mark the best performed model.
     y_range : list, optional
         Minimum and maximum for y-axis.
     x_label : str, optional
@@ -2495,6 +2499,10 @@ def plot_box(
         Arguments to pass to the `ax.scatter <https://matplotlib.org/stable\
         /api/_as_gen/matplotlib.axes.Axes.scatter.html>`_ method.Defaults to
         :code:`{"alpha": 0.8,'s':10.0}`.
+    test_kwargs: dict, optional
+        Arguments to pass to the `ax.text <https://matplotlib.org/stable\
+        /api/_as_gen/matplotlib.axes.Axes.text.html>`_ method.Defaults to
+        :code:`{'fontsize': 'large','ha':'center','va':'bottom'}`.
     fig_kwargs : dict, optional
         Arguments to pass to :code:`plt.subplots()`.
     ax : plt.axes, optional
@@ -2551,7 +2559,7 @@ def plot_box(
         fig, ax = create_figure(**fig_kwargs)
 
     # Box plot
-    ax.boxplot(data, labels=labels, **plot_kwargs)
+    bp = ax.boxplot(data, labels=labels, **plot_kwargs)
 
     # Plot the original samples
 
@@ -2559,13 +2567,29 @@ def plot_box(
         cmap = plt.get_cmap('viridis')
         default_scatter_kwargs = {'alpha':0.8,'s':10}
         scatter_kwargs = override_dict_defaults(default_scatter_kwargs,scatter_kwargs)
-        for i, (label, data) in enumerate(zip(labels, data)):
-            x = np.random.normal(i + 1, 0.04, size=len(data))  # Add jitter to x-coordinates for better visualization
+        for i, (label, points) in enumerate(zip(labels, data)):
+            x = np.random.normal(i + 1, 0.04, size=len(points))  # Add jitter to x-coordinates for better visualization
             for j in range(len(x)):
-                ax.scatter(x[j], data[j], color=cmap(j / len(x)),**scatter_kwargs)
+                ax.scatter(x[j], points[j], color=cmap(j / len(x)),**scatter_kwargs)
 
     # Set axis range
-    ax.set_ylim(y_range[0], y_range[1])
+    if (y_range[0] is not None) and (y_range[1] is not None):
+        ax.set_ylim(y_range[0], y_range[1])
+    else:
+        ax.relim()
+        ax.autoscale_view()
+
+
+    if mark_best:
+        default_text_kwargs = {'fontsize': 'large','ha':'center','va':'bottom'}
+        text_kwargs = override_dict_defaults(default_text_kwargs,text_kwargs)
+        # Add asterisk at maximum median value box
+        max_median_index = np.argmax([np.median(d) for d in data])
+        max_median_value = np.max([np.median(d) for d in data])
+        ax.text(max_median_index + 1, ax.get_ylim()[1], '*', **text_kwargs)
+        #ax.text(max_median_index + 1, bp['caps'][max_median_index * 2 + 1].get_data()[1], '*', ha='center', va='bottom')
+
+
 
     # Set title and axis labels
     ax.set_title(title)
