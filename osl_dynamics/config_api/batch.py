@@ -402,9 +402,12 @@ class BatchAnalysis:
             model = config['model']
             n_states = config['n_states']
             save_dir = config['save_dir']
-            with open(os.path.join(save_dir,'metrics.json'), 'r') as file:
-                metric = json.load(file)['log_likelihood']
-            metrics[model][str(int(n_states))].append(metric)
+            try:
+                with open(os.path.join(save_dir,'metrics.json'), 'r') as file:
+                    metric = json.load(file)['log_likelihood']
+                metrics[model][str(int(n_states))].append(metric)
+            except Exception:
+                print(f'save_dir {save_dir} fails!')
 
         # Plot
         for model in models:
