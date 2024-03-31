@@ -69,6 +69,7 @@ if __name__ == '__main__':
     '''
     #############################################################
     # Update 25th March 2024: Generate bi-cross validation simulation
+    '''
     from osl_dynamics import data, simulation
 
     # Case 1: All the data are weakly correlated
@@ -220,10 +221,152 @@ if __name__ == '__main__':
     for i in range(n_subjects):
         np.savetxt(f'{save_dir}{10001 + i}.txt', data[i])
         np.save(f'{save_dir}truth/{10001 + i}_state_time_course.npy', time_course[i])
+    '''
+    #############################################################
+    ### Update 31st March 2024
+    ### This is a simulation for bi cross validation
+    ### We try to answer the question: what happens when the state covariances are "sparse"
+    from osl_dynamics import data, simulation
+    from osl_dynamics.simulation.mvn import MVN
+
+    # Case 1: Covariances can be divided into three blocks (8,8,9 channels),
+    # Each block have two states, thus there are 8 states in total.
+
+    '''
+    save_dir = './data/node_timeseries/simulation_bicv/3_block/'
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    if not os.path.exists(f'{save_dir}truth/'):
+        os.makedirs(f'{save_dir}truth')
+
+    n_subjects = 500
+    n_states = 8
+    n_samples = 1200
+    n_channels = 25
+    n_channels_split = [8,8,9]
+
+    cov = []
+    for i in range(3):
+        mvn = MVN(means='zero',
+                  covariances='random',
+                  n_modes=2,
+                  n_channels = n_channels_split[i])
+        cov.append(mvn.covariances)
+    # Build up the covariances using blocked ones.
+    from scipy.linalg import block_diag
+    covariances = np.zeros((n_states,n_channels,n_channels))
+    for i in range(8):
+        index = [int(digit) for digit in bin(i)[2:].zfill(3)]
+        covariances[i,:,:] = block_diag(cov[0][index[0]],cov[1][index[1]],cov[2][index[2]])
+    sim = simulation.HMM_MVN(
+        n_samples=n_samples * n_subjects,
+        n_states=n_states,
+        n_channels=n_channels,
+        trans_prob='uniform',
+        stay_prob=0.8,
+        means="zero",
+        covariances=covariances
+    )
+    data = sim.time_series
+    time_course = sim.state_time_course
+    data = data.reshape(n_subjects, -1, n_channels)
+    time_course = time_course.reshape(n_subjects, -1, n_states)
+
+    np.save(f'{save_dir}truth/state_covariances.npy', sim.obs_mod.covariances)
+    np.save(f'{save_dir}truth/tpm.npy', sim.hmm.trans_prob)
+
+    for i in range(n_subjects):
+        np.savetxt(f'{save_dir}{10001 + i}.txt', data[i])
+        np.save(f'{save_dir}truth/{10001 + i}_state_time_course.npy', time_course[i])
+    '''
+    # Case 2: Randomly generate 8 state covariances, but only
+    # preserve the diagonal value
+    '''
+    save_dir = './data/node_timeseries/simulation_bicv/diagonal/'
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    if not os.path.exists(f'{save_dir}truth/'):
+        os.makedirs(f'{save_dir}truth')
+
+    n_subjects = 500
+    n_states = 8
+    n_samples = 1200
+    n_channels = 25
+
+    mvn = MVN(means='zero',
+              covariances='random',
+              n_modes=n_states,
+             n_channels=n_channels)
+    covariances = mvn.covariances
+    for i in range(n_states):
+        temp = covariances[i]
+
+        # Set off-diagonal elements to zero
+        temp[~np.eye(temp.shape[0], dtype=bool)] = 0
+
+        # Update the modified covariance matrix in the array
+        covariances[i] = temp
+    sim = simulation.HMM_MVN(
+        n_samples=n_samples * n_subjects,
+        n_states=n_states,
+        n_channels=n_channels,
+        trans_prob='uniform',
+        stay_prob=0.8,
+        means="zero",
+        covariances=covariances
+    )
+    data = sim.time_series
+    time_course = sim.state_time_course
+    data = data.reshape(n_subjects, -1, n_channels)
+    time_course = time_course.reshape(n_subjects, -1, n_states)
+
+    np.save(f'{save_dir}truth/state_covariances.npy', sim.obs_mod.covariances)
+    np.save(f'{save_dir}truth/tpm.npy', sim.hmm.trans_prob)
+
+    for i in range(n_subjects):
+        np.savetxt(f'{save_dir}{10001 + i}.txt', data[i])
+        np.save(f'{save_dir}truth/{10001 + i}_state_time_course.npy', time_course[i])
+    '''
+    # Case 3: 25 state covariances without correlation, all variances are unit
+    # except for the ith compoment in the state i
+    save_dir = './data/node_timeseries/simulation_bicv/diagonal_special/'
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    if not os.path.exists(f'{save_dir}truth/'):
+        os.makedirs(f'{save_dir}truth')
+
+    n_subjects = 500
+    n_states = 8
+    n_samples = 1200
+    n_channels = 25
+
+    covariances = np.zeros((n_states,n_channels,n_channels))
+    for i in range(n_states):
+        covariances[i] = np.eye(n_channels)
+        covariances[i,i,i] = 2
+
+    sim = simulation.HMM_MVN(
+        n_samples=n_samples * n_subjects,
+        n_states=n_states,
+        n_channels=n_channels,
+        trans_prob='uniform',
+        stay_prob=0.8,
+        means="zero",
+        covariances=covariances
+    )
+    data = sim.time_series
+    time_course = sim.state_time_course
+    data = data.reshape(n_subjects, -1, n_channels)
+    time_course = time_course.reshape(n_subjects, -1, n_states)
+
+    np.save(f'{save_dir}truth/state_covariances.npy', sim.obs_mod.covariances)
+    np.save(f'{save_dir}truth/tpm.npy', sim.hmm.trans_prob)
+
+    for i in range(n_subjects):
+        np.savetxt(f'{save_dir}{10001 + i}.txt', data[i])
+        np.save(f'{save_dir}truth/{10001 + i}_state_time_course.npy', time_course[i])
 
     #############################################################
-
-
     '''
     ### Update 6th Dec 2023
     ### This is a simulation from Chet, it's only for comparison purposes.
