@@ -812,7 +812,7 @@ class BICVHMM_2():
         # Update 25th March 2024
         # This is a new implementation of the Y_test using
         # customised test function.
-        shutil.copytree(spatial_Y_train,f'{save_dir}/model/')
+        #shutil.copytree(spatial_Y_train,f'{save_dir}/model/')
 
         # Create a new directory "config['save_dir']/X_train/inf_params
         # And copy the temporal info from X_test
