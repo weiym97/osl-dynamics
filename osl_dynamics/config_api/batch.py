@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 from .pipeline import run_pipeline_from_file
 from ..data.base import Data
-from ..evaluate.cross_validation import BICVHMM
+from ..evaluate.cross_validation import BICVHMM, BICVHMM_2
 from ..utils.misc import override_dict_defaults
 from ..utils.plotting import plot_box
 
@@ -266,7 +266,7 @@ class BatchTrain:
 
         elif "cv" in self.config["mode"]:
 
-            cv = BICVHMM(**self.config['cv_kwargs'])
+            cv = BICVHMM_2(**self.config['cv_kwargs'])
             cv.validate(self.config, self.train_keys, self.config['row_fold'], self.config['column_fold'])
             '''
             indice_all = self.select_indice(ratio=cv_ratio)

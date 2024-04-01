@@ -575,5 +575,302 @@ class BICVHMM():
             json.dump({'log_likelihood':metric}, json_file)
 
 
+class BICVHMM_2():
+    def __init__(self,n_samples=None,n_channels=None,row_indices=None,column_indices=None,save_dir=None,partition_rows=2,partition_columns=2,):
+        '''
+        Initialisation of BICVHMM_2. This is a slightly different implementation of
+        cross validation comapred to BICVHMM
+        If both row_indices and column indices are not None, use them to initialise BICVHMM_2.
+        Otherwise randomly generate row and column indices.
+        Parameters
+        ----------
+        n_samples: int
+            the number of samples
+        n_channels: int
+            the number of channels (the length of each sample)
+        row_indices: str or list
+            the list of row indices. Read from file if it's a string.
+        column_indices: str or list
+            the list of column indices. Read from file if it's a string.
+        partition_rows: int
+            the number of rows partition
+        partition_columns: int
+            the number of columns partition
 
+        '''
+        self.n_samples = n_samples
+        self.n_channels = n_channels
+        self.save_dir = save_dir
+
+        # Initialise the class using row_indices/column_indices
+        if (row_indices is not None) and (column_indices is not None):
+            if isinstance(row_indices,str):
+                self.row_indices = npz2list(np.load(row_indices))
+            if isinstance(column_indices,str):
+                self.column_indices = npz2list(np.load(column_indices))
+            self.partition_rows = len(self.row_indices)
+            self.partition_columns = len(self.column_indices)
+            # Update the number of samples and number of channels
+            self.n_samples = sum(len(arr) for arr in self.row_indices)
+            self.n_channels = sum(len(arr) for arr in self.column_indices)
+        else:
+            self.partition_rows = partition_rows
+            self.partition_columns = partition_columns
+            self.partition_indices()
+
+
+    def partition_indices(self):
+        '''
+        Generate partition indices, if save_dir is not None,
+        save the indices.
+        Parameters
+        ----------
+        save_dir: str,optional
+            the directory to save the indices
+
+        '''
+        # Generate random row and column indices
+        row_indices = np.arange(self.n_samples)
+        column_indices = np.arange(self.n_channels)
+        np.random.shuffle(row_indices)
+        np.random.shuffle(column_indices)
+
+        # Divide rows into partitions
+        self.row_indices = np.array_split(row_indices, self.partition_rows)
+
+        # Divide columns into partitions
+        self.column_indices = np.array_split(column_indices, self.partition_columns)
+
+
+        if self.save_dir is not None:
+            if not os.path.exists(self.save_dir):
+                os.makedirs(self.save_dir)
+            np.savez(os.path.join(self.save_dir,'row_indices.npz'), *self.row_indices)
+            np.savez(os.path.join(self.save_dir, 'column_indices.npz'), *self.column_indices)
+
+    def fold_indices(self,r,s):
+        """
+        Given the partitions, return the indices of fold (r,s).
+        Fold (r,s) treats the rth row subset as "test", and the sth column
+        subset as response.
+        The parition should be in the format:
+        (X_train, Y_train,
+         X_test,  Y_test  )
+        Parameters
+        ----------
+        r: int
+            the row index
+        s: int
+            the column index
+
+        Returns
+        -------
+        row_train: list
+            row indices for X_train and Y_train
+        row_test: list
+            row indices for X_test and Y_test
+        column_X: list
+            column indices for X_train and X_test
+        column_Y: list
+            column indices for Y_train and Y_test
+        """
+
+        # Assuming row_indices and column_indices are available
+        row_train = []
+        row_test = []
+        column_X = []
+        column_Y = []
+
+        # Assign row indices for X_train and Y_train based on r
+        for i, row_index in enumerate(self.row_indices):
+            if i == r:
+                row_test.extend(row_index)
+            else:
+                row_train.extend(row_index)
+
+        # Assign column indices for X_train and X_test based on s
+        for j, column_index in enumerate(self.column_indices):
+            if j == s:
+                column_Y.extend(column_index)
+            else:
+                column_X.extend(column_index)
+
+        row_train = sorted(list(map(int, row_train)))
+        row_test = sorted(list(map(int, row_test)))
+        column_X = sorted(list(map(int, column_X)))
+        column_Y = sorted(list(map(int, column_Y)))
+
+        return row_train, row_test, column_X, column_Y
+
+    def X_train(self,config,train_keys,row_train,column_X,):
+        # Specify the save directory
+        save_dir = os.path.join(config['save_dir'],'X_train/')
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
+        prepare_config = {}
+        prepare_config['load_data'] = config['load_data']
+
+        prepare_config['load_data']['prepare']['select']['channels'] = column_X
+
+        prepare_config[f'train_{config["model"]}'] = {
+            'config_kwargs':
+                {key: config[key] for key in train_keys if key in config},
+            'init_kwargs':
+                config['init_kwargs']
+        }
+        prepare_config[f'train_{config["model"]}']['config_kwargs']['n_channels'] = len(column_X)
+        prepare_config['keep_list'] = row_train
+
+        with open(f'{save_dir}/prepared_config.yaml', 'w') as file:
+            yaml.safe_dump(prepare_config, file, default_flow_style=False)
+        run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
+                               save_dir)
+        params_dir = f'{save_dir}/inf_params/'
+        return {'means': f'{params_dir}means.npy',
+                'covs': f'{params_dir}covs.npy'}, f'{params_dir}alp.pkl'
+
+    def Y_train(self,config,train_keys,row_train,column_Y,temporal_X_train):
+        # Update 23rd March 2024
+        # A completely new implementation of X_train
+
+        save_dir = os.path.join(config['save_dir'], 'Y_train/')
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
+        # Create a new directory "config['save_dir']/X_train/inf_params
+        if not os.path.exists(f'{save_dir}inf_params/'):
+            os.makedirs(f'{save_dir}inf_params/')
+
+        shutil.copy(temporal_X_train, f'{save_dir}inf_params/')
+
+        prepare_config = {}
+        prepare_config['load_data'] = config['load_data']
+
+        prepare_config['load_data']['prepare']['select']['channels'] = column_Y
+
+        prepare_config[f'build_{config["model"]}'] = {
+            'config_kwargs':
+                {key: config[key] for key in train_keys if key in config},
+        }
+        prepare_config[f'build_{config["model"]}']['config_kwargs']['n_channels'] = len(column_Y)
+        prepare_config['dual_estimation'] = {'concatenate':True}
+
+        # Note the 'keep_list' value is in order (from small to large number)
+        prepare_config['keep_list'] = row_train
+
+        with open(f'{save_dir}/prepared_config.yaml', 'w') as file:
+            yaml.safe_dump(prepare_config, file, default_flow_style=False,sort_keys=False)
+        run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
+                               save_dir)
+
+        return {'means': f'{save_dir}/dual_estimates/means.npy',
+                'covs': f'{save_dir}/dual_estimates/covs.npy'}
+
+
+    def X_test(self,config,train_keys,row_test,column_X,spatial_X_train):
+        # Specify the save directory
+        save_dir = os.path.join(config['save_dir'], 'X_test/')
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
+        prepare_config = {}
+        prepare_config['load_data'] = config['load_data']
+
+        prepare_config['load_data']['prepare']['select']['channels'] = column_X
+
+        prepare_config[f'train_{config["model"]}'] = {
+            'config_kwargs':
+                {key: config[key] for key in train_keys if key in config},
+            'init_kwargs':
+                config['init_kwargs']
+        }
+        # Fix the means and covariances
+        prepare_config[f'train_{config["model"]}']['config_kwargs']['learn_means'] = False
+        prepare_config[f'train_{config["model"]}']['config_kwargs']['learn_covariances'] = False
+        prepare_config[f'train_{config["model"]}']['config_kwargs']['initial_means'] = spatial_X_train['means']
+        prepare_config[f'train_{config["model"]}']['config_kwargs']['initial_covariances'] = spatial_X_train['covs']
+
+        prepare_config[f'train_{config["model"]}']['config_kwargs']['n_channels'] = len(column_X)
+        prepare_config['keep_list'] = row_test
+
+        with open(f'{save_dir}/prepared_config.yaml', 'w') as file:
+            yaml.safe_dump(prepare_config, file, default_flow_style=False)
+        run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
+                               save_dir)
+        params_dir = f'{save_dir}/inf_params/'
+        return f'{params_dir}/alp.pkl'
+
+    def Y_test(self,config,train_keys,row_test,column_Y,temporal_X_test,spatial_Y_train):
+        # Specify the save directory
+        save_dir = os.path.join(config['save_dir'], 'Y_test/')
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
+
+        #################################################
+        # Update 25th March 2024
+        # This is a new implementation of the Y_test using
+        # customised test function.
+        shutil.copytree(spatial_Y_train,f'{save_dir}/model/')
+
+        # Create a new directory "config['save_dir']/X_train/inf_params
+        # And copy the temporal info from X_test
+        if not os.path.exists(f'{save_dir}inf_params/'):
+            os.makedirs(f'{save_dir}inf_params/')
+
+        shutil.copy(temporal_X_test, f'{save_dir}inf_params/')
+
+        prepare_config = {}
+        prepare_config['load_data'] = config['load_data']
+        prepare_config['load_data']['prepare']['select']['channels'] = column_Y
+
+        prepare_config[f'build_{config["model"]}'] = {
+            'config_kwargs':
+                {key: config[key] for key in train_keys if key in config},
+        }
+        prepare_config[f'build_{config["model"]}']['config_kwargs']['n_channels'] = len(column_Y)
+        prepare_config[f'build_{config["model"]}']['config_kwargs']['initial_means'] = spatial_Y_train['means']
+        prepare_config[f'build_{config["model"]}']['config_kwargs']['initial_covariances'] = spatial_Y_train['covs']
+
+
+        prepare_config['log_likelihood'] = {}
+        # Note the 'keep_list' value is in order (from small to large number)
+        prepare_config['keep_list'] = row_test
+
+        with open(f'{save_dir}/prepared_config.yaml', 'w') as file:
+            yaml.safe_dump(prepare_config, file, default_flow_style=False, sort_keys=False)
+        run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
+                                save_dir)
+
+        with open(f'{save_dir}/metrics.json', 'r') as file:
+            # Load the JSON data
+            metrics = json.load(file)
+        return metrics['log_likelihood']
+
+
+    def validate(self,config,train_keys,i,j):
+        row_train, row_test, column_X, column_Y = self.fold_indices(i-1, j-1)
+
+        if not os.path.exists(config['save_dir']):
+            os.makedirs(config['save_dir'])
+
+
+        # Save the dictionary as a pickle file
+        with open(os.path.join(config['save_dir'],'fold_indices.json'), 'w') as f:
+            json.dump({
+                'row_train':row_train,
+                'row_test':row_test,
+                'column_X':column_X,
+                'column_Y':column_Y
+            }, f)
+
+        spatial_X_train,temporal_X_train = self.X_train(config, train_keys,row_train, column_X)
+        spatial_Y_train = self.Y_train(config, train_keys, row_train, column_Y, temporal_X_train)
+        temporal_X_test = self.X_test(config, train_keys,row_test, column_X, spatial_X_train)
+        metric = self.Y_test(config, train_keys,row_test, column_Y, temporal_X_test, spatial_Y_train)
+
+        # Write metrics data into the JSON file
+        with open(os.path.join(config['save_dir'],'metrics.json'), 'w') as json_file:
+            json.dump({'log_likelihood':metric}, json_file)
 
