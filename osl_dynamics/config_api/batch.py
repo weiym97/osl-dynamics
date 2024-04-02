@@ -385,7 +385,7 @@ class BatchAnalysis:
 
     def __init__(self, config_path):
         self.config_path = config_path
-        with open(os.path.join(config_path, 'config_root.yaml'), 'r') as file:
+        with open(os.path.join(config_path, 'config_simulation.yaml'), 'r') as file:
             self.config_root = yaml.safe_load(file)
         self.indexparser = IndexParser(self.config_root)
         self.config_list = pd.read_csv(os.path.join(config_path, 'config_list.csv'), index_col=0)
