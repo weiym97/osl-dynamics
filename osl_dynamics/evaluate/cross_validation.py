@@ -13,8 +13,9 @@ from ..config_api.wrappers import load_data
 from ..inference.modes import argmax_time_courses
 from ..array_ops import npz2list
 
+
 class BICVkmeans():
-    def __init__(self,n_clusters,n_samples,n_channels,partition_rows=2,partition_columns=2):
+    def __init__(self, n_clusters, n_samples, n_channels, partition_rows=2, partition_columns=2):
         '''
         Initialisation of BICVkmeans
         Parameters
@@ -37,8 +38,7 @@ class BICVkmeans():
         self.partition_columns = partition_columns
         self.partition_indices()
 
-
-    def partition_indices(self,save_dir=None):
+    def partition_indices(self, save_dir=None):
         '''
         Generate partition indices, if save_dir is not None,
         save the indices.
@@ -63,10 +63,10 @@ class BICVkmeans():
         if save_dir is not None:
             if not os.path.exists(save_dir):
                 os.makedirs(save_dir)
-            np.savez(os.path.join(save_dir,'row_indices.npz'), *row_indices)
+            np.savez(os.path.join(save_dir, 'row_indices.npz'), *row_indices)
             np.savez(os.path.join(save_dir, 'row_indices.npz'), *column_indices)
 
-    def fold_indices(self,r,s):
+    def fold_indices(self, r, s):
         """
         Given the paritions, return the indices of fold (r,s).
         Fold (r,s) treats the rth row subset as "test", and the sth column
@@ -120,8 +120,8 @@ class BICVkmeans():
 
         return row_train, row_test, column_X, column_Y
 
-    def Y_train(self,data,row_train,column_Y):
-        data = data[row_train][:,column_Y]
+    def Y_train(self, data, row_train, column_Y):
+        data = data[row_train][:, column_Y]
 
         # Initialize the KMeans model with the number of clusters
         kmeans = KMeans(n_clusters=self.n_clusters)
@@ -137,16 +137,16 @@ class BICVkmeans():
 
         return spatial_Y_train, temporal_Y_train
 
-    def X_train(self,data,row_train,column_X,temporal_Y_train):
-        data = data[row_train][:,column_X]
+    def X_train(self, data, row_train, column_X, temporal_Y_train):
+        data = data[row_train][:, column_X]
 
         spatial_X_train = np.array([np.mean(data[temporal_Y_train == cluster_label], axis=0)
-                              for cluster_label in range(self.n_clusters)])
+                                    for cluster_label in range(self.n_clusters)])
 
         return spatial_X_train
 
-    def X_test(self,data,row_test,column_X,spatial_X_train):
-        data = data[row_test][:,column_X]
+    def X_test(self, data, row_test, column_X, spatial_X_train):
+        data = data[row_test][:, column_X]
         # Compute distances between data points and centroids
         distances = cdist(data, spatial_X_train, metric='euclidean')
 
@@ -155,17 +155,17 @@ class BICVkmeans():
 
         return temporal_X_test
 
-    def Y_test(self,data,row_test,column_Y,temporal_X_test,spatial_Y_train):
-        data = data[row_test][:,column_Y]
+    def Y_test(self, data, row_test, column_Y, temporal_X_test, spatial_Y_train):
+        data = data[row_test][:, column_Y]
 
         centroids = spatial_Y_train[temporal_X_test]
 
         # Compute squared differences between data and centroids
-        mean_squared_diff = np.mean(np.sum((data - centroids) ** 2,axis=-1),axis=0)
+        mean_squared_diff = np.mean(np.sum((data - centroids) ** 2, axis=-1), axis=0)
 
         return mean_squared_diff
 
-    def validate(self,data,save_dir=None):
+    def validate(self, data, save_dir=None):
         metrics = []
         for i in range(self.partition_rows):
             for j in range(self.partition_columns):
@@ -174,7 +174,7 @@ class BICVkmeans():
                 spatial_X_train = self.X_train(data, row_train, column_X, temporal_Y_train)
                 temporal_X_test = self.X_test(data, row_test, column_X, spatial_X_train)
                 if save_dir is not None:
-                    np.save(os.path.join(save_dir,f'fold_{i+1}_{j+1}_spatial_Y_train.npy'),spatial_Y_train)
+                    np.save(os.path.join(save_dir, f'fold_{i + 1}_{j + 1}_spatial_Y_train.npy'), spatial_Y_train)
                     np.save(os.path.join(save_dir, f'fold_{i + 1}_{j + 1}_temporal_Y_train.npy'), temporal_Y_train)
                     np.save(os.path.join(save_dir, f'fold_{i + 1}_{j + 1}_spatial_X_train.npy'), spatial_X_train)
                     np.save(os.path.join(save_dir, f'fold_{i + 1}_{j + 1}_temporal_X_test.npy'), temporal_X_test)
@@ -183,8 +183,10 @@ class BICVkmeans():
 
         return metrics
 
+
 class BICVHMM():
-    def __init__(self,n_samples=None,n_channels=None,row_indices=None,column_indices=None,save_dir=None,partition_rows=2,partition_columns=2,):
+    def __init__(self, n_samples=None, n_channels=None, row_indices=None, column_indices=None, save_dir=None,
+                 partition_rows=2, partition_columns=2, ):
         '''
         Initialisation of BICVHMM.
         If both row_indices and column indices are not None, use them to initialise BICVHMM.
@@ -211,9 +213,9 @@ class BICVHMM():
 
         # Initialise the class using row_indices/column_indices
         if (row_indices is not None) and (column_indices is not None):
-            if isinstance(row_indices,str):
+            if isinstance(row_indices, str):
                 self.row_indices = npz2list(np.load(row_indices))
-            if isinstance(column_indices,str):
+            if isinstance(column_indices, str):
                 self.column_indices = npz2list(np.load(column_indices))
             self.partition_rows = len(self.row_indices)
             self.partition_columns = len(self.column_indices)
@@ -224,7 +226,6 @@ class BICVHMM():
             self.partition_rows = partition_rows
             self.partition_columns = partition_columns
             self.partition_indices()
-
 
     def partition_indices(self):
         '''
@@ -248,14 +249,13 @@ class BICVHMM():
         # Divide columns into partitions
         self.column_indices = np.array_split(column_indices, self.partition_columns)
 
-
         if self.save_dir is not None:
             if not os.path.exists(self.save_dir):
                 os.makedirs(self.save_dir)
-            np.savez(os.path.join(self.save_dir,'row_indices.npz'), *self.row_indices)
+            np.savez(os.path.join(self.save_dir, 'row_indices.npz'), *self.row_indices)
             np.savez(os.path.join(self.save_dir, 'column_indices.npz'), *self.column_indices)
 
-    def fold_indices(self,r,s):
+    def fold_indices(self, r, s):
         """
         Given the partitions, return the indices of fold (r,s).
         Fold (r,s) treats the rth row subset as "test", and the sth column
@@ -309,9 +309,9 @@ class BICVHMM():
 
         return row_train, row_test, column_X, column_Y
 
-    def Y_train(self,config,train_keys,row_train,column_Y,):
+    def Y_train(self, config, train_keys, row_train, column_Y, ):
         # Specify the save directory
-        save_dir = os.path.join(config['save_dir'],'Y_train/')
+        save_dir = os.path.join(config['save_dir'], 'Y_train/')
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
 
@@ -336,7 +336,7 @@ class BICVHMM():
         params_dir = f'{save_dir}/inf_params/'
         return f'{save_dir}/model/', f'{params_dir}alp.pkl'
 
-    def X_train(self,config,train_keys,row_train,column_X,temporal_Y_train):
+    def X_train(self, config, train_keys, row_train, column_X, temporal_Y_train):
         # Update 23rd March 2024
         # A completely new implementation of X_train
 
@@ -360,13 +360,13 @@ class BICVHMM():
                 {key: config[key] for key in train_keys if key in config},
         }
         prepare_config[f'build_{config["model"]}']['config_kwargs']['n_channels'] = len(column_X)
-        prepare_config['dual_estimation'] = {'concatenate':True}
+        prepare_config['dual_estimation'] = {'concatenate': True}
 
         # Note the 'keep_list' value is in order (from small to large number)
         prepare_config['keep_list'] = row_train
 
         with open(f'{save_dir}/prepared_config.yaml', 'w') as file:
-            yaml.safe_dump(prepare_config, file, default_flow_style=False,sort_keys=False)
+            yaml.safe_dump(prepare_config, file, default_flow_style=False, sort_keys=False)
         run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
                                save_dir)
 
@@ -415,9 +415,9 @@ class BICVHMM():
         """
 
         # Mean and covariance for each state
-        if isinstance(ts,np.ndarray):
+        if isinstance(ts, np.ndarray):
             n_channels = ts.shape[-1]
-        elif isinstance(ts,list):
+        elif isinstance(ts, list):
             n_channels = ts[0].shape[-1]
         else:
             raise TypeError('The variable ts type is incorrect!')
@@ -431,22 +431,22 @@ class BICVHMM():
         )
 
         # If ts is a list, turn into numpy.ndarray first
-        if isinstance(ts,list):
-            ts = np.stack(ts,axis=0)
+        if isinstance(ts, list):
+            ts = np.stack(ts, axis=0)
         ts = ts[row_train]
-        ts_1,ts_2,ts_3 = ts.shape
-        data_concat = np.reshape(ts,(ts_1*ts_2,ts_3))
+        ts_1, ts_2, ts_3 = ts.shape
+        data_concat = np.reshape(ts, (ts_1 * ts_2, ts_3))
         # You need hard parcellation first!
         alpha = argmax_time_courses(alpha)
-        alpha = np.concatenate(alpha,axis=0)
+        alpha = np.concatenate(alpha, axis=0)
         for j in range(n_states):
-            x = data_concat[alpha[:,j] == 1]
-            means[j,:] = np.mean(x, axis=0)
-            covariances[j,:,:] = np.cov(x, rowvar=False)
+            x = data_concat[alpha[:, j] == 1]
+            means[j, :] = np.mean(x, axis=0)
+            covariances[j, :, :] = np.cov(x, rowvar=False)
 
         return means, covariances
 
-    def X_test(self,config,train_keys,row_test,column_X,spatial_X_train):
+    def X_test(self, config, train_keys, row_test, column_X, spatial_X_train):
         # Specify the save directory
         save_dir = os.path.join(config['save_dir'], 'X_test/')
         if not os.path.exists(save_dir):
@@ -479,18 +479,17 @@ class BICVHMM():
         params_dir = f'{save_dir}/inf_params/'
         return f'{params_dir}/alp.pkl'
 
-    def Y_test(self,config,row_test,column_Y,temporal_X_test,spatial_Y_train):
+    def Y_test(self, config, row_test, column_Y, temporal_X_test, spatial_Y_train):
         # Specify the save directory
         save_dir = os.path.join(config['save_dir'], 'Y_test/')
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
 
-
         #################################################
         # Update 25th March 2024
         # This is a new implementation of the Y_test using
         # customised test function.
-        shutil.copytree(spatial_Y_train,f'{save_dir}/model/')
+        shutil.copytree(spatial_Y_train, f'{save_dir}/model/')
 
         # Create a new directory "config['save_dir']/X_train/inf_params
         # And copy the temporal info from X_test
@@ -509,13 +508,12 @@ class BICVHMM():
         with open(f'{save_dir}/prepared_config.yaml', 'w') as file:
             yaml.safe_dump(prepare_config, file, default_flow_style=False, sort_keys=False)
         run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
-                                save_dir)
+                               save_dir)
 
         with open(f'{save_dir}/metrics.json', 'r') as file:
             # Load the JSON data
             metrics = json.load(file)
         return metrics['log_likelihood']
-
 
         ################################################
         '''
@@ -546,37 +544,34 @@ class BICVHMM():
         return metrics
         '''
 
-
-
-
-    def validate(self,config,train_keys,i,j):
-        row_train, row_test, column_X, column_Y = self.fold_indices(i-1, j-1)
+    def validate(self, config, train_keys, i, j):
+        row_train, row_test, column_X, column_Y = self.fold_indices(i - 1, j - 1)
 
         if not os.path.exists(config['save_dir']):
             os.makedirs(config['save_dir'])
 
-
         # Save the dictionary as a pickle file
-        with open(os.path.join(config['save_dir'],'fold_indices.json'), 'w') as f:
+        with open(os.path.join(config['save_dir'], 'fold_indices.json'), 'w') as f:
             json.dump({
-                'row_train':row_train,
-                'row_test':row_test,
-                'column_X':column_X,
-                'column_Y':column_Y
+                'row_train': row_train,
+                'row_test': row_test,
+                'column_X': column_X,
+                'column_Y': column_Y
             }, f)
 
-        spatial_Y_train,temporal_Y_train = self.Y_train(config, train_keys,row_train, column_Y)
+        spatial_Y_train, temporal_Y_train = self.Y_train(config, train_keys, row_train, column_Y)
         spatial_X_train = self.X_train(config, train_keys, row_train, column_X, temporal_Y_train)
-        temporal_X_test = self.X_test(config, train_keys,row_test, column_X, spatial_X_train)
+        temporal_X_test = self.X_test(config, train_keys, row_test, column_X, spatial_X_train)
         metric = self.Y_test(config, row_test, column_Y, temporal_X_test, spatial_Y_train)
 
         # Write metrics data into the JSON file
-        with open(os.path.join(config['save_dir'],'metrics.json'), 'w') as json_file:
-            json.dump({'log_likelihood':metric}, json_file)
+        with open(os.path.join(config['save_dir'], 'metrics.json'), 'w') as json_file:
+            json.dump({'log_likelihood': metric}, json_file)
 
 
 class BICVHMM_2():
-    def __init__(self,n_samples=None,n_channels=None,row_indices=None,column_indices=None,save_dir=None,partition_rows=2,partition_columns=2,):
+    def __init__(self, n_samples=None, n_channels=None, row_indices=None, column_indices=None, save_dir=None,
+                 partition_rows=2, partition_columns=2, ):
         '''
         Initialisation of BICVHMM_2. This is a slightly different implementation of
         cross validation comapred to BICVHMM
@@ -604,9 +599,9 @@ class BICVHMM_2():
 
         # Initialise the class using row_indices/column_indices
         if (row_indices is not None) and (column_indices is not None):
-            if isinstance(row_indices,str):
+            if isinstance(row_indices, str):
                 self.row_indices = npz2list(np.load(row_indices))
-            if isinstance(column_indices,str):
+            if isinstance(column_indices, str):
                 self.column_indices = npz2list(np.load(column_indices))
             self.partition_rows = len(self.row_indices)
             self.partition_columns = len(self.column_indices)
@@ -617,7 +612,6 @@ class BICVHMM_2():
             self.partition_rows = partition_rows
             self.partition_columns = partition_columns
             self.partition_indices()
-
 
     def partition_indices(self):
         '''
@@ -641,14 +635,13 @@ class BICVHMM_2():
         # Divide columns into partitions
         self.column_indices = np.array_split(column_indices, self.partition_columns)
 
-
         if self.save_dir is not None:
             if not os.path.exists(self.save_dir):
                 os.makedirs(self.save_dir)
-            np.savez(os.path.join(self.save_dir,'row_indices.npz'), *self.row_indices)
+            np.savez(os.path.join(self.save_dir, 'row_indices.npz'), *self.row_indices)
             np.savez(os.path.join(self.save_dir, 'column_indices.npz'), *self.column_indices)
 
-    def fold_indices(self,r,s):
+    def fold_indices(self, r, s):
         """
         Given the partitions, return the indices of fold (r,s).
         Fold (r,s) treats the rth row subset as "test", and the sth column
@@ -702,9 +695,9 @@ class BICVHMM_2():
 
         return row_train, row_test, column_X, column_Y
 
-    def X_train(self,config,train_keys,row_train,column_X,):
+    def X_train(self, config, train_keys, row_train, column_X, ):
         # Specify the save directory
-        save_dir = os.path.join(config['save_dir'],'X_train/')
+        save_dir = os.path.join(config['save_dir'], 'X_train/')
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
 
@@ -730,7 +723,7 @@ class BICVHMM_2():
         return {'means': f'{params_dir}means.npy',
                 'covs': f'{params_dir}covs.npy'}, f'{params_dir}alp.pkl'
 
-    def Y_train(self,config,train_keys,row_train,column_Y,temporal_X_train):
+    def Y_train(self, config, train_keys, row_train, column_Y, temporal_X_train):
         # Update 23rd March 2024
         # A completely new implementation of X_train
 
@@ -754,21 +747,20 @@ class BICVHMM_2():
                 {key: config[key] for key in train_keys if key in config},
         }
         prepare_config[f'build_{config["model"]}']['config_kwargs']['n_channels'] = len(column_Y)
-        prepare_config['dual_estimation'] = {'concatenate':True}
+        prepare_config['dual_estimation'] = {'concatenate': True}
 
         # Note the 'keep_list' value is in order (from small to large number)
         prepare_config['keep_list'] = row_train
 
         with open(f'{save_dir}/prepared_config.yaml', 'w') as file:
-            yaml.safe_dump(prepare_config, file, default_flow_style=False,sort_keys=False)
+            yaml.safe_dump(prepare_config, file, default_flow_style=False, sort_keys=False)
         run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
                                save_dir)
 
         return {'means': f'{save_dir}/dual_estimates/means.npy',
                 'covs': f'{save_dir}/dual_estimates/covs.npy'}
 
-
-    def X_test(self,config,train_keys,row_test,column_X,spatial_X_train):
+    def X_test(self, config, train_keys, row_test, column_X, spatial_X_train):
         # Specify the save directory
         save_dir = os.path.join(config['save_dir'], 'X_test/')
         if not os.path.exists(save_dir):
@@ -801,18 +793,17 @@ class BICVHMM_2():
         params_dir = f'{save_dir}/inf_params/'
         return f'{params_dir}/alp.pkl'
 
-    def Y_test(self,config,train_keys,row_test,column_Y,temporal_X_test,spatial_Y_train):
+    def Y_test(self, config, train_keys, row_test, column_Y, temporal_X_test, spatial_Y_train):
         # Specify the save directory
         save_dir = os.path.join(config['save_dir'], 'Y_test/')
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
 
-
         #################################################
         # Update 25th March 2024
         # This is a new implementation of the Y_test using
         # customised test function.
-        #shutil.copytree(spatial_Y_train,f'{save_dir}/model/')
+        # shutil.copytree(spatial_Y_train,f'{save_dir}/model/')
 
         # Create a new directory "config['save_dir']/X_train/inf_params
         # And copy the temporal info from X_test
@@ -833,7 +824,6 @@ class BICVHMM_2():
         prepare_config[f'build_{config["model"]}']['config_kwargs']['initial_means'] = spatial_Y_train['means']
         prepare_config[f'build_{config["model"]}']['config_kwargs']['initial_covariances'] = spatial_Y_train['covs']
 
-
         prepare_config['log_likelihood'] = {}
         # Note the 'keep_list' value is in order (from small to large number)
         prepare_config['keep_list'] = row_test
@@ -841,46 +831,46 @@ class BICVHMM_2():
         with open(f'{save_dir}/prepared_config.yaml', 'w') as file:
             yaml.safe_dump(prepare_config, file, default_flow_style=False, sort_keys=False)
         run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
-                                save_dir)
+                               save_dir)
 
         with open(f'{save_dir}/metrics.json', 'r') as file:
             # Load the JSON data
             metrics = json.load(file)
         return metrics['log_likelihood']
 
-
-    def validate(self,config,train_keys,i,j):
-        row_train, row_test, column_X, column_Y = self.fold_indices(i-1, j-1)
+    def validate(self, config, train_keys, i, j):
+        row_train, row_test, column_X, column_Y = self.fold_indices(i - 1, j - 1)
 
         if not os.path.exists(config['save_dir']):
             os.makedirs(config['save_dir'])
 
-
         # Save the dictionary as a pickle file
-        with open(os.path.join(config['save_dir'],'fold_indices.json'), 'w') as f:
+        with open(os.path.join(config['save_dir'], 'fold_indices.json'), 'w') as f:
             json.dump({
-                'row_train':row_train,
-                'row_test':row_test,
-                'column_X':column_X,
-                'column_Y':column_Y
+                'row_train': row_train,
+                'row_test': row_test,
+                'column_X': column_X,
+                'column_Y': column_Y
             }, f)
 
-        spatial_X_train,temporal_X_train = self.X_train(config, train_keys,row_train, column_X)
+        spatial_X_train, temporal_X_train = self.X_train(config, train_keys, row_train, column_X)
         spatial_Y_train = self.Y_train(config, train_keys, row_train, column_Y, temporal_X_train)
-        temporal_X_test = self.X_test(config, train_keys,row_test, column_X, spatial_X_train)
-        metric = self.Y_test(config, train_keys,row_test, column_Y, temporal_X_test, spatial_Y_train)
+        temporal_X_test = self.X_test(config, train_keys, row_test, column_X, spatial_X_train)
+        metric = self.Y_test(config, train_keys, row_test, column_Y, temporal_X_test, spatial_Y_train)
 
         # Write metrics data into the JSON file
-        with open(os.path.join(config['save_dir'],'metrics.json'), 'w') as json_file:
-            json.dump({'log_likelihood':metric}, json_file)
+        with open(os.path.join(config['save_dir'], 'metrics.json'), 'w') as json_file:
+            json.dump({'log_likelihood': metric}, json_file)
+
 
 class CVBase():
     """
     Base class for bi-cross validation in dFC models.
     The idea comes from [k-means bi cross validation](https://www.tandfonline.com/doi/full/10.1080/10618600.2019.1647846)
     """
-    def __init__(self,n_samples=None,n_channels=None,row_indices=None,column_indices=None,
-                 save_dir=None,partition_rows=2,partition_columns=2):
+
+    def __init__(self, n_samples=None, n_channels=None, row_indices=None, column_indices=None,
+                 save_dir=None, partition_rows=2, partition_columns=2):
         '''
         Initialisation of CVBase.
         If both row_indices and column indices are not None, use them to initialise CVBase.
@@ -907,9 +897,9 @@ class CVBase():
 
         # Initialise the class using row_indices/column_indices
         if (row_indices is not None) and (column_indices is not None):
-            if isinstance(row_indices,str):
+            if isinstance(row_indices, str):
                 self.row_indices = npz2list(np.load(row_indices))
-            if isinstance(column_indices,str):
+            if isinstance(column_indices, str):
                 self.column_indices = npz2list(np.load(column_indices))
             self.partition_rows = len(self.row_indices)
             self.partition_columns = len(self.column_indices)
@@ -920,7 +910,6 @@ class CVBase():
             self.partition_rows = partition_rows
             self.partition_columns = partition_columns
             self.partition_indices()
-
 
     def partition_indices(self):
         '''
@@ -944,14 +933,13 @@ class CVBase():
         # Divide columns into partitions
         self.column_indices = np.array_split(column_indices, self.partition_columns)
 
-
         if self.save_dir is not None:
             if not os.path.exists(self.save_dir):
                 os.makedirs(self.save_dir)
-            np.savez(os.path.join(self.save_dir,'row_indices.npz'), *self.row_indices)
+            np.savez(os.path.join(self.save_dir, 'row_indices.npz'), *self.row_indices)
             np.savez(os.path.join(self.save_dir, 'column_indices.npz'), *self.column_indices)
 
-    def fold_indices(self,r,s):
+    def fold_indices(self, r, s):
         """
         Given the partitions, return the indices of fold (r,s).
         Fold (r,s) treats the rth row subset as "test", and the sth column
@@ -1005,19 +993,37 @@ class CVBase():
 
         return row_train, row_test, column_X, column_Y
 
+
 class CVHMM(CVBase):
     '''
     Bi-cross validation for HMM model (inherited from CVBase
     '''
-    def __init__(self,n_samples=None,n_channels=None,row_indices=None,column_indices=None,
-                 save_dir=None,partition_rows=2,partition_columns=2):
-        super().__init__(n_samples,n_channels,row_indices,column_indices,
-                 save_dir,partition_rows,partition_columns)
 
-    def full_train(self,config,train_keys,row,column,save_dir=None):
+    def __init__(self, n_samples=None, n_channels=None, row_indices=None, column_indices=None,
+                 save_dir=None, partition_rows=2, partition_columns=2, train_keys=None):
+        super().__init__(n_samples, n_channels, row_indices, column_indices,
+                         save_dir, partition_rows, partition_columns)
+        if train_keys is None:
+            self.train_keys = ['n_channels',
+                               'n_states',
+                               'learn_means',
+                               'learn_covariances',
+                               'learn_trans_prob',
+                               'initial_means',
+                               'initial_covariances',
+                               'initial_trans_prob',
+                               'sequence_length',
+                               'batch_size',
+                               'learning_rate',
+                               'n_epochs',
+                               ]
+        else:
+            self.train_keys = train_keys
+
+    def full_train(self, config, row, column, save_dir=None):
         # Specify the save directory
         if save_dir is None:
-            save_dir = os.path.join(config['save_dir'],'full_train/')
+            save_dir = os.path.join(config['save_dir'], 'full_train/')
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
 
@@ -1028,7 +1034,7 @@ class CVHMM(CVBase):
 
         prepare_config[f'train_{config["model"]}'] = {
             'config_kwargs':
-                {key: config[key] for key in train_keys if key in config},
+                {key: config[key] for key in self.train_keys if key in config},
             'init_kwargs':
                 config['init_kwargs']
         }
@@ -1043,7 +1049,7 @@ class CVHMM(CVBase):
         return {'means': f'{params_dir}means.npy',
                 'covs': f'{params_dir}covs.npy'}, f'{params_dir}alp.pkl'
 
-    def infer_spatial(self,config,train_keys,row,column,temporal,save_dir=None):
+    def infer_spatial(self, config, row, column, temporal, save_dir=None):
         # Specify the save directory
         if save_dir is None:
             save_dir = os.path.join(config['save_dir'], 'infer_spatial/')
@@ -1063,24 +1069,55 @@ class CVHMM(CVBase):
 
         prepare_config[f'build_{config["model"]}'] = {
             'config_kwargs':
-                {key: config[key] for key in train_keys if key in config},
+                {key: config[key] for key in self.train_keys if key in config},
         }
         prepare_config[f'build_{config["model"]}']['config_kwargs']['n_channels'] = len(column)
-        prepare_config['dual_estimation'] = {'concatenate':True}
+        prepare_config['dual_estimation'] = {'concatenate': True}
 
         # Note the 'keep_list' value is in order (from small to large number)
         prepare_config['keep_list'] = row
 
         with open(f'{save_dir}/prepared_config.yaml', 'w') as file:
-            yaml.safe_dump(prepare_config, file, default_flow_style=False,sort_keys=False)
+            yaml.safe_dump(prepare_config, file, default_flow_style=False, sort_keys=False)
         run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
                                save_dir)
 
         return {'means': f'{save_dir}/dual_estimates/means.npy',
                 'covs': f'{save_dir}/dual_estimates/covs.npy'}
-    def infer_temporal(self):
-        pass
 
+    def infer_temporal(self, config, row, column, spatial, save_dir=None):
+        # Specify the save directory
+        if save_dir is None:
+            save_dir = os.path.join(config['save_dir'], 'infer_temporal/')
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
+        prepare_config = {}
+        prepare_config['load_data'] = config['load_data']
+
+        prepare_config['load_data']['prepare']['select']['channels'] = column
+
+        prepare_config[f'train_{config["model"]}'] = {
+            'config_kwargs':
+                {key: config[key] for key in self.train_keys if key in config},
+            'init_kwargs':
+                config['init_kwargs']
+        }
+        # Fix the means and covariances
+        prepare_config[f'train_{config["model"]}']['config_kwargs']['learn_means'] = False
+        prepare_config[f'train_{config["model"]}']['config_kwargs']['learn_covariances'] = False
+        prepare_config[f'train_{config["model"]}']['config_kwargs']['initial_means'] = spatial['means']
+        prepare_config[f'train_{config["model"]}']['config_kwargs']['initial_covariances'] = spatial['covs']
+
+        prepare_config[f'train_{config["model"]}']['config_kwargs']['n_channels'] = len(column)
+        prepare_config['keep_list'] = row
+
+        with open(f'{save_dir}/prepared_config.yaml', 'w') as file:
+            yaml.safe_dump(prepare_config, file, default_flow_style=False)
+        run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
+                               save_dir)
+        params_dir = f'{save_dir}/inf_params/'
+        return f'{params_dir}/alp.pkl'
 
     def calculate_error(self):
         pass

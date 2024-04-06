@@ -96,7 +96,7 @@ def test_partition_indices():
 
     # Case 2: Multi-folds
     cv_2 = CVBase(n_samples=n_samples, n_channels=n_channels, save_dir=f'{save_dir}case_2/',
-                   partition_rows=7, partition_columns=9)
+                  partition_rows=7, partition_columns=9)
     row_indices = np.load(os.path.join(f'{save_dir}case_2/', 'row_indices.npz'))
     column_indices = np.load(os.path.join(f'{save_dir}case_2/', 'column_indices.npz'))
     row_indices = np.sort(np.concatenate([row_indices[key] for key in row_indices.keys()]))
@@ -107,14 +107,13 @@ def test_partition_indices():
     # Case 3: Use the results from case 1:
     cv_3 = CVBase(n_samples=n_samples,
                   n_channels=n_channels,
-                  row_indices = f'{save_dir}case_1/row_indices.npz',
-                  column_indices = f'{save_dir}case_1/column_indices.npz')
+                  row_indices=f'{save_dir}case_1/row_indices.npz',
+                  column_indices=f'{save_dir}case_1/column_indices.npz')
 
-    npt.assert_array_equal(cv_1.row_indices[0],cv_3.row_indices[0])
+    npt.assert_array_equal(cv_1.row_indices[0], cv_3.row_indices[0])
     npt.assert_array_equal(cv_1.row_indices[1], cv_3.row_indices[1])
     npt.assert_array_equal(cv_1.column_indices[0], cv_3.column_indices[0])
     npt.assert_array_equal(cv_1.column_indices[1], cv_3.column_indices[1])
-
 
     # Delete the directory afterwards
     shutil.rmtree(save_dir)
@@ -225,7 +224,6 @@ def test_full_train():
     # Genetate irrelevant dataset
     np.save(f"{data_dir}10001.npy", generate_obs(np.eye(3) * 100, n_timepoints=300000))
 
-
     config = f"""
             load_data:
                 inputs: {data_dir}
@@ -262,19 +260,20 @@ def test_full_train():
                   'learning_rate',
                   'n_epochs',
                   ]
-    cv = CVHMM(n_samples, n_channels)
-    result,_ = cv.full_train(config, train_keys, row_train, column_Y)
+    cv = CVHMM(n_samples, n_channels, train_keys=train_keys)
+    result, _ = cv.full_train(config, row_train, column_Y)
 
     result_means = np.load(result['means'])
     result_covs = np.load(result['covs'])
-    npt.assert_array_equal(result_means,np.zeros((n_states,len(column_Y))))
+    npt.assert_array_equal(result_means, np.zeros((n_states, len(column_Y))))
 
     # Assert diagonal elements are all one
-    npt.assert_allclose(np.diagonal(result_covs, axis1=-2, axis2=-1), 1.0,rtol=0.05,atol=0.05)
+    npt.assert_allclose(np.diagonal(result_covs, axis1=-2, axis2=-1), 1.0, rtol=0.05, atol=0.05)
 
     # Assert off-diagonal elements are equal to cors
-    off_diagonal = np.array([float(result_covs[i,0,1]) for i in range(n_states)])
-    npt.assert_allclose(np.sort(off_diagonal), cors_Y, atol=0.05,rtol=0.05)
+    off_diagonal = np.array([float(result_covs[i, 0, 1]) for i in range(n_states)])
+    npt.assert_allclose(np.sort(off_diagonal), cors_Y, atol=0.05, rtol=0.05)
+
 
 def test_infer_spatial():
     import os
@@ -320,17 +319,17 @@ def test_infer_spatial():
 
     for i in range(0, 2):
         # Build up the hidden variable
-        hv_temp = np.zeros((n_timepoints*2,n_states))
-        hv_temp[:,i] = np.array([0.6] * n_timepoints + [0.4] * n_timepoints)
-        hv_temp[:, i+1] = np.array([0.4] * n_timepoints + [0.6] * n_timepoints)
-        hidden_states.append(np.tile(hv_temp,(1500,1)))
+        hv_temp = np.zeros((n_timepoints * 2, n_states))
+        hv_temp[:, i] = np.array([0.6] * n_timepoints + [0.4] * n_timepoints)
+        hv_temp[:, i + 1] = np.array([0.4] * n_timepoints + [0.6] * n_timepoints)
+        hidden_states.append(np.tile(hv_temp, (1500, 1)))
 
         obs = []
         for j in range(1500):
-            observations_Y = [generate_obs(covs_Y[i],n_timepoints=n_timepoints),
-                              generate_obs(covs_Y[i + 1],n_timepoints=n_timepoints)]
-            observations_X = [generate_obs([[vars_X[i]]], [means_X[i]],n_timepoints=n_timepoints),
-                              generate_obs([[vars_X[i + 1]]], [means_X[i + 1]],n_timepoints=n_timepoints)]
+            observations_Y = [generate_obs(covs_Y[i], n_timepoints=n_timepoints),
+                              generate_obs(covs_Y[i + 1], n_timepoints=n_timepoints)]
+            observations_X = [generate_obs([[vars_X[i]]], [means_X[i]], n_timepoints=n_timepoints),
+                              generate_obs([[vars_X[i + 1]]], [means_X[i + 1]], n_timepoints=n_timepoints)]
             observations = np.concatenate(
                 [np.hstack((Y[:, :1], X, Y[:, 1:])) for X, Y in zip(observations_X, observations_Y)], axis=0)
             obs.append(observations)
@@ -376,29 +375,23 @@ def test_infer_spatial():
                   ]
 
     config = yaml.safe_load(config)
-    cv = CVHMM(n_samples, n_channels)
-    result = cv.infer_spatial(config, train_keys, row_train, column_X,f'{data_dir}alp.pkl')
+    cv = CVHMM(n_samples, n_channels, train_keys=train_keys)
+    result = cv.infer_spatial(config, row_train, column_X, f'{data_dir}alp.pkl')
 
     result_means = np.load(result['means'])
     result_covs = np.load(result['covs'])
-    npt.assert_allclose(means_X,result_means,rtol=1e-2,atol=1e-2)
+    npt.assert_allclose(means_X, result_means, rtol=1e-2, atol=1e-2)
     npt.assert_allclose(vars_X, result_covs, rtol=1e-2, atol=1e-2)
-    '''
-    result_X_train = cv.X_train(config, row_train, column_X, f'{save_dir}/Y_train/inf_params/alp.pkl')
-    means = np.load(result_X_train['means'])
-    covs = np.load(result_X_train['covs'])
-    npt.assert_almost_equal(np.squeeze(means), np.array(means_X), decimal=2)
-    npt.assert_almost_equal(np.squeeze(covs), np.array(vars_X), decimal=3)
-    '''
 
-def test_X_test():
+
+def test_infer_temporal():
     import os
     import shutil
     import yaml
     import pickle
-    from osl_dynamics.evaluate.cross_validation import BICVHMM
+    from osl_dynamics.evaluate.cross_validation import CVHMM
 
-    save_dir = './test_X_test/'
+    save_dir = './test_infer_temporal/'
     if os.path.exists(save_dir):
         shutil.rmtree(save_dir)
     os.makedirs(save_dir)
@@ -408,7 +401,7 @@ def test_X_test():
     n_channels = 3
     n_states = 3
     row_test = [1, 2]
-    column_X = [0,2]
+    column_X = [0, 2]
     column_Y = [1]
 
     # Construct the data
@@ -418,17 +411,16 @@ def test_X_test():
         return np.random.multivariate_normal(mean, cov, n_timepoints)
 
     # Define the covariance matrices of state 1,2 in both splits
-    means_X = [np.array([-10.0,-10.0]),np.array([0.0,0.0]),np.array([10.0,10.0])]
+    means_X = [np.array([-10.0, -10.0]), np.array([0.0, 0.0]), np.array([10.0, 10.0])]
     cors_X = [-0.5, 0.0, 0.5]
     covs_X = [np.array([[1.0, cor], [cor, 1.0]]) for cor in cors_X]
 
     means_Y = [1.0, 2.0, 3.0]
     vars_Y = [0.5, 1.0, 2.0]
 
-    np.save(f'{save_dir}/fixed_means.npy',np.array(means_X))
-    np.save(f'{save_dir}/fixed_covs.npy',np.stack(covs_X))
-    spatial_X_train = {'means':f'{save_dir}/fixed_means.npy','covs':f'{save_dir}/fixed_covs.npy'}
-
+    np.save(f'{save_dir}/fixed_means.npy', np.array(means_X))
+    np.save(f'{save_dir}/fixed_covs.npy', np.stack(covs_X))
+    spatial_X_train = {'means': f'{save_dir}/fixed_means.npy', 'covs': f'{save_dir}/fixed_covs.npy'}
 
     # save these files
     data_dir = f'{save_dir}data/'
@@ -448,10 +440,10 @@ def test_X_test():
 
         obs = []
         for j in range(1500):
-            observations_X = [generate_obs(covs_X[i],means_X[i],n_timepoints),
-                              generate_obs(covs_X[i + 1],means_X[i+1],n_timepoints)]
-            observations_Y = [generate_obs([[vars_Y[i]]], [means_Y[i]],n_timepoints),
-                              generate_obs([[vars_Y[i + 1]]], [means_Y[i + 1]]),n_timepoints]
+            observations_X = [generate_obs(covs_X[i], means_X[i], n_timepoints),
+                              generate_obs(covs_X[i + 1], means_X[i + 1], n_timepoints)]
+            observations_Y = [generate_obs([[vars_Y[i]]], [means_Y[i]], n_timepoints),
+                              generate_obs([[vars_Y[i + 1]]], [means_Y[i + 1]]), n_timepoints]
             observations = np.concatenate(
                 [np.hstack((X[:, :1], Y, X[:, 1:])) for X, Y in zip(observations_X, observations_Y)], axis=0)
             obs.append(observations)
@@ -497,15 +489,15 @@ def test_X_test():
                   'learning_rate',
                   'n_epochs',
                   ]
-    cv = BICVHMM(n_samples, n_channels)
-    cv.X_test(config, train_keys, row_test, column_X, spatial_X_train)
+    cv = CVHMM(n_samples, n_channels, train_keys=train_keys)
+    result = cv.infer_temporal(config, row_test, column_X, spatial_X_train)
 
     # Read the alpha
-    with open(f'{save_dir}/X_test/inf_params/alp.pkl','rb') as file:
+    with open(result, 'rb') as file:
         alpha = pickle.load(file)
 
     for i in range(2):
-        npt.assert_allclose(alpha[0],hidden_states[0],atol=1e-6)
+        npt.assert_allclose(alpha[0], hidden_states[0], atol=1e-6)
 
 
 def test_Y_test():
@@ -536,12 +528,12 @@ def test_Y_test():
         os.makedirs(data_dir)
 
     # Build up subject data
-    data_1 = np.zeros((2,3))
-    np.save(f'{data_dir}10001.npy',data_1)
-    data_2 = np.array([[1.,0.,1.,],[-1.,0.,0.]])
-    np.save(f'{data_dir}10002.npy',data_2)
-    data_3 = np.array([[-1.,0.,-1.],[1.,0.,0.]])
-    np.save(f'{data_dir}10003.npy',data_3)
+    data_1 = np.zeros((2, 3))
+    np.save(f'{data_dir}10001.npy', data_1)
+    data_2 = np.array([[1., 0., 1., ], [-1., 0., 0.]])
+    np.save(f'{data_dir}10002.npy', data_2)
+    data_3 = np.array([[-1., 0., -1.], [1., 0., 0.]])
+    np.save(f'{data_dir}10003.npy', data_3)
 
     def multivariate_gaussian_log_likelihood(x, mu, cov):
         """
@@ -592,33 +584,33 @@ def test_Y_test():
     config = yaml.safe_load(config)
 
     model = Model(Config(n_states=3,
-                       n_channels=len(column_Y),
-                       learn_means=False,
-                       learn_covariances=True,
-                       sequence_length=2,
-                       batch_size=1,
-                       n_epochs=1,
-                       learning_rate=0.01
-                       )
-                )
+                         n_channels=len(column_Y),
+                         learn_means=False,
+                         learn_covariances=True,
+                         sequence_length=2,
+                         batch_size=1,
+                         n_epochs=1,
+                         learning_rate=0.01
+                         )
+                  )
 
-    covs = np.array([[[1.0,0.0],[0.0,1.0]],
-                     [[1.5,0.8],[0.8,1.5]],
-                     [[0.5,-0.25],[-0.25,0.5]]])
+    covs = np.array([[[1.0, 0.0], [0.0, 1.0]],
+                     [[1.5, 0.8], [0.8, 1.5]],
+                     [[0.5, -0.25], [-0.25, 0.5]]])
     model.set_covariances(covs)
     model.save(f'{save_dir}/model/')
 
     # Set up the alpha.pkl
-    alpha = [np.array([[1.,0.,0.],[0.0,0.5,0.5]]),
-             np.array([[0.5,0.5,0.0],[0.0,0.0,1.0]])]
+    alpha = [np.array([[1., 0., 0.], [0.0, 0.5, 0.5]]),
+             np.array([[0.5, 0.5, 0.0], [0.0, 0.0, 1.0]])]
     with open(f'{data_dir}alp.pkl', "wb") as file:
         pickle.dump(alpha, file)
     # Set up the cross validation
     cv = BICVHMM(n_samples, n_channels)
-    cv.Y_test(config, row_test, column_Y, f'{data_dir}alp.pkl',f'{save_dir}/model/')
+    cv.Y_test(config, row_test, column_Y, f'{data_dir}alp.pkl', f'{save_dir}/model/')
 
-    ll_1 = multivariate_gaussian_log_likelihood(data_2[:1,[0,2]],np.array([0,0]),covs[0])
-    ll_2 = 0.5 * multivariate_gaussian_log_likelihood(data_2[1:2, [0, 2]], np.array([0, 0]), covs[1])+\
+    ll_1 = multivariate_gaussian_log_likelihood(data_2[:1, [0, 2]], np.array([0, 0]), covs[0])
+    ll_2 = 0.5 * multivariate_gaussian_log_likelihood(data_2[1:2, [0, 2]], np.array([0, 0]), covs[1]) + \
            0.5 * multivariate_gaussian_log_likelihood(data_2[1:2, [0, 2]], np.array([0, 0]), covs[2])
     ll_3 = 0.5 * multivariate_gaussian_log_likelihood(data_3[:1, [0, 2]], np.array([0, 0]), covs[0]) + \
            0.5 * multivariate_gaussian_log_likelihood(data_3[:1, [0, 2]], np.array([0, 0]), covs[1])
@@ -629,6 +621,4 @@ def test_Y_test():
         # Load the JSON data
         metrics = json.load(file)
 
-    npt.assert_almost_equal(ll,metrics['log_likelihood'],decimal=3)
-
-
+    npt.assert_almost_equal(ll, metrics['log_likelihood'], decimal=3)
