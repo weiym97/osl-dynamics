@@ -1119,8 +1119,45 @@ class CVHMM(CVBase):
         params_dir = f'{save_dir}/inf_params/'
         return f'{params_dir}/alp.pkl'
 
-    def calculate_error(self):
-        pass
+    def calculate_error(self,config, row, column, temporal, spatial,save_dir=None):
+        # Specify the save directory
+        if save_dir is None:
+            save_dir = os.path.join(config['save_dir'], 'calculate_error/')
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
+        if not os.path.exists(f'{save_dir}inf_params/'):
+            os.makedirs(f'{save_dir}inf_params/')
+
+        shutil.copy(temporal, f'{save_dir}inf_params/')
+
+        prepare_config = {}
+        prepare_config['load_data'] = config['load_data']
+        prepare_config['load_data']['prepare']['select']['channels'] = column
+
+        prepare_config[f'build_{config["model"]}'] = {
+            'config_kwargs':
+                {key: config[key] for key in self.train_keys if key in config},
+        }
+        prepare_config[f'build_{config["model"]}']['config_kwargs']['n_channels'] = len(column)
+        prepare_config[f'build_{config["model"]}']['config_kwargs']['initial_means'] = spatial['means']
+        prepare_config[f'build_{config["model"]}']['config_kwargs']['initial_covariances'] = spatial['covs']
+
+        prepare_config['log_likelihood'] = {}
+        # Note the 'keep_list' value is in order (from small to large number)
+        prepare_config['keep_list'] = row
+
+        with open(f'{save_dir}/prepared_config.yaml', 'w') as file:
+            yaml.safe_dump(prepare_config, file, default_flow_style=False, sort_keys=False)
+        run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
+                               save_dir)
+
+        with open(f'{save_dir}/metrics.json', 'r') as file:
+            # Load the JSON data
+            metrics = json.load(file)
+        return f'{save_dir}/metrics.json'
+
+
 
     def validate(self):
         pass

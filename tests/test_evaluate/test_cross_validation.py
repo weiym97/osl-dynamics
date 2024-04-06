@@ -500,16 +500,15 @@ def test_infer_temporal():
         npt.assert_allclose(alpha[0], hidden_states[0], atol=1e-6)
 
 
-def test_Y_test():
+def test_calculate_error():
     import os
     import json
     import shutil
     import yaml
     import pickle
-    from osl_dynamics.evaluate.cross_validation import BICVHMM
-    from osl_dynamics.models.hmm import Config, Model
+    from osl_dynamics.evaluate.cross_validation import CVHMM
 
-    save_dir = './test_Y_test/'
+    save_dir = './test_calculate_error/'
     if os.path.exists(save_dir):
         shutil.rmtree(save_dir)
 
@@ -583,22 +582,16 @@ def test_Y_test():
                 """
     config = yaml.safe_load(config)
 
-    model = Model(Config(n_states=3,
-                         n_channels=len(column_Y),
-                         learn_means=False,
-                         learn_covariances=True,
-                         sequence_length=2,
-                         batch_size=1,
-                         n_epochs=1,
-                         learning_rate=0.01
-                         )
-                  )
-
+    means = np.zeros((3,2))
     covs = np.array([[[1.0, 0.0], [0.0, 1.0]],
                      [[1.5, 0.8], [0.8, 1.5]],
                      [[0.5, -0.25], [-0.25, 0.5]]])
-    model.set_covariances(covs)
-    model.save(f'{save_dir}/model/')
+    np.save(f'{save_dir}/means.npy',means)
+    np.save(f'{save_dir}/covs.npy',covs)
+    spatial = {
+        'means': f'{save_dir}/means.npy',
+        'covs': f'{save_dir}/covs.npy'
+    }
 
     # Set up the alpha.pkl
     alpha = [np.array([[1., 0., 0.], [0.0, 0.5, 0.5]]),
@@ -606,8 +599,21 @@ def test_Y_test():
     with open(f'{data_dir}alp.pkl', "wb") as file:
         pickle.dump(alpha, file)
     # Set up the cross validation
-    cv = BICVHMM(n_samples, n_channels)
-    cv.Y_test(config, row_test, column_Y, f'{data_dir}alp.pkl', f'{save_dir}/model/')
+    train_keys = ['n_channels',
+                  'n_states',
+                  'learn_means',
+                  'learn_covariances',
+                  'learn_trans_prob',
+                  'initial_means',
+                  'initial_covariances',
+                  'initial_trans_prob',
+                  'sequence_length',
+                  'batch_size',
+                  'learning_rate',
+                  'n_epochs',
+                  ]
+    cv = CVHMM(n_samples, n_channels,train_keys=train_keys)
+    result = cv.calculate_error(config, row_test, column_Y, f'{data_dir}alp.pkl', spatial)
 
     ll_1 = multivariate_gaussian_log_likelihood(data_2[:1, [0, 2]], np.array([0, 0]), covs[0])
     ll_2 = 0.5 * multivariate_gaussian_log_likelihood(data_2[1:2, [0, 2]], np.array([0, 0]), covs[1]) + \
@@ -617,7 +623,7 @@ def test_Y_test():
     ll_4 = multivariate_gaussian_log_likelihood(data_3[1:2, [0, 2]], np.array([0, 0]), covs[2])
 
     ll = (ll_1 + ll_2 + ll_3 + ll_4) / 2
-    with open(f'{save_dir}/Y_test/metrics.json', 'r') as file:
+    with open(result, 'r') as file:
         # Load the JSON data
         metrics = json.load(file)
 
