@@ -1155,7 +1155,7 @@ class CVHMM(CVBase):
 
 
 
-    def validate(self,config,train_keys,i,j):
+    def validate(self,config,i,j):
         row_train, row_test, column_X, column_Y = self.fold_indices(i - 1, j - 1)
 
         if not os.path.exists(config['save_dir']):

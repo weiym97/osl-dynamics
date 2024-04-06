@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 from .pipeline import run_pipeline_from_file
 from ..data.base import Data
-from ..evaluate.cross_validation import BICVHMM, BICVHMM_2
+from ..evaluate.cross_validation import CVBase, CVHMM
 from ..utils.misc import override_dict_defaults
 from ..utils.plotting import plot_box
 
@@ -173,7 +173,7 @@ batch_variable:
 
             for i in range(cv_count):
                 cv_kwargs['save_dir'] = f'{self.save_dir}/cv_{i + 1}_partition/'
-                cv = BICVHMM(**cv_kwargs)
+                cv = CVBase(**cv_kwargs)
             self.batch_variable['row_fold'] = list(range(1, cv.partition_rows + 1))
             self.batch_variable['column_fold'] = list(range(1, cv.partition_columns + 1))
         combinations = list(product(*self.batch_variable.values()))
@@ -265,9 +265,9 @@ class BatchTrain:
 
 
         elif "cv" in self.config["mode"]:
-
-            cv = BICVHMM_2(**self.config['cv_kwargs'])
-            cv.validate(self.config, self.train_keys, self.config['row_fold'], self.config['column_fold'])
+            self.config['train_keys'] = self.train_keys
+            cv = CVHMM(**self.config['cv_kwargs'])
+            cv.validate(self.config, self.config['row_fold'], self.config['column_fold'])
             '''
             indice_all = self.select_indice(ratio=cv_ratio)
 
