@@ -874,3 +874,182 @@ class BICVHMM_2():
         with open(os.path.join(config['save_dir'],'metrics.json'), 'w') as json_file:
             json.dump({'log_likelihood':metric}, json_file)
 
+class CVBase():
+    """
+    Base class for bi-cross validation in dFC models.
+    The idea comes from [k-means bi cross validation](https://www.tandfonline.com/doi/full/10.1080/10618600.2019.1647846)
+    """
+    def __init__(self,n_samples=None,n_channels=None,row_indices=None,column_indices=None,
+                 save_dir=None,partition_rows=2,partition_columns=2):
+        '''
+        Initialisation of CVBase.
+        If both row_indices and column indices are not None, use them to initialise CVBase.
+        Otherwise randomly generate row and column indices.
+
+        Parameters
+        ----------
+        n_samples: int
+            the number of samples
+        n_channels: int
+            the number of channels (the length of each sample)
+        row_indices: str or list
+            the list of row indices. Read from file if it's a string.
+        column_indices: str or list
+            the list of column indices. Read from file if it's a string.
+        partition_rows: int
+            the number of rows partition
+        partition_columns: int
+            the number of columns partition
+        '''
+        self.n_samples = n_samples
+        self.n_channels = n_channels
+        self.save_dir = save_dir
+
+        # Initialise the class using row_indices/column_indices
+        if (row_indices is not None) and (column_indices is not None):
+            if isinstance(row_indices,str):
+                self.row_indices = npz2list(np.load(row_indices))
+            if isinstance(column_indices,str):
+                self.column_indices = npz2list(np.load(column_indices))
+            self.partition_rows = len(self.row_indices)
+            self.partition_columns = len(self.column_indices)
+            # Update the number of samples and number of channels
+            self.n_samples = sum(len(arr) for arr in self.row_indices)
+            self.n_channels = sum(len(arr) for arr in self.column_indices)
+        else:
+            self.partition_rows = partition_rows
+            self.partition_columns = partition_columns
+            self.partition_indices()
+
+
+    def partition_indices(self):
+        '''
+        Generate partition indices, if save_dir is not None,
+        save the indices.
+        Parameters
+        ----------
+        save_dir: str,optional
+            the directory to save the indices
+
+        '''
+        # Generate random row and column indices
+        row_indices = np.arange(self.n_samples)
+        column_indices = np.arange(self.n_channels)
+        np.random.shuffle(row_indices)
+        np.random.shuffle(column_indices)
+
+        # Divide rows into partitions
+        self.row_indices = np.array_split(row_indices, self.partition_rows)
+
+        # Divide columns into partitions
+        self.column_indices = np.array_split(column_indices, self.partition_columns)
+
+
+        if self.save_dir is not None:
+            if not os.path.exists(self.save_dir):
+                os.makedirs(self.save_dir)
+            np.savez(os.path.join(self.save_dir,'row_indices.npz'), *self.row_indices)
+            np.savez(os.path.join(self.save_dir, 'column_indices.npz'), *self.column_indices)
+
+    def fold_indices(self,r,s):
+        """
+        Given the partitions, return the indices of fold (r,s).
+        Fold (r,s) treats the rth row subset as "test", and the sth column
+        subset as response.
+        The parition should be in the format:
+        (X_train, Y_train,
+         X_test,  Y_test  )
+        Parameters
+        ----------
+        r: int
+            the row index
+        s: int
+            the column index
+
+        Returns
+        -------
+        row_train: list
+            row indices for X_train and Y_train
+        row_test: list
+            row indices for X_test and Y_test
+        column_X: list
+            column indices for X_train and X_test
+        column_Y: list
+            column indices for Y_train and Y_test
+        """
+
+        # Assuming row_indices and column_indices are available
+        row_train = []
+        row_test = []
+        column_X = []
+        column_Y = []
+
+        # Assign row indices for X_train and Y_train based on r
+        for i, row_index in enumerate(self.row_indices):
+            if i == r:
+                row_test.extend(row_index)
+            else:
+                row_train.extend(row_index)
+
+        # Assign column indices for X_train and X_test based on s
+        for j, column_index in enumerate(self.column_indices):
+            if j == s:
+                column_Y.extend(column_index)
+            else:
+                column_X.extend(column_index)
+
+        row_train = sorted(list(map(int, row_train)))
+        row_test = sorted(list(map(int, row_test)))
+        column_X = sorted(list(map(int, column_X)))
+        column_Y = sorted(list(map(int, column_Y)))
+
+        return row_train, row_test, column_X, column_Y
+
+class CVHMM(CVBase):
+    '''
+    Bi-cross validation for HMM model (inherited from CVBase
+    '''
+    def __init__(self,n_samples=None,n_channels=None,row_indices=None,column_indices=None,
+                 save_dir=None,partition_rows=2,partition_columns=2):
+        super().__init__(n_samples,n_channels,row_indices,column_indices,
+                 save_dir,partition_rows,partition_columns)
+
+    def full_train(self,config,train_keys,row,column,save_dir=None):
+        # Specify the save directory
+        if save_dir is None:
+            save_dir = os.path.join(config['save_dir'],'full_train/')
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
+        prepare_config = {}
+        prepare_config['load_data'] = config['load_data']
+
+        prepare_config['load_data']['prepare']['select']['channels'] = column
+
+        prepare_config[f'train_{config["model"]}'] = {
+            'config_kwargs':
+                {key: config[key] for key in train_keys if key in config},
+            'init_kwargs':
+                config['init_kwargs']
+        }
+        prepare_config[f'train_{config["model"]}']['config_kwargs']['n_channels'] = len(column)
+        prepare_config['keep_list'] = row
+
+        with open(f'{save_dir}/prepared_config.yaml', 'w') as file:
+            yaml.safe_dump(prepare_config, file, default_flow_style=False)
+        run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
+                               save_dir)
+        params_dir = f'{save_dir}/inf_params/'
+        return {'means': f'{params_dir}means.npy',
+                'covs': f'{params_dir}covs.npy'}, f'{params_dir}alp.pkl'
+
+    def infer_temporal(self):
+        pass
+    def infer_spatial(self):
+        pass
+
+    def calculate_error(self):
+        pass
+
+    def validate(self):
+        pass

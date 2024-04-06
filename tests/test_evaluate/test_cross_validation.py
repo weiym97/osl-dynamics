@@ -70,7 +70,7 @@ def test_BICVkmeans():
 def test_partition_indices():
     import os
     import shutil
-    from osl_dynamics.evaluate.cross_validation import BICVHMM
+    from osl_dynamics.evaluate.cross_validation import CVBase
 
     save_dir = './test_tmp_partition_indices/'
     if not os.path.exists(save_dir):
@@ -86,7 +86,7 @@ def test_partition_indices():
     n_channels = 50
 
     # Case 1: Default settings
-    cv_1 = BICVHMM(n_samples=n_samples, n_channels=n_channels, save_dir=f'{save_dir}case_1/')
+    cv_1 = CVBase(n_samples=n_samples, n_channels=n_channels, save_dir=f'{save_dir}case_1/')
     row_indices = np.load(os.path.join(f'{save_dir}case_1/', 'row_indices.npz'))
     column_indices = np.load(os.path.join(f'{save_dir}case_1/', 'column_indices.npz'))
     row_indices = np.sort(np.concatenate([row_indices[key] for key in row_indices.keys()]))
@@ -95,7 +95,7 @@ def test_partition_indices():
     npt.assert_array_equal(column_indices, np.arange(n_channels))
 
     # Case 2: Multi-folds
-    cv_2 = BICVHMM(n_samples=n_samples, n_channels=n_channels, save_dir=f'{save_dir}case_2/',
+    cv_2 = CVBase(n_samples=n_samples, n_channels=n_channels, save_dir=f'{save_dir}case_2/',
                    partition_rows=7, partition_columns=9)
     row_indices = np.load(os.path.join(f'{save_dir}case_2/', 'row_indices.npz'))
     column_indices = np.load(os.path.join(f'{save_dir}case_2/', 'column_indices.npz'))
@@ -105,10 +105,10 @@ def test_partition_indices():
     npt.assert_array_equal(column_indices, np.arange(n_channels))
 
     # Case 3: Use the results from case 1:
-    cv_3 = BICVHMM(n_samples=n_samples,
-                   n_channels=n_channels,
-                   row_indices = f'{save_dir}case_1/row_indices.npz',
-                   column_indices = f'{save_dir}case_1/column_indices.npz')
+    cv_3 = CVBase(n_samples=n_samples,
+                  n_channels=n_channels,
+                  row_indices = f'{save_dir}case_1/row_indices.npz',
+                  column_indices = f'{save_dir}case_1/column_indices.npz')
 
     npt.assert_array_equal(cv_1.row_indices[0],cv_3.row_indices[0])
     npt.assert_array_equal(cv_1.row_indices[1], cv_3.row_indices[1])
@@ -121,11 +121,11 @@ def test_partition_indices():
 
 
 def test_fold_indices():
-    from osl_dynamics.evaluate.cross_validation import BICVHMM
+    from osl_dynamics.evaluate.cross_validation import CVBase
 
     n_samples = 7
     n_channels = 5
-    cv = BICVHMM(n_samples=n_samples, n_channels=n_channels, partition_rows=3)
+    cv = CVBase(n_samples=n_samples, n_channels=n_channels, partition_rows=3)
     cv.row_indices = [np.array([6, 2]), np.array([4, 0]), np.array([5, 3, 1])]
     cv.column_indices = [np.array([4, 2, 0]), np.array([3, 1])]
 
@@ -172,13 +172,13 @@ def test_fold_indices():
     npt.assert_array_equal(column_Y, np.array([1, 3]))
 
 
-def test_Y_train():
+def test_full_train():
     import os
     import shutil
     import yaml
-    from osl_dynamics.evaluate.cross_validation import BICVHMM
+    from osl_dynamics.evaluate.cross_validation import CVHMM
 
-    save_dir = './test_Y_train/'
+    save_dir = './test_full_train/'
     if os.path.exists(save_dir):
         shutil.rmtree(save_dir)
     os.makedirs(save_dir)
@@ -262,11 +262,11 @@ def test_Y_train():
                   'learning_rate',
                   'n_epochs',
                   ]
-    cv = BICVHMM(n_samples, n_channels)
-    cv.Y_train(config, train_keys, row_train, column_Y)
+    cv = CVHMM(n_samples, n_channels)
+    cv.full_train(config, train_keys, row_train, column_Y)
 
-    result_means = np.load(f'{save_dir}/Y_train/inf_params/means.npy')
-    result_covs = np.load(f'{save_dir}/Y_train/inf_params/covs.npy')
+    result_means = np.load(f'{save_dir}/full_train/inf_params/means.npy')
+    result_covs = np.load(f'{save_dir}/full_train/inf_params/covs.npy')
     npt.assert_array_equal(result_means,np.zeros((n_states,len(column_Y))))
 
     # Assert diagonal elements are all one

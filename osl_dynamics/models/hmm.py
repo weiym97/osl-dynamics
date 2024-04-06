@@ -937,11 +937,12 @@ class Model(ModelBase):
                 / (self.config.n_states - 1)
             )
             np.fill_diagonal(trans_prob, 0.9)
-        elif trans_prob == 'random':
-            trans_prob = np.random.rand(self.config.n_states, self.config.n_states)
+        elif isinstance(trans_prob,str):
+            if trans_prob == 'random':
+                trans_prob = np.random.rand(self.config.n_states, self.config.n_states)
 
-            # Divide each row by its sum to ensure rows sum to 1
-            trans_prob /= trans_prob.sum(axis=1, keepdims=True)
+                # Divide each row by its sum to ensure rows sum to 1
+                trans_prob /= trans_prob.sum(axis=1, keepdims=True)
 
         self.trans_prob = trans_prob
 
