@@ -1043,10 +1043,44 @@ class CVHMM(CVBase):
         return {'means': f'{params_dir}means.npy',
                 'covs': f'{params_dir}covs.npy'}, f'{params_dir}alp.pkl'
 
+    def infer_spatial(self,config,train_keys,row,column,temporal,save_dir=None):
+        # Specify the save directory
+        if save_dir is None:
+            save_dir = os.path.join(config['save_dir'], 'infer_spatial/')
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
+        # Create a new directory "config['save_dir']/X_train/inf_params
+        if not os.path.exists(f'{save_dir}inf_params/'):
+            os.makedirs(f'{save_dir}inf_params/')
+
+        shutil.copy(temporal, f'{save_dir}inf_params/')
+
+        prepare_config = {}
+        prepare_config['load_data'] = config['load_data']
+
+        prepare_config['load_data']['prepare']['select']['channels'] = column
+
+        prepare_config[f'build_{config["model"]}'] = {
+            'config_kwargs':
+                {key: config[key] for key in train_keys if key in config},
+        }
+        prepare_config[f'build_{config["model"]}']['config_kwargs']['n_channels'] = len(column)
+        prepare_config['dual_estimation'] = {'concatenate':True}
+
+        # Note the 'keep_list' value is in order (from small to large number)
+        prepare_config['keep_list'] = row
+
+        with open(f'{save_dir}/prepared_config.yaml', 'w') as file:
+            yaml.safe_dump(prepare_config, file, default_flow_style=False,sort_keys=False)
+        run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
+                               save_dir)
+
+        return {'means': f'{save_dir}/dual_estimates/means.npy',
+                'covs': f'{save_dir}/dual_estimates/covs.npy'}
     def infer_temporal(self):
         pass
-    def infer_spatial(self):
-        pass
+
 
     def calculate_error(self):
         pass

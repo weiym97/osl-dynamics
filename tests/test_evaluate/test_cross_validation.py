@@ -263,10 +263,10 @@ def test_full_train():
                   'n_epochs',
                   ]
     cv = CVHMM(n_samples, n_channels)
-    cv.full_train(config, train_keys, row_train, column_Y)
+    result,_ = cv.full_train(config, train_keys, row_train, column_Y)
 
-    result_means = np.load(f'{save_dir}/full_train/inf_params/means.npy')
-    result_covs = np.load(f'{save_dir}/full_train/inf_params/covs.npy')
+    result_means = np.load(result['means'])
+    result_covs = np.load(result['covs'])
     npt.assert_array_equal(result_means,np.zeros((n_states,len(column_Y))))
 
     # Assert diagonal elements are all one
@@ -276,14 +276,14 @@ def test_full_train():
     off_diagonal = np.array([float(result_covs[i,0,1]) for i in range(n_states)])
     npt.assert_allclose(np.sort(off_diagonal), cors_Y, atol=0.05,rtol=0.05)
 
-def test_X_train():
+def test_infer_spatial():
     import os
     import pickle
     import shutil
     import yaml
-    from osl_dynamics.evaluate.cross_validation import BICVHMM
+    from osl_dynamics.evaluate.cross_validation import CVHMM
 
-    save_dir = './test_X_train/'
+    save_dir = './test_infer_spatial/'
     if os.path.exists(save_dir):
         shutil.rmtree(save_dir)
     os.makedirs(save_dir)
@@ -376,11 +376,11 @@ def test_X_train():
                   ]
 
     config = yaml.safe_load(config)
-    cv = BICVHMM(n_samples, n_channels)
-    cv.X_train(config, train_keys, row_train, column_X,f'{data_dir}alp.pkl')
+    cv = CVHMM(n_samples, n_channels)
+    result = cv.infer_spatial(config, train_keys, row_train, column_X,f'{data_dir}alp.pkl')
 
-    result_means = np.load(f'{save_dir}/X_train/dual_estimates/means.npy')
-    result_covs = np.load(f'{save_dir}/X_train/dual_estimates/covs.npy')
+    result_means = np.load(result['means'])
+    result_covs = np.load(result['covs'])
     npt.assert_allclose(means_X,result_means,rtol=1e-2,atol=1e-2)
     npt.assert_allclose(vars_X, result_covs, rtol=1e-2, atol=1e-2)
     '''
