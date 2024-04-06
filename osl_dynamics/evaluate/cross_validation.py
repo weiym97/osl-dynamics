@@ -1151,13 +1151,43 @@ class CVHMM(CVBase):
             yaml.safe_dump(prepare_config, file, default_flow_style=False, sort_keys=False)
         run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
                                save_dir)
-
-        with open(f'{save_dir}/metrics.json', 'r') as file:
-            # Load the JSON data
-            metrics = json.load(file)
         return f'{save_dir}/metrics.json'
 
 
 
-    def validate(self):
-        pass
+    def validate(self,config,train_keys,i,j):
+        row_train, row_test, column_X, column_Y = self.fold_indices(i - 1, j - 1)
+
+        if not os.path.exists(config['save_dir']):
+            os.makedirs(config['save_dir'])
+
+        # Save the dictionary as a pickle file
+        with open(os.path.join(config['save_dir'], 'fold_indices.json'), 'w') as f:
+            json.dump({
+                'row_train': row_train,
+                'row_test': row_test,
+                'column_X': column_X,
+                'column_Y': column_Y
+            }, f)
+        if str(config['cv_variant']) == '1':
+            spatial_Y_train, temporal_Y_train = self.full_train(config, row_train, column_Y,
+                                                    save_dir=os.path.join(config['save_dir'],'Y_train/'))
+            spatial_X_train = self.infer_spatial(config, row_train, column_X, temporal_Y_train,
+                                save_dir=os.path.join(config['save_dir'],'X_train/'))
+            temporal_X_test = self.infer_temporal(config, row_test, column_X, spatial_X_train,
+                                 save_dir=os.path.join(config['save_dir'],'X_test/'))
+            metric = self.calculate_error(config, row_test, column_Y, temporal_X_test, spatial_Y_train,
+                        save_dir=os.path.join(config['save_dir'],'Y_test/'))
+
+        elif str(config['cv_variant']) == '2':
+            spatial_X_train, temporal_X_train = self.full_train(config, row_train, column_X,
+                                                    save_dir=os.path.join(config['save_dir'],'X_train/'))
+            spatial_Y_train = self.infer_spatial(config,row_train, column_Y, temporal_X_train,
+                                                 save_dir=os.path.join(config['save_dir'],'Y_train/'))
+            temporal_X_test = self.infer_temporal(config, row_test, column_X, spatial_X_train,
+                                save_dir=os.path.join(config['save_dir'],'X_test/'))
+            metric = self.calculate_error(config, row_test, column_Y, temporal_X_test, spatial_Y_train,
+                        save_dir=os.path.join(config['save_dir'],'Y_test/'))
+
+        else:
+            raise ValueError('Currently the cv_variant unavailable!')
