@@ -1163,6 +1163,31 @@ class CVHMM(CVBase):
                                save_dir)
         return f'{save_dir}/metrics.json'
 
+    def split_column(self,config,column_1,column_2,spatial,save_dir=None):
+        # Specify the save directory
+        if save_dir is None:
+            save_dir = [os.path.join(config['save_dir'], 'column_1_spatial/'),
+                        os.path.join(config['save_dir'], 'column_2_spatial/')]
+        for dir in save_dir:
+            if not os.path.exists(dir):
+                os.makedirs(dir)
+        means = np.load(spatial['means'])
+        covs = np.load(spatial['covs'])
+
+        means_1 = means[:,column_1]
+        means_2 = means[:,column_2]
+        covs_1 = (covs[:,:,column_1])[:,column_1,:]
+        covs_2 = (covs[:,:,column_2])[:,column_2,:]
+
+        np.save(f'{save_dir[0]}means.npy',means_1)
+        np.save(f'{save_dir[0]}covs.npy', covs_1)
+        np.save(f'{save_dir[1]}means.npy', means_2)
+        np.save(f'{save_dir[1]}covs.npy', covs_2)
+
+        return ({'means':f'{save_dir[0]}means.npy','covs':f'{save_dir[0]}covs.npy'},
+                {'means':f'{save_dir[1]}means.npy','covs':f'{save_dir[1]}covs.npy'})
+
+
 
 
     def validate(self,config,i,j):
@@ -1199,5 +1224,16 @@ class CVHMM(CVBase):
             metric = self.calculate_error(config, row_test, column_Y, temporal_X_test, spatial_Y_train,
                         save_dir=os.path.join(config['save_dir'],'Y_test/'))
 
+        elif str(config['cv_variant']) == '3':
+            spatial_XY_train, _ = self.full_train(config, row_train, sorted(column_X+column_Y),
+                                    save_dir=os.path.join(config['save_dir'],'XY_train/'))
+            spatial_X_train, spatial_Y_train = self.split_column(config,column_X,column_Y,spatial_XY_train,
+                                                save_dir = [os.path.join(config['save_dir'],'X_train/'),
+                                                            os.path.join(config['save_dir'],'Y_train/')]
+                                                )
+            temporal_X_test = self.infer_temporal(config, row_test, column_X, spatial_X_train,
+                                                  save_dir=os.path.join(config['save_dir'], 'X_test/'))
+            metric = self.calculate_error(config, row_test, column_Y, temporal_X_test, spatial_Y_train,
+                                          save_dir=os.path.join(config['save_dir'], 'Y_test/'))
         else:
             raise ValueError('Currently the cv_variant unavailable!')

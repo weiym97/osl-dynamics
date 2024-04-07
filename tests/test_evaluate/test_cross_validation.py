@@ -628,3 +628,51 @@ def test_calculate_error():
         metrics = json.load(file)
 
     npt.assert_almost_equal(ll, metrics['log_likelihood'], decimal=3)
+
+def test_split_column():
+    import os
+    import shutil
+    from osl_dynamics.evaluate.cross_validation import CVHMM
+    save_dir = './test_split_column/'
+    if os.path.exists(save_dir):
+        shutil.rmtree(save_dir)
+
+    os.makedirs(save_dir)
+    n_samples = 2
+    n_channels = 4
+    cv = CVHMM(n_samples, n_channels)
+    config = {'save_dir':'123'}
+
+    means = np.array([[1.,2.,3.,4.],[5.,6.,7.,8.]])
+    covs = np.array([
+        [[1.,2.,3.,4.],
+         [5.,6.,7.,8.],
+         [9.,10.,11.,12.],
+         [13.,14.,15.,16.]],
+        [[17.,18.,19.,20.],
+         [21.,22.,23.,24.],
+         [25.,26.,27.,28.],
+         [29.,30.,31.,32.]]
+    ])
+    column_X = [0,2]
+    column_Y = [1,3]
+    np.save(f'{save_dir}means.npy',means)
+    np.save(f'{save_dir}covs.npy',covs)
+    spatial_XY_train = {'means':f'{save_dir}means.npy','covs':f'{save_dir}covs.npy'}
+    spatial_X_train, spatial_Y_train = cv.split_column(config,column_X,column_Y,spatial_XY_train,
+                                                       save_dir=[f'{save_dir}X_train/',f'{save_dir}Y_train/']
+                                                      )
+    spatial_X_train_means = np.load(spatial_X_train['means'])
+    spatial_X_train_covs = np.load(spatial_X_train['covs'])
+    spatial_Y_train_means = np.load(spatial_Y_train['means'])
+    spatial_Y_train_covs = np.load(spatial_Y_train['covs'])
+
+    X_train_means = np.array([[1.,3.],[5.,7.]])
+    X_train_covs = np.array([[[1.,3.],[9.,11.]],[[17.,19.],[25.,27.]]])
+    Y_train_means = np.array([[2.,4.],[6.,8.]])
+    Y_train_covs = np.array([[[6.,8.],[14.,16.]],[[22.,24.],[30.,32.]]])
+    npt.assert_array_equal(spatial_X_train_means,X_train_means)
+    npt.assert_array_equal(spatial_X_train_covs, X_train_covs)
+    npt.assert_array_equal(spatial_Y_train_means, Y_train_means)
+    npt.assert_array_equal(spatial_Y_train_covs, Y_train_covs)
+
