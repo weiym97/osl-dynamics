@@ -1060,7 +1060,7 @@ class CVHMM(CVBase):
         if not os.path.exists(f'{save_dir}inf_params/'):
             os.makedirs(f'{save_dir}inf_params/')
 
-        shutil.copy(temporal, f'{save_dir}inf_params/')
+        shutil.move(temporal, f'{save_dir}inf_params/')
 
         prepare_config = {}
         prepare_config['load_data'] = config['load_data']
@@ -1081,6 +1081,16 @@ class CVHMM(CVBase):
             yaml.safe_dump(prepare_config, file, default_flow_style=False, sort_keys=False)
         run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
                                save_dir)
+
+        # Compress the representation of alp.pkl file
+        if os.path.exists(f'{save_dir}inf_params/alp.pkl'):
+            from osl_dynamics.inference.modes import prob2onehot
+            with open(f'{save_dir}inf_params/alp.pkl','rb') as file:
+                alpha = pickle.load(file)
+            alpha = prob2onehot(alpha)
+            os.remove(f'{save_dir}inf_params/alp.pkl')
+            with open(f'{save_dir}inf_params/alp.pkl','wb') as file:
+                pickle.dump(alpha, file)
 
         return {'means': f'{save_dir}/dual_estimates/means.npy',
                 'covs': f'{save_dir}/dual_estimates/covs.npy'}
@@ -1129,7 +1139,7 @@ class CVHMM(CVBase):
         if not os.path.exists(f'{save_dir}inf_params/'):
             os.makedirs(f'{save_dir}inf_params/')
 
-        shutil.copy(temporal, f'{save_dir}inf_params/')
+        shutil.move(temporal, f'{save_dir}inf_params/')
 
         prepare_config = {}
         prepare_config['load_data'] = config['load_data']
