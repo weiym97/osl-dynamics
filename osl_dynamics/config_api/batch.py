@@ -408,11 +408,14 @@ class BatchAnalysis:
                 metrics[model][str(int(n_states))].append(metric)
             except Exception:
                 print(f'save_dir {save_dir} fails!')
+                metrics[model][str(int(n_states))].append(np.nan)
 
         # Plot
         for model in models:
-            plot_box(data = metrics[model].values(),
-                     labels=metrics[model].keys(),
+            temp_keys = list(metrics[model].keys())
+            temp_values = [metrics[model][key] for key in temp_keys]
+            plot_box(data=temp_values,
+                     labels=temp_keys,
                      filename=os.path.join(self.analysis_path,f'{model}_metrics.jpg')
                      )
 

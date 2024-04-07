@@ -1,18 +1,19 @@
 import numpy as np
 import numpy.testing as npt
 
+
 def test_get_one_hot():
     from osl_dynamics.array_ops import get_one_hot
 
     # Case 1: Categorical input
-    input_1 = np.array([0,2,0,1])
+    input_1 = np.array([0, 2, 0, 1])
     output_1 = np.array([
-        [1,0,0],
-        [0,0,1],
-        [1,0,0],
-        [0,1,0]
+        [1, 0, 0],
+        [0, 0, 1],
+        [1, 0, 0],
+        [0, 1, 0]
     ])
-    npt.assert_equal(get_one_hot(input_1),output_1)
+    npt.assert_equal(get_one_hot(input_1), output_1)
 
     # Case 2: Categorical input, but input n_states
     input_2 = np.array([0, 2, 0, 1])
@@ -22,22 +23,22 @@ def test_get_one_hot():
         [1, 0, 0, 0],
         [0, 1, 0, 0]
     ])
-    npt.assert_equal(get_one_hot(input_2,n_states=4), output_2)
+    npt.assert_equal(get_one_hot(input_2, n_states=4), output_2)
 
     # Case 3: (n_samples, n_states) to be binarized
     input_3 = np.array([
-        [0.99,0.03,0.03],
-        [0.02,0.02,0.9],
-        [0.80,0.4,0.5],
-        [-1.,-0.5,-1.]
+        [0.99, 0.03, 0.03],
+        [0.02, 0.02, 0.9],
+        [0.80, 0.4, 0.5],
+        [-1., -0.5, -1.]
     ])
     output_3 = np.array([
-        [1,0,0],
-        [0,0,1],
-        [1,0,0],
-        [0,1,0]
+        [1, 0, 0],
+        [0, 0, 1],
+        [1, 0, 0],
+        [0, 1, 0]
     ])
-    npt.assert_equal(get_one_hot(input_3),output_3)
+    npt.assert_equal(get_one_hot(input_3), output_3)
 
     # Case 4: (n_samples, n_states) to be binarized, input n_states
     input_4 = np.array([
@@ -52,7 +53,8 @@ def test_get_one_hot():
         [1, 0, 0, 0],
         [0, 1, 0, 0]
     ])
-    npt.assert_equal(get_one_hot(input_4,n_states=4), output_4)
+    npt.assert_equal(get_one_hot(input_4, n_states=4), output_4)
+
 
 def test_cov2std():
     from osl_dynamics.array_ops import cov2std
@@ -67,6 +69,7 @@ def test_cov2std():
     stds = cov2std(covs)
     npt.assert_equal(stds, np.array([[4.0, 2.0], [10.0, 20.0]]))
 
+
 def test_cov2corr():
     from osl_dynamics.array_ops import cov2corr
 
@@ -80,65 +83,68 @@ def test_cov2corr():
     corrs = cov2corr(covs)
     npt.assert_equal(corrs, np.array([[[1.0, 0.5], [0.5, 1.0]], [[1.0, -0.2], [-0.2, 1.0]]]))
 
+
 def test_stdcorr2cov():
     from osl_dynamics.array_ops import stdcorr2cov
     # Case 1: One covariance matrix, std is a vector
     std = np.array([4.0, 2.0])
     corr = np.array([[1.0, 0.5], [0.5, 1.0]])
-    cov = stdcorr2cov(std,corr)
-    npt.assert_equal(cov,np.array([[16.0, 4.0], [4.0, 4.0]]))
+    cov = stdcorr2cov(std, corr)
+    npt.assert_equal(cov, np.array([[16.0, 4.0], [4.0, 4.0]]))
 
     # Case 2: Two covariance matrices, std is two vectors
     stds = np.array([[4.0, 2.0], [10.0, 20.0]])
     corrs = np.array([[[1.0, 0.5], [0.5, 1.0]], [[1.0, -0.2], [-0.2, 1.0]]])
-    covs = stdcorr2cov(stds,corrs)
-    npt.assert_equal(covs,np.array([[[16.0, 4.0], [4.0, 4.0]], [[100.0, -40.0], [-40.0, 400.0]]]))
+    covs = stdcorr2cov(stds, corrs)
+    npt.assert_equal(covs, np.array([[[16.0, 4.0], [4.0, 4.0]], [[100.0, -40.0], [-40.0, 400.0]]]))
 
     # Case 3: One covariance matrix, std is a diagonal matrix
-    std = np.array([[4.0,0.0],[0.0, 2.0]])
+    std = np.array([[4.0, 0.0], [0.0, 2.0]])
     corr = np.array([[1.0, 0.5], [0.5, 1.0]])
-    cov = stdcorr2cov(std, corr,std_diagonal=True)
+    cov = stdcorr2cov(std, corr, std_diagonal=True)
     npt.assert_equal(cov, np.array([[16.0, 4.0], [4.0, 4.0]]))
 
     # Case 4: Two covariance matrices, std is two diagonal matrices
-    stds = np.array([[[4.0,0.0],[0.0,2.0]], [[10.0,0.0],[0.0,20.0]]])
+    stds = np.array([[[4.0, 0.0], [0.0, 2.0]], [[10.0, 0.0], [0.0, 20.0]]])
     corrs = np.array([[[1.0, 0.5], [0.5, 1.0]], [[1.0, -0.2], [-0.2, 1.0]]])
-    covs = stdcorr2cov(stds, corrs,std_diagonal=True)
+    covs = stdcorr2cov(stds, corrs, std_diagonal=True)
     npt.assert_equal(covs, np.array([[[16.0, 4.0], [4.0, 4.0]], [[100.0, -40.0], [-40.0, 400.0]]]))
+
 
 def test_cov2stdcorr():
     from osl_dynamics.array_ops import cov2stdcorr
     # Case 1: One covariance matrix
     cov = np.array([[16.0, 4.0], [4.0, 4.0]])
-    std,corr = cov2stdcorr(cov)
+    std, corr = cov2stdcorr(cov)
     npt.assert_equal(std, np.array([4.0, 2.0]))
-    npt.assert_equal(corr,np.array([[1.0, 0.5], [0.5, 1.0]]))
-
+    npt.assert_equal(corr, np.array([[1.0, 0.5], [0.5, 1.0]]))
 
     # Case 2: Two covariance matrices
     covs = np.array([[[16.0, 4.0], [4.0, 4.0]], [[100.0, -40.0], [-40.0, 400.0]]])
-    stds,corrs = cov2stdcorr(covs)
+    stds, corrs = cov2stdcorr(covs)
     npt.assert_equal(stds, np.array([[4.0, 2.0], [10.0, 20.0]]))
     npt.assert_equal(corrs, np.array([[[1.0, 0.5], [0.5, 1.0]], [[1.0, -0.2], [-0.2, 1.0]]]))
+
 
 def test_check_symmetry():
     from osl_dynamics.array_ops import check_symmetry
     # Case 1: One matrix, symmetric
-    matrix = np.array([[1.0,0.0],[0.0,1.0]])
-    npt.assert_equal(check_symmetry(matrix),np.array([True]))
+    matrix = np.array([[1.0, 0.0], [0.0, 1.0]])
+    npt.assert_equal(check_symmetry(matrix), np.array([True]))
 
     # Case 2: One matrix, non-symmetric
     matrix = np.array([[1.0, 0.1], [0.0, 1.0]])
     npt.assert_equal(check_symmetry(matrix), np.array([False]))
 
     # Case 3: Two matrices
-    matrix = np.array([[[1.0, 0.1], [0.0, 1.0]],[[1.0,0.0],[0.0,1.0]]])
-    npt.assert_equal(check_symmetry(matrix), np.array([False,True]))
+    matrix = np.array([[[1.0, 0.1], [0.0, 1.0]], [[1.0, 0.0], [0.0, 1.0]]])
+    npt.assert_equal(check_symmetry(matrix), np.array([False, True]))
 
     # Case 4: One matrix, symmetric wrt eps=1e-6
     matrix = np.array([[1.0, 0.99e-6], [0.0, 1.0]])
-    npt.assert_equal(check_symmetry(matrix,precision=1e-6), np.array([True]))
+    npt.assert_equal(check_symmetry(matrix, precision=1e-6), np.array([True]))
     npt.assert_equal(check_symmetry(matrix, precision=1e-7), np.array([False]))
+
 
 def test_ezclump():
     from osl_dynamics.array_ops import ezclump
@@ -167,6 +173,7 @@ def test_ezclump():
     expected_result5 = [slice(0, 5)]
     npt.assert_equal(ezclump(arr5), expected_result5)
 
+
 def test_slice_length():
     from osl_dynamics.array_ops import slice_length
 
@@ -190,6 +197,7 @@ def test_slice_length():
     expected_length4 = 0
     npt.assert_equal(slice_length(s4), expected_length4)
 
+
 def test_npz2list():
     from osl_dynamics.array_ops import npz2list
     # Create a list of numpy arrays
@@ -212,7 +220,33 @@ def test_npz2list():
     import os
     os.remove('test_data.npz')
 
-    x = np.array([1,2,3])
+    x = np.array([1, 2, 3])
     x_list = npz2list(x)
-    npt.assert_array_equal(x,x_list[0])
+    npt.assert_array_equal(x, x_list[0])
 
+
+def test_demean_list():
+    from osl_dynamics.array_ops import demean_list
+    data_1 = [
+        [1., 5., 3.],
+        [2., 10., 6.],
+        [3., 15., 9.]
+    ]
+    answer_1 = [
+        [-1., -5., -3.],
+        [0., 0., 0.],
+        [1.,5.,3.]
+    ]
+    np.testing.assert_allclose(demean_list(data_1), answer_1, atol=1e-8)
+
+    data_2 = [
+        [1., 5., np.nan],
+        [np.nan, 10., 6.],
+        [3., np.nan, 9.]
+    ]
+    answer_2 = [
+        [-1., -2.5],
+        [2.5, -1.5],
+        [1., 1.5]
+    ]
+    np.testing.assert_allclose(demean_list(data_2), answer_2, atol=1e-8)

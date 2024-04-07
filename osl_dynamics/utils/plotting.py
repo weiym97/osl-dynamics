@@ -15,7 +15,7 @@ from matplotlib.path import Path
 from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
 from nilearn.plotting import plot_markers
 
-from osl_dynamics.array_ops import get_one_hot
+from osl_dynamics.array_ops import get_one_hot,demean_list
 from osl_dynamics.utils.misc import override_dict_defaults
 from osl_dynamics.utils.topoplots import Topology
 from osl_dynamics.utils.parcellation import Parcellation
@@ -2460,6 +2460,7 @@ def plot_box(
     labels=None,
     plot_samples=True,
     mark_best=True,
+    demean=False,
     y_range=None,
     x_label=None,
     y_label=None,
@@ -2483,6 +2484,8 @@ def plot_box(
         Whether to plot the original samples
     mark_best: bool, optional
         Whether to mark the best performed model.
+    demean: bool, optional
+        Whether to demean *across* the list
     y_range : list, optional
         Minimum and maximum for y-axis.
     x_label : str, optional
@@ -2557,6 +2560,9 @@ def plot_box(
     create_fig = ax is None
     if create_fig:
         fig, ax = create_figure(**fig_kwargs)
+
+    if demean:
+        data = demean_list(data)
 
     # Box plot
     bp = ax.boxplot(data, labels=labels, **plot_kwargs)

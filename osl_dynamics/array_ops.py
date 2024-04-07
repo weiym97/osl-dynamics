@@ -421,3 +421,28 @@ def npz2list(array):
         return [array]
     elif isinstance(array,np.lib.npyio.NpzFile):
         return [array[key] for key in array.keys()]
+
+def demean_list(data):
+    '''
+    demean across a list of lists.
+    Return the de-meaned list
+    Parameters
+    ----------
+    data: list
+        the input list to be demeaned
+
+    Returns
+    -------
+    demeaned_data: list
+        the demeaned data. Nan values are chopped out.
+    '''
+    # Check whether the input is a list
+    if not isinstance(data,list):
+        raise TypeError('The input should be a list of lists!')
+    data = np.array(data)
+    if not data.ndim == 2:
+        raise ValueError('The input should be a list of lists!')
+
+    data -= np.nanmean(data,axis=0,keepdims=True)
+
+    return [[elem for elem in row if not np.isnan(elem)] for row in data]
