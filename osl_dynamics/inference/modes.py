@@ -67,6 +67,28 @@ def argmax_time_courses(alpha, concatenate=False, n_modes=None):
         tcs = array_ops.get_one_hot(tcs, n_states=n_modes)
     return tcs
 
+def prob2onehot(alpha,concatenate=False):
+    """
+    Convert a list of probabilistic time courses to a list of one-hot coding
+    Parameters
+    ----------
+    alpha : list of np.ndarray or np.ndarray
+        Mode mixing factors or state probabilities. Shape must be
+        (n_sessions, n_samples, n_modes) or (n_samples, n_modes).
+    concatenate : bool, optional
+        If :code:`alpha` is a :code:`list`, should we concatenate the
+        time courses?
+    Returns
+    -------
+    one_hots : list
+       list of one-hot coding time courses.
+        The list has length n_sessions, each element is a 1D np.ndarray
+        with length n_samples and integer values (0,n_modes)
+    """
+    if isinstance(alpha,np.ndarray):
+        alpha = [alpha]
+    return [np.argmax(prob, axis=1) for prob in alpha]
+
 
 def gmm_time_courses(
     alpha,

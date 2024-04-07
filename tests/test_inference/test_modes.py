@@ -28,6 +28,17 @@ def test_argmax_time_courses():
     result = argmax_time_courses(alpha_3d)
     npt.assert_array_equal(result, expected_result)
 
+def test_prob2onehot():
+    from osl_dynamics.inference.modes import prob2onehot
+
+    alpha_1 = [np.array([[0.1, 0.9], [0.8, 0.2]]), np.array([[0.2, 0.8], [0.6, 0.4]])]
+    answer_1 = [np.array([1,0]),np.array([1,0])]
+    npt.assert_array_equal(prob2onehot(alpha_1), answer_1)
+
+    alpha_2 = np.array([[0.1, 0.9], [0.8, 0.2]])
+    answer_2 = [np.array([1,0])]
+    npt.assert_array_equal(prob2onehot(alpha_2), answer_2)
+
 
 def test_hungarian_pair():
     from osl_dynamics.inference.modes import hungarian_pair
