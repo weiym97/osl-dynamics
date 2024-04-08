@@ -2461,6 +2461,7 @@ def plot_box(
     plot_samples=True,
     mark_best=True,
     demean=False,
+    inset_start_index=None,
     y_range=None,
     x_label=None,
     y_label=None,
@@ -2486,6 +2487,9 @@ def plot_box(
         Whether to mark the best performed model.
     demean: bool, optional
         Whether to demean *across* the list
+    inset_start_index: int, optional
+        If specified, add an inset using data and labels
+        starting from the index.
     y_range : list, optional
         Minimum and maximum for y-axis.
     x_label : str, optional
@@ -2502,7 +2506,7 @@ def plot_box(
         Arguments to pass to the `ax.scatter <https://matplotlib.org/stable\
         /api/_as_gen/matplotlib.axes.Axes.scatter.html>`_ method.Defaults to
         :code:`{"alpha": 0.8,'s':10.0}`.
-    test_kwargs: dict, optional
+    text_kwargs: dict, optional
         Arguments to pass to the `ax.text <https://matplotlib.org/stable\
         /api/_as_gen/matplotlib.axes.Axes.text.html>`_ method.Defaults to
         :code:`{'fontsize': 'large','ha':'center','va':'bottom'}`.
@@ -2595,7 +2599,10 @@ def plot_box(
         ax.text(max_median_index + 1, ax.get_ylim()[1], '*', **text_kwargs)
         #ax.text(max_median_index + 1, bp['caps'][max_median_index * 2 + 1].get_data()[1], '*', ha='center', va='bottom')
 
-
+    if inset_start_index is not None:
+        small_ax = fig.add_axes([0.65, 0.2, 0.3, 0.3])  # Adjust these values as needed for positioning
+        small_bp = small_ax.boxplot(data[inset_start_index:], labels=labels[inset_start_index:], **plot_kwargs)
+        small_ax.set_xticklabels(labels[inset_start_index:], rotation=45)
 
     # Set title and axis labels
     ax.set_title(title)

@@ -486,6 +486,6 @@ def test_plot_box():
     data = [np.random.normal(loc=i*0.5, size=100) for i in range(1, 6)]
     labels = range(1,6)
     plot_box(data,labels=labels,x_label='Number of cluster',y_label='Metric',title='Box plot test',
-             filename=f'{plot_dir}/toy_example.png')
+             inset_start_index=3,filename=f'{plot_dir}/toy_example.png')
 
 
