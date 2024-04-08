@@ -393,7 +393,7 @@ class BatchAnalysis:
         if not os.path.exists(self.analysis_path):
             os.makedirs(self.analysis_path)
 
-    def compare(self,demean=False):
+    def compare(self,demean=False,inset_start_index=None):
         models = self.config_root['batch_variable']['model']
         n_states = self.config_root['batch_variable']['n_states']
         metrics = {model: {str(int(num)): [] for num in n_states } for model in models}
@@ -417,6 +417,7 @@ class BatchAnalysis:
             plot_box(data=temp_values,
                      labels=temp_keys,
                      demean=demean,
+                     inset_start_index=inset_start_index,
                      filename=os.path.join(self.analysis_path,f'{model}_metrics.jpg')
                      )
 
