@@ -1085,11 +1085,11 @@ class CVHMM(CVBase):
         # Compress the representation of alp.pkl file
         if os.path.exists(f'{save_dir}inf_params/alp.pkl'):
             from osl_dynamics.inference.modes import prob2onehot
-            with open(f'{save_dir}inf_params/alp.pkl','rb') as file:
+            with open(f'{save_dir}inf_params/alp.pkl', 'rb') as file:
                 alpha = pickle.load(file)
             alpha = prob2onehot(alpha)
             os.remove(f'{save_dir}inf_params/alp.pkl')
-            with open(f'{save_dir}inf_params/alp.pkl','wb') as file:
+            with open(f'{save_dir}inf_params/alp.pkl', 'wb') as file:
                 pickle.dump(alpha, file)
 
         return {'means': f'{save_dir}/dual_estimates/means.npy',
@@ -1129,7 +1129,7 @@ class CVHMM(CVBase):
         params_dir = f'{save_dir}/inf_params/'
         return f'{params_dir}/alp.pkl'
 
-    def calculate_error(self,config, row, column, temporal, spatial,save_dir=None):
+    def calculate_error(self, config, row, column, temporal, spatial, save_dir=None):
         # Specify the save directory
         if save_dir is None:
             save_dir = os.path.join(config['save_dir'], 'calculate_error/')
@@ -1163,7 +1163,7 @@ class CVHMM(CVBase):
                                save_dir)
         return f'{save_dir}/metrics.json'
 
-    def split_column(self,config,column_1,column_2,spatial,save_dir=None):
+    def split_column(self, config, column_1, column_2, spatial, save_dir=None):
         # Specify the save directory
         if save_dir is None:
             save_dir = [os.path.join(config['save_dir'], 'column_1_spatial/'),
@@ -1174,23 +1174,49 @@ class CVHMM(CVBase):
         means = np.load(spatial['means'])
         covs = np.load(spatial['covs'])
 
-        means_1 = means[:,column_1]
-        means_2 = means[:,column_2]
-        covs_1 = (covs[:,:,column_1])[:,column_1,:]
-        covs_2 = (covs[:,:,column_2])[:,column_2,:]
+        means_1 = means[:, column_1]
+        means_2 = means[:, column_2]
+        covs_1 = (covs[:, :, column_1])[:, column_1, :]
+        covs_2 = (covs[:, :, column_2])[:, column_2, :]
 
-        np.save(f'{save_dir[0]}means.npy',means_1)
+        np.save(f'{save_dir[0]}means.npy', means_1)
         np.save(f'{save_dir[0]}covs.npy', covs_1)
         np.save(f'{save_dir[1]}means.npy', means_2)
         np.save(f'{save_dir[1]}covs.npy', covs_2)
 
-        return ({'means':f'{save_dir[0]}means.npy','covs':f'{save_dir[0]}covs.npy'},
-                {'means':f'{save_dir[1]}means.npy','covs':f'{save_dir[1]}covs.npy'})
+        return ({'means': f'{save_dir[0]}means.npy', 'covs': f'{save_dir[0]}covs.npy'},
+                {'means': f'{save_dir[1]}means.npy', 'covs': f'{save_dir[1]}covs.npy'})
+
+    def split_row(self,config,row_1,row_2,temporal,save_dir=None):
+        # Specify the save directory
+        if save_dir is None:
+            save_dir = [os.path.join(config['save_dir'], 'row_1_temporal/'),
+                        os.path.join(config['save_dir'], 'row_2_temporal/')]
+        for dir in save_dir:
+            if not os.path.exists(dir):
+                os.makedirs(dir)
+
+        # Read the whole alpha file
+        with open(temporal, 'rb') as file:
+            # Load the Python object from the pickle file
+            alpha = pickle.load(file)
+
+        # Extract alpha_1 and alpha_2
+        alpha_1 = [alpha[i] for i in row_1]
+        alpha_2 = [alpha[i] for i in row_2]
+
+        with open(f'{save_dir[0]}/alp.pkl', 'wb') as file:
+            pickle.dump(alpha_1, file)
+        with open(f'{save_dir[1]}/alp.pkl', 'wb') as file:
+            pickle.dump(alpha_2, file)
+
+        # Remove the original file to save disc space
+        os.remove(temporal)
+
+        return f'{save_dir[0]}/alp.pkl',f'{save_dir[1]}/alp.pkl'
 
 
-
-
-    def validate(self,config,i,j):
+    def validate(self, config, i, j):
         row_train, row_test, column_X, column_Y = self.fold_indices(i - 1, j - 1)
 
         if not os.path.exists(config['save_dir']):
@@ -1206,33 +1232,43 @@ class CVHMM(CVBase):
             }, f)
         if str(config['cv_variant']) == '1':
             spatial_Y_train, temporal_Y_train = self.full_train(config, row_train, column_Y,
-                                                    save_dir=os.path.join(config['save_dir'],'Y_train/'))
+                                                                save_dir=os.path.join(config['save_dir'], 'Y_train/'))
             spatial_X_train = self.infer_spatial(config, row_train, column_X, temporal_Y_train,
-                                save_dir=os.path.join(config['save_dir'],'X_train/'))
+                                                 save_dir=os.path.join(config['save_dir'], 'X_train/'))
             temporal_X_test = self.infer_temporal(config, row_test, column_X, spatial_X_train,
-                                 save_dir=os.path.join(config['save_dir'],'X_test/'))
+                                                  save_dir=os.path.join(config['save_dir'], 'X_test/'))
             metric = self.calculate_error(config, row_test, column_Y, temporal_X_test, spatial_Y_train,
-                        save_dir=os.path.join(config['save_dir'],'Y_test/'))
+                                          save_dir=os.path.join(config['save_dir'], 'Y_test/'))
 
         elif str(config['cv_variant']) == '2':
             spatial_X_train, temporal_X_train = self.full_train(config, row_train, column_X,
-                                                    save_dir=os.path.join(config['save_dir'],'X_train/'))
-            spatial_Y_train = self.infer_spatial(config,row_train, column_Y, temporal_X_train,
-                                                 save_dir=os.path.join(config['save_dir'],'Y_train/'))
-            temporal_X_test = self.infer_temporal(config, row_test, column_X, spatial_X_train,
-                                save_dir=os.path.join(config['save_dir'],'X_test/'))
-            metric = self.calculate_error(config, row_test, column_Y, temporal_X_test, spatial_Y_train,
-                        save_dir=os.path.join(config['save_dir'],'Y_test/'))
-
-        elif str(config['cv_variant']) == '3':
-            spatial_XY_train, _ = self.full_train(config, row_train, sorted(column_X+column_Y),
-                                    save_dir=os.path.join(config['save_dir'],'XY_train/'))
-            spatial_X_train, spatial_Y_train = self.split_column(config,column_X,column_Y,spatial_XY_train,
-                                                save_dir = [os.path.join(config['save_dir'],'X_train/'),
-                                                            os.path.join(config['save_dir'],'Y_train/')]
-                                                )
+                                                                save_dir=os.path.join(config['save_dir'], 'X_train/'))
+            spatial_Y_train = self.infer_spatial(config, row_train, column_Y, temporal_X_train,
+                                                 save_dir=os.path.join(config['save_dir'], 'Y_train/'))
             temporal_X_test = self.infer_temporal(config, row_test, column_X, spatial_X_train,
                                                   save_dir=os.path.join(config['save_dir'], 'X_test/'))
+            metric = self.calculate_error(config, row_test, column_Y, temporal_X_test, spatial_Y_train,
+                                          save_dir=os.path.join(config['save_dir'], 'Y_test/'))
+
+        elif str(config['cv_variant']) == '3':
+            spatial_XY_train, _ = self.full_train(config, row_train, sorted(column_X + column_Y),
+                                                  save_dir=os.path.join(config['save_dir'], 'XY_train/'))
+            spatial_X_train, spatial_Y_train = self.split_column(config, column_X, column_Y, spatial_XY_train,
+                                                                 save_dir=[os.path.join(config['save_dir'], 'X_train/'),
+                                                                           os.path.join(config['save_dir'], 'Y_train/')]
+                                                                 )
+            temporal_X_test = self.infer_temporal(config, row_test, column_X, spatial_X_train,
+                                                  save_dir=os.path.join(config['save_dir'], 'X_test/'))
+            metric = self.calculate_error(config, row_test, column_Y, temporal_X_test, spatial_Y_train,
+                                          save_dir=os.path.join(config['save_dir'], 'Y_test/'))
+        elif str(config['cv_variant']) == '4':
+            _, temporal_X_traintest = self.full_train(config, sorted(row_train + row_test), column_X,
+                                                      save_dir=os.path.join(config['save_dir'], 'X_traintest/'))
+            temporal_X_train, temporal_X_test = self.split_row(config,row_train,row_test,temporal_X_traintest,
+                                                               save_dir=[os.path.join(config['save_dir'], 'X_train/'),
+                                                                         os.path.join(config['save_dir'], 'X_test/')])
+            spatial_Y_train = self.infer_spatial(config, row_train, column_Y, temporal_X_train,
+                                                 save_dir=os.path.join(config['save_dir'], 'Y_train/'))
             metric = self.calculate_error(config, row_test, column_Y, temporal_X_test, spatial_Y_train,
                                           save_dir=os.path.join(config['save_dir'], 'Y_test/'))
         else:

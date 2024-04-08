@@ -676,3 +676,41 @@ def test_split_column():
     npt.assert_array_equal(spatial_Y_train_means, Y_train_means)
     npt.assert_array_equal(spatial_Y_train_covs, Y_train_covs)
 
+def test_split_row():
+    import os
+    import pickle
+    import shutil
+    from osl_dynamics.evaluate.cross_validation import CVHMM
+
+    save_dir = './test_split_row/'
+    if os.path.exists(save_dir):
+        shutil.rmtree(save_dir)
+    os.makedirs(save_dir)
+
+    n_samples = 4
+    n_channels = 2
+    cv = CVHMM(n_samples, n_channels)
+    config = {'save_dir': '123'}
+    alpha = [
+        np.array([0.,0.,0.]),
+        np.array([1., 1., 1.]),
+        np.array([2.,2.,2.]),
+        np.array([3.,3.,3.])
+    ]
+    with open(f'{save_dir}alp.pkl','wb') as file:
+        pickle.dump(alpha,file)
+    row_train = [0,2]
+    row_test = [1,3]
+    temporal_X_train, temporal_X_test = cv.split_row(config,row_train,row_test,f'{save_dir}alp.pkl',
+                                                     save_dir = [f'{save_dir}/X_train/',f'{save_dir}/X_test/'])
+    answer_1 = [np.array([0.,0.,0.]),np.array([2.,2.,2.]),]
+    answer_2 = [np.array([1., 1., 1.]),np.array([3.,3.,3.])]
+
+    with open(temporal_X_train,'rb') as file:
+        temp_1 = pickle.load(file)
+
+    with open(temporal_X_test,'rb') as file:
+        temp_2 = pickle.load(file)
+
+    npt.assert_array_equal(temp_1,answer_1)
+    npt.assert_array_equal(temp_2,answer_2)
