@@ -898,9 +898,11 @@ class CVBase():
         # Initialise the class using row_indices/column_indices
         if (row_indices is not None) and (column_indices is not None):
             if isinstance(row_indices, str):
-                self.row_indices = npz2list(np.load(row_indices))
+                 row_indices= npz2list(np.load(row_indices))
             if isinstance(column_indices, str):
-                self.column_indices = npz2list(np.load(column_indices))
+                column_indices = npz2list(np.load(column_indices))
+            self.row_indices = row_indices
+            self.column_indices = column_indices
             self.partition_rows = len(self.row_indices)
             self.partition_columns = len(self.column_indices)
             # Update the number of samples and number of channels
