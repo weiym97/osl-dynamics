@@ -994,9 +994,131 @@ class CVBase():
         return row_train, row_test, column_X, column_Y
 
 
+class CVKmeans(CVBase):
+    '''
+    Bi cross validation for K-means model (inherited from CVBase)
+    '''
+
+    def __init__(self, n_samples=None, n_channels=None, row_indices=None, column_indices=None,
+                 save_dir=None, partition_rows=2, partition_columns=2):
+        super().__init__(n_samples, n_channels, row_indices, column_indices,
+                         save_dir, partition_rows, partition_columns)
+
+    def full_train(self, config, data, row, column, save_dir=None):
+        if isinstance(data, str):
+            data = np.load(data)
+        data = data[row][:, column]
+
+        if save_dir is None:
+            save_dir = f'{config["save_dir"]}/full_train/'
+
+        # Initialize the KMeans model with the number of clusters
+        kmeans = KMeans(n_clusters=config['n_clusters'])
+
+        # Fit the model to the data
+        kmeans.fit(data)
+
+        # Get the cluster centroids
+        spatial_Y_train = kmeans.cluster_centers_
+
+        # Get the cluster labels for each data point
+        temporal_Y_train = kmeans.labels_
+
+        # Save the results
+        np.save(f'{save_dir}/centre.npy', spatial_Y_train)
+        np.save(f'{save_dir}/label.npy', temporal_Y_train)
+        return f'{save_dir}/centre.npy', f'{save_dir}/label.npy'
+
+    def infer_spatial(self, config, data, row, column, temporal, save_dir=None):
+        if isinstance(data, str):
+            data = np.load(data)
+
+        if isinstance(temporal, str):
+            temporal = np.load(temporal)
+
+        data = data[row][:, column]
+
+        if save_dir is None:
+            save_dir = f'{config["save_dir"]}/infer_spatial/'
+
+        spatial = np.array([np.mean(data[temporal == cluster_label], axis=0)
+                            for cluster_label in range(config['n_clusters'])])
+
+        np.save(f'{save_dir}centre.npy', spatial)
+
+        return f'{save_dir}centre.npy'
+
+    def infer_temporal(self, config, data, row, column, spatial, save_dir=None):
+        if isinstance(data, str):
+            data = np.load(data)
+
+        if isinstance(spatial, str):
+            spatial = np.load(spatial)
+
+        data = data[row][:, column]
+
+        if save_dir is None:
+            save_dir = f'{config["save_dir"]}/infer_spatial/'
+
+        distances = cdist(data, spatial, metric='euclidean')
+
+        # Assign each data point to the nearest centroid
+        temporal = np.argmin(distances, axis=1)
+
+        np.save(f'{save_dir}label.npy', temporal)
+
+        return f'{save_dir}label.npy'
+
+    def calculate_error(self, config, data, row, column, temporal, spatial, save_dir=None):
+        if isinstance(data, str):
+            data = np.load(data)
+
+        if isinstance(spatial, str):
+            spatial = np.load(spatial)
+        if isinstance(temporal, str):
+            temporal = np.load(temporal)
+
+        data = data[row][:, column]
+
+        if save_dir is None:
+            save_dir = f'{config["save_dir"]}/calculate_error/'
+
+        centroids = spatial[temporal]
+
+        # Compute squared differences between data and centroids
+        mean_squared_diff = np.mean(np.sum((data - centroids) ** 2, axis=-1), axis=0)
+
+        with open(f'{save_dir}/metrics.json', "w") as file:
+            json.dump({'mse': mean_squared_diff}, file)
+        return f'{save_dir}/metrics.json'
+
+    def validate(self, config, data, i, j):
+        row_train, row_test, column_X, column_Y = self.fold_indices(i - 1, j - 1)
+
+        if not os.path.exists(config['save_dir']):
+            os.makedirs(config['save_dir'])
+
+        # Save the dictionary as a pickle file
+        with open(os.path.join(config['save_dir'], 'fold_indices.json'), 'w') as f:
+            json.dump({
+                'row_train': row_train,
+                'row_test': row_test,
+                'column_X': column_X,
+                'column_Y': column_Y
+            }, f)
+        spatial_Y_train, temporal_Y_train = self.full_train(config, data,row_train, column_Y,
+                                                            save_dir=os.path.join(config['save_dir'], 'Y_train/'))
+        spatial_X_train = self.infer_spatial(config, data, row_train, column_X, temporal_Y_train,
+                                             save_dir=os.path.join(config['save_dir'], 'X_train/'))
+        temporal_X_test = self.infer_temporal(config, data, row_test, column_X, spatial_X_train,
+                                              save_dir=os.path.join(config['save_dir'], 'X_test/'))
+        metric = self.calculate_error(config, data, row_test, column_Y, temporal_X_test, spatial_Y_train,
+                                      save_dir=os.path.join(config['save_dir'], 'Y_test/'))
+
+
 class CVHMM(CVBase):
     '''
-    Bi-cross validation for HMM model (inherited from CVBase
+    Bi-cross validation for HMM model (inherited from CVBase)
     '''
 
     def __init__(self, n_samples=None, n_channels=None, row_indices=None, column_indices=None,
@@ -1187,7 +1309,7 @@ class CVHMM(CVBase):
         return ({'means': f'{save_dir[0]}means.npy', 'covs': f'{save_dir[0]}covs.npy'},
                 {'means': f'{save_dir[1]}means.npy', 'covs': f'{save_dir[1]}covs.npy'})
 
-    def split_row(self,config,row_1,row_2,temporal,save_dir=None):
+    def split_row(self, config, row_1, row_2, temporal, save_dir=None):
         # Specify the save directory
         if save_dir is None:
             save_dir = [os.path.join(config['save_dir'], 'row_1_temporal/'),
@@ -1213,8 +1335,7 @@ class CVHMM(CVBase):
         # Remove the original file to save disc space
         os.remove(temporal)
 
-        return f'{save_dir[0]}/alp.pkl',f'{save_dir[1]}/alp.pkl'
-
+        return f'{save_dir[0]}/alp.pkl', f'{save_dir[1]}/alp.pkl'
 
     def validate(self, config, i, j):
         row_train, row_test, column_X, column_Y = self.fold_indices(i - 1, j - 1)
@@ -1264,7 +1385,7 @@ class CVHMM(CVBase):
         elif str(config['cv_variant']) == '4':
             _, temporal_X_traintest = self.full_train(config, sorted(row_train + row_test), column_X,
                                                       save_dir=os.path.join(config['save_dir'], 'X_traintest/'))
-            temporal_X_train, temporal_X_test = self.split_row(config,row_train,row_test,temporal_X_traintest,
+            temporal_X_train, temporal_X_test = self.split_row(config, row_train, row_test, temporal_X_traintest,
                                                                save_dir=[os.path.join(config['save_dir'], 'X_train/'),
                                                                          os.path.join(config['save_dir'], 'X_test/')])
             spatial_Y_train = self.infer_spatial(config, row_train, column_Y, temporal_X_train,
