@@ -1011,6 +1011,8 @@ class CVKmeans(CVBase):
 
         if save_dir is None:
             save_dir = f'{config["save_dir"]}/full_train/'
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
 
         # Initialize the KMeans model with the number of clusters
         kmeans = KMeans(n_clusters=config['n_clusters'])
@@ -1040,6 +1042,8 @@ class CVKmeans(CVBase):
 
         if save_dir is None:
             save_dir = f'{config["save_dir"]}/infer_spatial/'
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
 
         spatial = np.array([np.mean(data[temporal == cluster_label], axis=0)
                             for cluster_label in range(config['n_clusters'])])
@@ -1059,6 +1063,8 @@ class CVKmeans(CVBase):
 
         if save_dir is None:
             save_dir = f'{config["save_dir"]}/infer_spatial/'
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
 
         distances = cdist(data, spatial, metric='euclidean')
 
@@ -1082,6 +1088,8 @@ class CVKmeans(CVBase):
 
         if save_dir is None:
             save_dir = f'{config["save_dir"]}/calculate_error/'
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
 
         centroids = spatial[temporal]
 
