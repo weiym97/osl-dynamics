@@ -1116,14 +1116,24 @@ class CVKmeans(CVBase):
                 'column_X': column_X,
                 'column_Y': column_Y
             }, f)
-        spatial_Y_train, temporal_Y_train = self.full_train(config, data,row_train, column_Y,
-                                                            save_dir=os.path.join(config['save_dir'], 'Y_train/'))
-        spatial_X_train = self.infer_spatial(config, data, row_train, column_X, temporal_Y_train,
-                                             save_dir=os.path.join(config['save_dir'], 'X_train/'))
-        temporal_X_test = self.infer_temporal(config, data, row_test, column_X, spatial_X_train,
-                                              save_dir=os.path.join(config['save_dir'], 'X_test/'))
-        metric = self.calculate_error(config, data, row_test, column_Y, temporal_X_test, spatial_Y_train,
-                                      save_dir=os.path.join(config['save_dir'], 'Y_test/'))
+        if str(config['cv_variant']) == '1':
+            spatial_Y_train, temporal_Y_train = self.full_train(config, data,row_train, column_Y,
+                                                                save_dir=os.path.join(config['save_dir'], 'Y_train/'))
+            spatial_X_train = self.infer_spatial(config, data, row_train, column_X, temporal_Y_train,
+                                                 save_dir=os.path.join(config['save_dir'], 'X_train/'))
+            temporal_X_test = self.infer_temporal(config, data, row_test, column_X, spatial_X_train,
+                                                  save_dir=os.path.join(config['save_dir'], 'X_test/'))
+            metric = self.calculate_error(config, data, row_test, column_Y, temporal_X_test, spatial_Y_train,
+                                          save_dir=os.path.join(config['save_dir'], 'Y_test/'))
+        if str(config['cv_variant']) == '2':
+            spatial_X_train, temporal_X_train = self.full_train(config, data, row_train, column_X,
+                                                                save_dir=os.path.join(config['save_dir'], 'X_train/'))
+            spatial_Y_train = self.infer_spatial(config, data, row_train, column_Y, temporal_X_train,
+                                                 save_dir=os.path.join(config['save_dir'], 'Y_train/'))
+            temporal_X_test = self.infer_temporal(config, data, row_test, column_X, spatial_X_train,
+                                                  save_dir=os.path.join(config['save_dir'], 'X_test/'))
+            metric = self.calculate_error(config, data, row_test, column_Y, temporal_X_test, spatial_Y_train,
+                                          save_dir=os.path.join(config['save_dir'], 'Y_test/'))
 
 
 class CVHMM(CVBase):
