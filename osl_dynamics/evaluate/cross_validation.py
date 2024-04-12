@@ -1102,6 +1102,23 @@ class CVKmeans(CVBase):
             json.dump({'mse': mean_squared_diff}, file)
         return f'{save_dir}/metrics.json'
 
+    def split_column(self,config,data,column_1,column_2,spatial,save_dir=None):
+        # Specify the save directory
+        if save_dir is None:
+            save_dir = [os.path.join(config['save_dir'], 'column_1_spatial/'),
+                        os.path.join(config['save_dir'], 'column_2_spatial/')]
+        for dir in save_dir:
+            if not os.path.exists(dir):
+                os.makedirs(dir)
+
+        centre = np.load(spatial)
+        centre_1 = centre[:,column_1]
+        centre_2 = centre[:,column_2]
+        np.save(f'{save_dir[0]}/centre.npy',centre_1)
+        np.save(f'{save_dir[1]}/centre.npy',centre_2)
+        return f'{save_dir[0]}/centre.npy',f'{save_dir[1]}/centre.npy'
+
+
     def validate(self, config, data, i, j):
         row_train, row_test, column_X, column_Y = self.fold_indices(i - 1, j - 1)
 
@@ -1130,6 +1147,18 @@ class CVKmeans(CVBase):
                                                                 save_dir=os.path.join(config['save_dir'], 'X_train/'))
             spatial_Y_train = self.infer_spatial(config, data, row_train, column_Y, temporal_X_train,
                                                  save_dir=os.path.join(config['save_dir'], 'Y_train/'))
+            temporal_X_test = self.infer_temporal(config, data, row_test, column_X, spatial_X_train,
+                                                  save_dir=os.path.join(config['save_dir'], 'X_test/'))
+            metric = self.calculate_error(config, data, row_test, column_Y, temporal_X_test, spatial_Y_train,
+                                          save_dir=os.path.join(config['save_dir'], 'Y_test/'))
+
+        elif str(config['cv_variant']) == '3':
+            spatial_XY_train, _ = self.full_train(config, data, row_train, sorted(column_X + column_Y),
+                                                  save_dir=os.path.join(config['save_dir'], 'XY_train/'))
+            spatial_X_train, spatial_Y_train = self.split_column(config, data, column_X, column_Y, spatial_XY_train,
+                                                                 save_dir=[os.path.join(config['save_dir'], 'X_train/'),
+                                                                           os.path.join(config['save_dir'], 'Y_train/')]
+                                                                 )
             temporal_X_test = self.infer_temporal(config, data, row_test, column_X, spatial_X_train,
                                                   save_dir=os.path.join(config['save_dir'], 'X_test/'))
             metric = self.calculate_error(config, data, row_test, column_Y, temporal_X_test, spatial_Y_train,
