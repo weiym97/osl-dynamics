@@ -1310,7 +1310,20 @@ class CVHMM(CVBase):
         if not os.path.exists(f'{save_dir}inf_params/'):
             os.makedirs(f'{save_dir}inf_params/')
 
+        # Compress the file
+        if os.path.exists(temporal):
+            from osl_dynamics.array_ops import convert_arrays_to_dtype
+            with open(temporal, 'rb') as file:
+                alpha = pickle.load(file)
+            alpha = convert_arrays_to_dtype(alpha,np.float16)
+            os.remove(temporal)
+            with open(temporal, 'wb') as file:
+                pickle.dump(alpha, file)
+
         shutil.move(temporal, f'{save_dir}inf_params/')
+
+
+
 
         prepare_config = {}
         prepare_config['load_data'] = config['load_data']
