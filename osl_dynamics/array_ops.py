@@ -446,3 +446,26 @@ def demean_list(data):
     data -= np.nanmean(data,axis=0,keepdims=True)
 
     return [[elem for elem in row if not np.isnan(elem)] for row in data]
+
+def convert_arrays_to_dtype(arrays, dtype):
+    """
+    Convert a list of numpy arrays to the specified data type.
+
+    Parameters
+    ----------
+    arrays: np.ndarray | list of np.ndarray
+        the arrays  to convert
+    - dtype: Desired data type (e.g., np.float16, np.float32, np.float64)
+
+    Returns
+    -------
+    arrays: np.ndarray | list of np.ndarray
+        numpy arrays with the specified data type
+    """
+    if isinstance(arrays,np.ndarray):
+        return arrays.astype(dtype)
+
+    converted_arrays = []
+    for arr in arrays:
+        converted_arrays.append(arr.astype(dtype))
+    return converted_arrays

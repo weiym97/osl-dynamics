@@ -250,3 +250,22 @@ def test_demean_list():
         [1., 1.5]
     ]
     np.testing.assert_allclose(demean_list(data_2), answer_2, atol=1e-8)
+
+def test_convert_arrays_to_dtype():
+    from osl_dynamics.array_ops import convert_arrays_to_dtype
+    # Create input arrays
+    arrays_float32 = np.array([1.0, 2.0, 3.0],dtype=np.float32)
+    arrays_float64 = [np.array([1.0, 2.0, 3.0],dtype=np.float64), np.array([4.0, 5.0, 6.0],dtype=np.float64)]
+
+    # Expected outputs
+    expected_float16 = np.array([1.0, 2.0, 3.0], dtype=np.float16)
+    expected_float32 = [np.array([1.0, 2.0, 3.0], dtype=np.float32), np.array([4.0, 5.0, 6.0], dtype=np.float32)]
+
+    converted_array = convert_arrays_to_dtype(arrays_float32, np.float16)
+    npt.assert_allclose(converted_array, expected_float16)
+    assert converted_array.dtype == expected_float16.dtype
+
+    converted_arrays = convert_arrays_to_dtype(arrays_float64, np.float32)
+    for i in range(len(converted_arrays)):
+        npt.assert_allclose(converted_arrays[i], expected_float32[i])
+        assert converted_arrays[i].dtype == expected_float32[i].dtype
