@@ -414,6 +414,8 @@ class BatchAnalysis:
         for model in models:
             temp_keys = list(metrics[model].keys())
             temp_values = [metrics[model][key] for key in temp_keys]
+            for temp_value in temp_values:
+                print(np.median(temp_value))
             plot_box(data=temp_values,
                      labels=temp_keys,
                      demean=demean,
@@ -421,5 +423,7 @@ class BatchAnalysis:
                      filename=os.path.join(self.analysis_path,f'{model}_metrics.jpg')
                      )
 
+    def plot_free_energy(self):
+        pass
 
 
