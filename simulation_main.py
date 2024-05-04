@@ -429,7 +429,7 @@ if __name__ == '__main__':
         n_states=n_states,
         n_channels=n_channels,
         trans_prob='uniform',
-        stay_prob=0.93,
+        stay_prob=0.965,
         means="zero",
         covariances=covariances
     )
