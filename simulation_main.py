@@ -367,6 +367,7 @@ if __name__ == '__main__':
         np.savetxt(f'{save_dir}{10001 + i}.txt', data[i])
         np.save(f'{save_dir}truth/{10001 + i}_state_time_course.npy', time_course[i])
     '''
+    '''
     # Case 4: states are sparse.
     save_dir = './data/node_timeseries/simulation_bicv/sparse/'
     if not os.path.exists(save_dir):
@@ -390,6 +391,45 @@ if __name__ == '__main__':
         n_channels=n_channels,
         trans_prob='uniform',
         stay_prob=0.8,
+        means="zero",
+        covariances=covariances
+    )
+    data = sim.time_series
+    time_course = sim.state_time_course
+    data = data.reshape(n_subjects, -1, n_channels)
+    time_course = time_course.reshape(n_subjects, -1, n_states)
+
+    np.save(f'{save_dir}truth/state_covariances.npy', sim.obs_mod.covariances)
+    np.save(f'{save_dir}truth/tpm.npy', sim.hmm.trans_prob)
+
+    for i in range(n_subjects):
+        np.savetxt(f'{save_dir}{10001 + i}.txt', data[i])
+        np.save(f'{save_dir}truth/{10001 + i}_state_time_course.npy', time_course[i])
+    '''
+    # Case 5: states are sparse. But states are stable
+    save_dir = './data/node_timeseries/simulation_bicv/sparse_stable/'
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    if not os.path.exists(f'{save_dir}truth/'):
+        os.makedirs(f'{save_dir}truth')
+
+    n_subjects = 500
+    n_states = 8
+    n_samples = 1200
+    n_channels = 25
+
+    covariances_original = np.load('./data/node_timeseries/simulation_bicv/random/truth/state_covariances.npy')
+    from osl_dynamics.array_ops import cov2stdcorr, stdcorr2cov
+
+    stds, corrs = cov2stdcorr(covariances_original)
+    covariances = stdcorr2cov(stds, corrs ** 3)
+
+    sim = simulation.HMM_MVN(
+        n_samples=n_samples * n_subjects,
+        n_states=n_states,
+        n_channels=n_channels,
+        trans_prob='uniform',
+        stay_prob=0.93,
         means="zero",
         covariances=covariances
     )
