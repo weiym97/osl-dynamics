@@ -422,6 +422,19 @@ class BatchAnalysis:
                      )
 
     def plot_free_energy(self):
-        pass
+        models = self.config_root['batch_variable']['model']
+        n_states = self.config_root['batch_variable']['n_states']
+        metrics = {model: {str(int(num)): [] for num in n_states} for model in models}
+        for i in range(len(self.config_list)):
+            config = self.indexparser.parse(i)
+            model = config['model']
+            n_states = config['n_states']
+            mode = config['mode']
+            save_dir = config['save_dir']
+            print(f'model: {model}')
+            print(f'n_states: {n_states}')
+            print(f'mode: {mode}')
+            print(f'save_dir: {save_dir}')
+
 
 
