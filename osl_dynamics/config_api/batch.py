@@ -432,14 +432,14 @@ class BatchAnalysis:
             mode = config['mode']
             save_dir = config['save_dir']
             if 'repeat' in mode:
-                #try:
+                try:
                     with open(f'{save_dir}/metrics/metrics.json',"r") as file:
                         data = json.load(file)
                     for metric in metrics:
-                        loss[metric][model][str(int(n_states))].append(data['metric'])
-                #except Exception:
-                #    print(f'save_dir {save_dir} fails!')
-                #    loss[metric][model][str(int(n_states))].append(np.nan)
+                        loss[metric][model][str(int(n_states))].append(data[metric])
+                except Exception:
+                    print(f'save_dir {save_dir} fails!')
+                    loss[metric][model][str(int(n_states))].append(np.nan)
 
             # Plot
             for metric in metrics:
