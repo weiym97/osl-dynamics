@@ -490,7 +490,7 @@ class BatchAnalysis:
                      demean=False,
                      x_label='N_states',
                      y_label='reproducibility',
-                     title=f'reproducibility VS N_states',
+                     title=f'Average Riemannian distance VS N_states',
                      filename=os.path.join(self.analysis_path, f'{model}_reproducibility.jpg')
                      )
 
