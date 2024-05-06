@@ -462,6 +462,9 @@ class BatchAnalysis:
         models = self.config_root['batch_variable']['model']
         n_states = self.config_root['batch_variable']['n_states']
         rep = {model: {str(int(num)): [] for num in n_states} for model in models}
+        rep_path = os.path.join(self.analysis_path,'rep')
+        if not os.path.exists(rep_path):
+            os.makedirs(rep_path)
         for i in range(len(self.config_list)):
             config = self.indexparser.parse(i)
             model = config['model']
@@ -472,7 +475,8 @@ class BatchAnalysis:
                 try:
                     cov_1 = np.load(f'{save_dir}/half_1/inf_params/covs.npy')
                     cov_2 = np.load(f'{save_dir}/half_2/inf_params/covs.npy')
-                    rep[model][str(int(n_states))].append(self._reproducibility_analysis(cov_1,cov_2,mode))
+                    rep[model][str(int(n_states))].append(self._reproducibility_analysis(cov_1,cov_2,
+                                                          filename=os.path.join(rep_path,f'{n_states}_{mode}.jpg')))
                 except Exception:
                     print(f'save_dir {save_dir} fails!')
                     rep[model][str(int(n_states))].append(np.nan)
@@ -490,7 +494,7 @@ class BatchAnalysis:
                      filename=os.path.join(self.analysis_path, f'{model}_reproducibility.jpg')
                      )
 
-    def _reproducibility_analysis(self,cov_1,cov_2,mode='split_1'):
+    def _reproducibility_analysis(self,cov_1,cov_2,filename=None):
         if not os.path.exists(os.path.join(self.analysis_path,'rep')):
             os.makedirs(os.path.join(self.analysis_path,'rep'))
         from osl_dynamics.inference.metrics import twopair_riemannian_distance
@@ -499,7 +503,7 @@ class BatchAnalysis:
         riem = twopair_riemannian_distance(cov_1,cov_2)
         indice,riem_reorder = hungarian_pair(riem,distance=True)
         plot_mode_pairing(riem_reorder,indice,x_label='2nd half',y_label='1st half',
-                          title=f'{mode} pairing',filename=os.path.join(self.analysis_path,'rep',f'{mode}.jpg'))
+                          filename=filename)
         return np.mean(np.diagonal(riem_reorder))
 
 
