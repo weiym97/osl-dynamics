@@ -402,13 +402,15 @@ class BatchAnalysis:
             model = config['model']
             n_states = config['n_states']
             save_dir = config['save_dir']
-            try:
-                with open(os.path.join(save_dir, 'Y_test/metrics.json'), 'r') as file:
-                    metric = json.load(file)['log_likelihood']
-                metrics[model][str(int(n_states))].append(metric)
-            except Exception:
-                print(f'save_dir {save_dir} fails!')
-                metrics[model][str(int(n_states))].append(np.nan)
+            mode = config['mode']
+            if 'cv' in mode:
+                try:
+                    with open(os.path.join(save_dir, 'Y_test/metrics.json'), 'r') as file:
+                        metric = json.load(file)['log_likelihood']
+                    metrics[model][str(int(n_states))].append(metric)
+                except Exception:
+                    print(f'save_dir {save_dir} fails!')
+                    metrics[model][str(int(n_states))].append(np.nan)
 
         # Plot
         for model in models:
@@ -455,3 +457,49 @@ class BatchAnalysis:
                          title=f'{metric} VS N_states',
                          filename=os.path.join(self.analysis_path, f'{model}_{metric}.jpg')
                         )
+
+    def plot_split_half_reproducibility(self):
+        models = self.config_root['batch_variable']['model']
+        n_states = self.config_root['batch_variable']['n_states']
+        rep = {model: {str(int(num)): [] for num in n_states} for model in models}
+        for i in range(len(self.config_list)):
+            config = self.indexparser.parse(i)
+            model = config['model']
+            n_states = config['n_states']
+            save_dir = config['save_dir']
+            mode = config['mode']
+            if 'split' in mode:
+                try:
+                    cov_1 = np.load(f'{save_dir}/half_1/inf_params/covs.npy')
+                    cov_2 = np.load(f'{save_dir}/half_2/inf_params/covs.npy')
+                    rep[model][str(int(n_states))].append(self._reproducibility_analysis(cov_1,cov_2,mode))
+                except Exception:
+                    print(f'save_dir {save_dir} fails!')
+                    rep[model][str(int(n_states))].append(np.nan)
+
+        for model in models:
+            temp_keys = list(rep[model].keys())
+            temp_values = [rep[model][key] for key in temp_keys]
+            plot_box(data=temp_values,
+                     labels=temp_keys,
+                     mark_best=False,
+                     demean=False,
+                     x_label='N_states',
+                     y_label='reproducibility',
+                     title=f'reproducibility VS N_states',
+                     filename=os.path.join(self.analysis_path, f'{model}_reproducibility.jpg')
+                     )
+
+    def _reproducibility_analysis(self,cov_1,cov_2,mode='split_1'):
+        if not os.path.exists(os.path.join(self.analysis_path,'rep')):
+            os.makedirs(os.path.join(self.analysis_path,'rep'))
+        from osl_dynamics.inference.metrics import twopair_riemannian_distance
+        from osl_dynamics.inference.modes import hungarian_pair
+        from osl_dynamics.utils.plotting import plot_mode_pairing
+        riem = twopair_riemannian_distance(cov_1,cov_2)
+        indice,riem_reorder = hungarian_pair(riem,distance=True)
+        plot_mode_pairing(riem_reorder,indice,x_label='2nd half',y_label='1st half',
+                          title=f'{mode} pairing',filename=os.path.join(self.analysis_path,'rep',f'{mode}.jpg'))
+        return np.mean(np.diagonal(riem_reorder))
+
+
