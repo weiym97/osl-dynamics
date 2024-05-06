@@ -8,6 +8,7 @@ See ./config_train_prototype.yaml for an example batch file.
 """
 import os
 import random
+import pickle
 import time
 import json
 from itertools import product
@@ -476,7 +477,7 @@ class BatchAnalysis:
                     cov_1 = np.load(f'{save_dir}/half_1/inf_params/covs.npy')
                     cov_2 = np.load(f'{save_dir}/half_2/inf_params/covs.npy')
                     rep[model][str(int(n_states))].append(self._reproducibility_analysis(cov_1,cov_2,
-                                                          filename=os.path.join(rep_path,f'{n_states}_{mode}.jpg')))
+                                                          filename=os.path.join(rep_path,f'state_{n_states}_{mode}.jpg')))
                 except Exception:
                     print(f'save_dir {save_dir} fails!')
                     rep[model][str(int(n_states))].append(np.nan)
@@ -494,6 +495,33 @@ class BatchAnalysis:
                      filename=os.path.join(self.analysis_path, f'{model}_reproducibility.jpg')
                      )
 
+    def plot_fo(self, plot_mode='repeat_1'):
+        from osl_dynamics.inference.modes import argmax_time_courses,fractional_occupancies
+        from osl_dynamics.utils.plotting import plot_violin
+        models = self.config_root['batch_variable']['model']
+        n_states = self.config_root['batch_variable']['n_states']
+        fo_path = os.path.join(self.analysis_path, 'fo')
+        if not os.path.exists(fo_path):
+            os.makedirs(fo_path)
+        for i in range(len(self.config_list)):
+            config = self.indexparser.parse(i)
+            model = config['model']
+            n_states = config['n_states']
+            save_dir = config['save_dir']
+            mode = config['mode']
+            if plot_mode == mode:
+                try:
+                    with open(f'{save_dir}/inf_params/alp.pkl', "rb") as file:
+                        alpha = pickle.load(file)
+                    stc = argmax_time_courses(alpha)
+                    fo = fractional_occupancies(stc)
+                    plot_violin(fo.T, x_label="State", y_label="FO",title=f'Fractional Occupancy, {n_states} states',
+                                filename=os.path.join(fo_path,f'state_{n_states}.jpg'))
+
+
+                except Exception:
+                    print(f'save_dir {save_dir} fails!')
+
     def _reproducibility_analysis(self,cov_1,cov_2,filename=None):
         if not os.path.exists(os.path.join(self.analysis_path,'rep')):
             os.makedirs(os.path.join(self.analysis_path,'rep'))
@@ -505,5 +533,9 @@ class BatchAnalysis:
         plot_mode_pairing(riem_reorder,indice,x_label='2nd half',y_label='1st half',
                           filename=filename)
         return np.mean(np.diagonal(riem_reorder))
+
+
+
+
 
 
