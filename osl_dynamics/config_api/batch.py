@@ -441,13 +441,13 @@ class BatchAnalysis:
                     print(f'save_dir {save_dir} fails!')
                     loss[metric][model][str(int(n_states))].append(np.nan)
 
-            # Plot
-            for metric in metrics:
-                for model in models:
-                    temp_keys = list(loss[metric][model].keys())
-                    temp_values = [loss[metric][model][key] for key in temp_keys]
-                    plot_box(data=temp_values,
-                             labels=temp_keys,
-                             demean=False,
-                             filename=os.path.join(self.analysis_path, f'{model}_{metric}.jpg')
-                             )
+        # Plot
+        for metric in metrics:
+            for model in models:
+                temp_keys = list(loss[metric][model].keys())
+                temp_values = [loss[metric][model][key] for key in temp_keys]
+                plot_box(data=temp_values,
+                         labels=temp_keys,
+                         demean=False,
+                         filename=os.path.join(self.analysis_path, f'{model}_{metric}.jpg')
+                        )
