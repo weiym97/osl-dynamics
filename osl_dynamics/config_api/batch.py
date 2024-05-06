@@ -389,21 +389,21 @@ class BatchAnalysis:
             self.config_root = yaml.safe_load(file)
         self.indexparser = IndexParser(self.config_root)
         self.config_list = pd.read_csv(os.path.join(config_path, 'config_list.csv'), index_col=0)
-        self.analysis_path = os.path.join(config_path,'analysis')
+        self.analysis_path = os.path.join(config_path, 'analysis')
         if not os.path.exists(self.analysis_path):
             os.makedirs(self.analysis_path)
 
-    def compare(self,demean=False,inset_start_index=None):
+    def compare(self, demean=False, inset_start_index=None):
         models = self.config_root['batch_variable']['model']
         n_states = self.config_root['batch_variable']['n_states']
-        metrics = {model: {str(int(num)): [] for num in n_states } for model in models}
+        metrics = {model: {str(int(num)): [] for num in n_states} for model in models}
         for i in range(len(self.config_list)):
             config = self.indexparser.parse(i)
             model = config['model']
             n_states = config['n_states']
             save_dir = config['save_dir']
             try:
-                with open(os.path.join(save_dir,'Y_test/metrics.json'), 'r') as file:
+                with open(os.path.join(save_dir, 'Y_test/metrics.json'), 'r') as file:
                     metric = json.load(file)['log_likelihood']
                 metrics[model][str(int(n_states))].append(metric)
             except Exception:
@@ -418,23 +418,36 @@ class BatchAnalysis:
                      labels=temp_keys,
                      demean=demean,
                      inset_start_index=inset_start_index,
-                     filename=os.path.join(self.analysis_path,f'{model}_metrics.jpg')
+                     filename=os.path.join(self.analysis_path, f'{model}_metrics.jpg')
                      )
 
-    def plot_free_energy(self):
+    def plot_training_loss(self, metrics=['free_energy']):
         models = self.config_root['batch_variable']['model']
         n_states = self.config_root['batch_variable']['n_states']
-        metrics = {model: {str(int(num)): [] for num in n_states} for model in models}
+        loss = {metric: {model: {str(int(num)): [] for num in n_states} for model in models} for metric in metrics}
         for i in range(len(self.config_list)):
             config = self.indexparser.parse(i)
             model = config['model']
             n_states = config['n_states']
             mode = config['mode']
             save_dir = config['save_dir']
-            print(f'model: {model}')
-            print(f'n_states: {n_states}')
-            print(f'mode: {mode}')
-            print(f'save_dir: {save_dir}')
+            if 'repeat' in mode:
+                try:
+                    with open(f'{save_dir}/metrics/metrics.json' "r") as file:
+                        data = json.load(file)
+                    for metric in metrics:
+                        loss[metric][model][str(int(n_states))].append(data['metric'])
+                except Exception:
+                    print(f'save_dir {save_dir} fails!')
+                    loss[metric][model][str(int(n_states))].append(np.nan)
 
-
-
+            # Plot
+            for metric in metrics:
+                for model in models:
+                    temp_keys = list(loss[metric][model].keys())
+                    temp_values = [loss[metric][model][key] for key in temp_keys]
+                    plot_box(data=temp_values,
+                             labels=temp_keys,
+                             demean=False,
+                             filename=os.path.join(self.analysis_path, f'{model}_{metric}.jpg')
+                             )
