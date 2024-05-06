@@ -448,6 +448,10 @@ class BatchAnalysis:
                 temp_values = [loss[metric][model][key] for key in temp_keys]
                 plot_box(data=temp_values,
                          labels=temp_keys,
+                         mark_best=False,
                          demean=False,
+                         x_label='N_states',
+                         y_label=metric,
+                         title=f'{metric} VS N_states',
                          filename=os.path.join(self.analysis_path, f'{model}_{metric}.jpg')
                         )
