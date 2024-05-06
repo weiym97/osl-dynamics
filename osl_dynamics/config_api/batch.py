@@ -433,7 +433,7 @@ class BatchAnalysis:
             save_dir = config['save_dir']
             if 'repeat' in mode:
                 try:
-                    with open(f'{save_dir}/metrics/metrics.json' "r") as file:
+                    with open(f'{save_dir}/metrics/metrics.json',"r") as file:
                         data = json.load(file)
                     for metric in metrics:
                         loss[metric][model][str(int(n_states))].append(data['metric'])
