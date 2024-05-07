@@ -1201,6 +1201,9 @@ class CVHMM(CVBase):
         prepare_config = {}
         prepare_config['load_data'] = config['load_data']
 
+        # If select key is not specificed before
+        if 'select' not in prepare_config['load_data']['prepare'].keys():
+            prepare_config['load_data']['prepare']['select'] = {}
         prepare_config['load_data']['prepare']['select']['channels'] = column
 
         prepare_config[f'train_{config["model"]}'] = {
@@ -1236,6 +1239,8 @@ class CVHMM(CVBase):
         prepare_config = {}
         prepare_config['load_data'] = config['load_data']
 
+        if 'select' not in prepare_config['load_data']['prepare'].keys():
+            prepare_config['load_data']['prepare']['select'] = {}
         prepare_config['load_data']['prepare']['select']['channels'] = column
 
         prepare_config[f'build_{config["model"]}'] = {
@@ -1276,6 +1281,8 @@ class CVHMM(CVBase):
         prepare_config = {}
         prepare_config['load_data'] = config['load_data']
 
+        if 'select' not in prepare_config['load_data']['prepare'].keys():
+            prepare_config['load_data']['prepare']['select'] = {}
         prepare_config['load_data']['prepare']['select']['channels'] = column
 
         prepare_config[f'train_{config["model"]}'] = {
@@ -1327,6 +1334,9 @@ class CVHMM(CVBase):
 
         prepare_config = {}
         prepare_config['load_data'] = config['load_data']
+
+        if 'select' not in prepare_config['load_data']['prepare'].keys():
+            prepare_config['load_data']['prepare']['select'] = {}
         prepare_config['load_data']['prepare']['select']['channels'] = column
 
         prepare_config[f'build_{config["model"]}'] = {
