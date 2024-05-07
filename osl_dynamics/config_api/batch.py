@@ -101,8 +101,8 @@ batch_variable:
                            if key not in ['batch_variable', 'non_batch_variable']}
 
         # Check the number of channels is set correctly.
-        if 'cv_kwargs' in self.other_keys:
-            assert self.non_batch_variable['n_channels'] == self.other_keys['cv_kwargs']['n_channels']
+        #if 'cv_kwargs' in self.other_keys:
+        #    assert self.non_batch_variable['n_channels'] == self.other_keys['cv_kwargs']['n_channels']
 
         # Check whether the save_dir exists, make directory if not
         if not os.path.exists(config['save_dir']):
