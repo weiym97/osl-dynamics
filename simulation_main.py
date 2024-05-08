@@ -529,7 +529,7 @@ if __name__ == '__main__':
 
     from osl_dynamics.data import Data
 
-    meg_data = Data("raw_save_dir")
+    meg_data = Data(raw_save_dir)
 
     # Prepare data
     methods = {
