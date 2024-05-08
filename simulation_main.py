@@ -483,6 +483,7 @@ if __name__ == '__main__':
         np.save(f'{save_dir}truth/{10001 + i}_state_time_course.npy', time_course[i])
     '''
 
+    '''
     # Case 7: diagonal. But states are stable
     save_dir = './data/node_timeseries/simulation_bicv/diagonal_stable/'
     if not os.path.exists(save_dir):
@@ -517,6 +518,26 @@ if __name__ == '__main__':
     for i in range(n_subjects):
         np.savetxt(f'{save_dir}{10001 + i}.txt', data[i])
         np.save(f'{save_dir}truth/{10001 + i}_state_time_course.npy', time_course[i])
+    '''
+
+    # Case 8: MEG data.
+    # The raw data are in ./data/node_timeseries/notts_MEG/raw/
+    # We'd like to implement tde-pca
+    # The pre-processed data are stored in ./data/node_timeseries/notts_MEG/tde-pca/
+    raw_save_dir = './data/node_timeseries/notts_MEG/raw/'
+    preprocessed_save_dir = './data/node_timeseries/notts_MEG/tde-pca/'
+
+    from osl_dynamics.data import Data
+
+    meg_data = Data("raw_save_dir")
+
+    # Prepare data
+    methods = {
+        "tde_pca": {"n_embeddings": 15, "n_pca_components": 80},
+        "standardize": {},
+    }
+    meg_data.prepare(methods)
+    meg_data.save(preprocessed_save_dir)
     #############################################################
     '''
     ### Update 6th Dec 2023
