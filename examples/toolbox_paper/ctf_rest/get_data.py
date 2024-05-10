@@ -24,8 +24,6 @@ def get_data(name, output_dir):
     os.remove(f"{name}.zip")
     print(f"Data downloaded to: {output_dir}")
 
-get_data("notts_mrc_meguk_aal", output_dir="training_data_78")
-
 
 # Download datasets for burst detection and dynamic network analysis
 # (approximately 708 MB)
