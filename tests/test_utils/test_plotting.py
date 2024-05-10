@@ -471,6 +471,16 @@ def test_plot_mode_pairing():
     plot_mode_pairing(metrics,indices,x_label='split_2',y_label='split_1',title='Pairing test',
                       filename=f'{plot_dir}/toy_example.png')
 
+def test_plot_IC_distribution():
+    from osl_dynamics.utils.plotting import plot_IC_distribution
+
+    plot_dir = "test_plot/plot_IC_distribution"
+    example_file_path = f'{plot_dir}/example.dscalar.nii'
+    if not os.path.isfile(example_file_path):
+        raise FileNotFoundError(f"The example file '{example_file_path}' does not exist.")
+
+    plot_IC_distribution(example_file_path,filename=f'{plot_dir}/example.png')
+
 def test_plot_box():
     from osl_dynamics.utils.plotting import plot_box
 

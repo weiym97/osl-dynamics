@@ -3,6 +3,7 @@
 """
 
 import logging
+import warnings
 from itertools import zip_longest
 
 import numpy as np
@@ -15,7 +16,7 @@ from matplotlib.path import Path
 from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
 from nilearn.plotting import plot_markers
 
-from osl_dynamics.array_ops import get_one_hot,demean_list
+from osl_dynamics.array_ops import get_one_hot, demean_list
 from osl_dynamics.utils.misc import override_dict_defaults
 from osl_dynamics.utils.topoplots import Topology
 from osl_dynamics.utils.parcellation import Parcellation
@@ -2386,7 +2387,7 @@ def plot_mode_pairing(
     fig_kwargs : dict, optional
         Arguments to pass to :code:`plt.subplots()`.
     sns_kwargs : dict, optional
-        Arguments to pass to :code:`sns.violinplot()`.
+        Arguments to pass to :code:`sns.heatmap()`.
     ax : matplotlib.axes.axes, optional
         Axis object to plot on.
     filename : str, optional
@@ -2455,23 +2456,162 @@ def plot_mode_pairing(
     elif create_fig:
         return fig, ax
 
+
+def plot_IC_distribution(
+        spatial_map,
+        reorder=True,
+        indices=None,
+        x_label='Independent Component',
+        y_label='Grayordinate',
+        title=None,
+        fig_kwargs=None,
+        sns_kwargs=None,
+        ax=None,
+        filename=None,
+
+):
+    """
+    Plot the distribution of independent components across the coordinates
+    Parameters
+    ----------
+    spatial_map: np.ndarray | nibabel.cifti2.cifti2.Cifti2Image | str
+        the spatial map of different compoments
+    reorder: bool,optional
+        whether reorder the compoments according to centre of mass.
+    indices: dict, optional
+        Indices as xticks and yticks.
+        The format should be {'row':[state_1, state_2,...state_N_1],'col':[state_1, state_2,...state_N_2]}
+    x_label : str, optional
+        Label for x-axis.
+    y_label : str, optional
+        Label for y-axis.
+    title : str, optional
+        Figure title.
+    fig_kwargs : dict, optional
+        Arguments to pass to :code:`plt.subplots()`.
+    sns_kwargs : dict, optional
+        Arguments to pass to :code:`sns.violinplot()`.
+    ax : matplotlib.axes.axes, optional
+        Axis object to plot on.
+    filename : str, optional
+        Output filename.
+
+    Returns
+    -------
+    fig : plt.figure
+        Matplotlib figure object. Only returned if :code:`ax=None` and
+        :code:`filename=None`.
+    ax : plt.axes
+        Matplotlib axis object(s). Only returned if :code:`ax=None` and
+        :code:`filename=None`.
+    """
+    import nibabel as nib
+    if isinstance(spatial_map, str):
+        spatial_map = nib.load(spatial_map)
+    if isinstance(spatial_map, nib.cifti2.cifti2.Cifti2Image):
+        spatial_map = spatial_map.get_fdata().T
+    # Check the size spatial map, which should be (V,N), where
+    # V is the number of vertexes, and N is the number of components.
+    if np.ndim(spatial_map) != 2:
+        raise ValueError('The input spatial map should be 2D!')
+    if spatial_map.shape[0] < spatial_map.shape[1]:
+        warnings.warn("This function assumes that the spatial map is in shape (V,N), where "
+                      "V is the number of vertexes, and N is the number of compoments."
+                      "Please check your data.")
+
+    # Validation
+    if ax is not None:
+        if filename is not None:
+            raise ValueError(
+                "Please use plotting.save() to save the figure instead of the "
+                + "filename argument."
+            )
+        if isinstance(ax, np.ndarray):
+            raise ValueError("Only pass one axis.")
+
+    if fig_kwargs is None:
+        fig_kwargs = {}
+    default_fig_kwargs = {"figsize": (8, 6),
+                          # "xtick.labelsize": 13,
+                          # "ytick.labelsize": 13,
+                          }
+    fig_kwargs = override_dict_defaults(default_fig_kwargs, fig_kwargs)
+
+    if sns_kwargs is None:
+        sns_kwargs = {}
+    default_sns_kwargs = {  # "font_scale": 1.2,
+        "cmap": "coolwarm",
+        "square": False,
+        "vmin": -0.8,
+        "vmax": 0.8,
+        # "linewidths": 0.5,
+        # "cbar_kws": {"shrink": 0.75},
+        # "fmt": ".2f"
+    }
+    sns_kwargs = override_dict_defaults(default_sns_kwargs, sns_kwargs)
+    # Set up the figure and axis
+
+    # Create figure
+    create_fig = ax is None
+    if create_fig:
+        fig, ax = create_figure(**fig_kwargs)
+
+    # Reorder
+    if reorder:
+        centers_of_gravity = (np.mean(np.arange(spatial_map.shape[0])[:, np.newaxis] * np.abs(spatial_map), axis=0)
+                              / np.mean(np.abs(spatial_map), axis=0))
+
+        # Sort the columns based on their center of gravity
+        sorted_indices = np.argsort(centers_of_gravity)
+
+        # Reorder the columns of the original array
+        spatial_map = spatial_map[:, sorted_indices]
+
+    # Create a heatmap of the correlation matrix
+    ax = sns.heatmap(data=spatial_map, ax=ax, **sns_kwargs)
+    # Set xticks and yticks
+    if indices is not None:
+        ax.set_xticks(np.arange(len(indices["col"])) + 0.5, indices["col"], fontsize=15)
+        ax.set_yticks(np.arange(len(indices["row"])) + 0.5, indices["row"], fontsize=15)
+    else:
+        num_indices = 5
+        max_col = ax.get_xlim()[1]
+        max_row = ax.get_ylim()[0]
+        col_indices = np.linspace(0, max_col, num_indices, dtype=int)
+        row_indices = np.linspace(0, max_row, num_indices, dtype=int)
+        print(row_indices)
+        ax.set_xticks(col_indices, col_indices, fontsize=15)
+        ax.set_yticks(row_indices, row_indices, fontsize=15)
+
+    # Set title and axis labels
+    ax.set_title(title, fontsize=20)
+    ax.set_xlabel(x_label, fontsize=15)
+    ax.set_ylabel(y_label, fontsize=15)
+
+    # Save the figure if a filename has been pass
+    if filename is not None:
+        save(fig, filename, tight_layout=True)
+    elif create_fig:
+        return fig, ax
+
+
 def plot_box(
-    data,
-    labels=None,
-    plot_samples=True,
-    mark_best=True,
-    demean=False,
-    inset_start_index=None,
-    y_range=None,
-    x_label=None,
-    y_label=None,
-    title=None,
-    plot_kwargs=None,
-    scatter_kwargs=None,
-    text_kwargs=None,
-    fig_kwargs=None,
-    ax=None,
-    filename=None,
+        data,
+        labels=None,
+        plot_samples=True,
+        mark_best=True,
+        demean=False,
+        inset_start_index=None,
+        y_range=None,
+        x_label=None,
+        y_label=None,
+        title=None,
+        plot_kwargs=None,
+        scatter_kwargs=None,
+        text_kwargs=None,
+        fig_kwargs=None,
+        ax=None,
+        filename=None,
 ):
     """Basic box plot.
 
@@ -2540,7 +2680,6 @@ def plot_box(
     if y_range is None:
         y_range = [None, None]
 
-
     if ax is not None:
         if filename is not None:
             raise ValueError(
@@ -2557,7 +2696,7 @@ def plot_box(
 
     if plot_kwargs is None:
         plot_kwargs = {}
-    default_plot_kwargs = {"showmeans": True,'showfliers':False}
+    default_plot_kwargs = {"showmeans": True, 'showfliers': False}
     plot_kwargs = override_dict_defaults(default_plot_kwargs, plot_kwargs)
 
     # Create figure
@@ -2575,12 +2714,12 @@ def plot_box(
 
     if plot_samples:
         cmap = plt.get_cmap('viridis')
-        default_scatter_kwargs = {'alpha':0.8,'s':10}
-        scatter_kwargs = override_dict_defaults(default_scatter_kwargs,scatter_kwargs)
+        default_scatter_kwargs = {'alpha': 0.8, 's': 10}
+        scatter_kwargs = override_dict_defaults(default_scatter_kwargs, scatter_kwargs)
         for i, (label, points) in enumerate(zip(labels, data)):
             x = np.random.normal(i + 1, 0.04, size=len(points))  # Add jitter to x-coordinates for better visualization
             for j in range(len(x)):
-                ax.scatter(x[j], points[j], color=cmap(j / len(x)),**scatter_kwargs)
+                ax.scatter(x[j], points[j], color=cmap(j / len(x)), **scatter_kwargs)
 
     # Set axis range
     if (y_range[0] is not None) and (y_range[1] is not None):
@@ -2589,15 +2728,14 @@ def plot_box(
         ax.relim()
         ax.autoscale_view()
 
-
     if mark_best:
-        default_text_kwargs = {'fontsize': 'large','ha':'center','va':'bottom'}
-        text_kwargs = override_dict_defaults(default_text_kwargs,text_kwargs)
+        default_text_kwargs = {'fontsize': 'large', 'ha': 'center', 'va': 'bottom'}
+        text_kwargs = override_dict_defaults(default_text_kwargs, text_kwargs)
         # Add asterisk at maximum median value box
         max_median_index = np.argmax([np.median(d) for d in data])
         max_median_value = np.max([np.median(d) for d in data])
         ax.text(max_median_index + 1, ax.get_ylim()[1], '*', **text_kwargs)
-        #ax.text(max_median_index + 1, bp['caps'][max_median_index * 2 + 1].get_data()[1], '*', ha='center', va='bottom')
+        # ax.text(max_median_index + 1, bp['caps'][max_median_index * 2 + 1].get_data()[1], '*', ha='center', va='bottom')
 
     if inset_start_index is not None:
         small_ax = fig.add_axes([0.65, 0.2, 0.3, 0.3])  # Adjust these values as needed for positioning
@@ -2608,7 +2746,6 @@ def plot_box(
     ax.set_title(title)
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
-
 
     # Save the figure if a filename has been pass
     if filename is not None:
