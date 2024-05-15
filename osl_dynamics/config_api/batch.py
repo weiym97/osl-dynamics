@@ -426,7 +426,7 @@ class BatchAnalysis:
                      labels=temp_keys,
                      demean=demean,
                      inset_start_index=inset_start_index,
-                     filename=os.path.join(self.analysis_path, f'{model}_{folder}_{object}.jpg')
+                     filename=os.path.join(self.analysis_path, f'{model}_{folder.split("/")[0]}_{object}.jpg')
                      )
 
     def plot_training_loss(self, metrics=['free_energy']):
