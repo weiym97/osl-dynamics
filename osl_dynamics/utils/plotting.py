@@ -2579,7 +2579,6 @@ def plot_IC_distribution(
         max_row = ax.get_ylim()[0]
         col_indices = np.linspace(0, max_col, num_indices, dtype=int)
         row_indices = np.linspace(0, max_row, num_indices, dtype=int)
-        print(row_indices)
         ax.set_xticks(col_indices, col_indices, fontsize=15)
         ax.set_yticks(row_indices, row_indices, fontsize=15)
 
