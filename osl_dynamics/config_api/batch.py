@@ -410,13 +410,13 @@ class BatchAnalysis:
             save_dir = config['save_dir']
             mode = config['mode']
             if 'cv' in mode:
-                try:
+                #try:
                     with open(os.path.join(save_dir,folder, 'metrics.json'), 'r') as file:
                         metric = json.load(file)[object]
                     metrics[model][str(int(n_states))].append(metric)
-                except Exception:
-                    print(f'save_dir {save_dir} fails!')
-                    metrics[model][str(int(n_states))].append(np.nan)
+                #except Exception:
+                #    print(f'save_dir {save_dir} fails!')
+                #    metrics[model][str(int(n_states))].append(np.nan)
 
         # Plot
         for model in models:
