@@ -394,7 +394,12 @@ class BatchAnalysis:
         if not os.path.exists(self.analysis_path):
             os.makedirs(self.analysis_path)
 
-    def compare(self, demean=False, inset_start_index=None):
+    def compare(self, demean=False, inset_start_index=None,folder='Y_test/',object='log_likelihood'):
+        '''
+        By default of bi-cross validation, we should compare the final log_likelihood on the Y_test.
+        But for sanity check, and potentiall understand how the method work, we are also interested in
+        the folder Y_train/metrics, X_test/metrics.
+        '''
         models = self.config_root['batch_variable']['model']
         n_states = self.config_root['batch_variable']['n_states']
         metrics = {model: {str(int(num)): [] for num in n_states} for model in models}
@@ -406,8 +411,8 @@ class BatchAnalysis:
             mode = config['mode']
             if 'cv' in mode:
                 try:
-                    with open(os.path.join(save_dir, 'Y_test/metrics.json'), 'r') as file:
-                        metric = json.load(file)['log_likelihood']
+                    with open(os.path.join(save_dir,folder, 'metrics.json'), 'r') as file:
+                        metric = json.load(file)[object]
                     metrics[model][str(int(n_states))].append(metric)
                 except Exception:
                     print(f'save_dir {save_dir} fails!')
@@ -421,7 +426,7 @@ class BatchAnalysis:
                      labels=temp_keys,
                      demean=demean,
                      inset_start_index=inset_start_index,
-                     filename=os.path.join(self.analysis_path, f'{model}_metrics.jpg')
+                     filename=os.path.join(self.analysis_path, f'{model}_{folder}_{object}.jpg')
                      )
 
     def plot_training_loss(self, metrics=['free_energy']):
