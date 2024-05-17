@@ -429,6 +429,22 @@ class BatchAnalysis:
                      filename=os.path.join(self.analysis_path, f'{model}_{folder.split("/")[0]}_{object}.jpg')
                      )
 
+
+    def temporal_analysis(self,demean=False, inset_start_index=None,theme='reproducibility'):
+        if theme == 'reproducibility':
+            directory_list = [['fold_1_1/X_train/inf_params/alp.pkl','fold_1_2/X_train/inf_params/alp.pkl'],
+                              ['fold_2_1/X_train/inf_params/alp.pkl','fold_2_2/X_train/inf_params/alp.pkl']]
+        elif theme == 'compromise':
+            directory_list = [['fold_1_1/X_train/inf_params/alp.pkl','fold_2_1/Y_test/inf_params/alp.pkl'],
+                              ['fold_1_2/X_train/inf_params/alp.pkl','fold_2_2/Y_test/inf_params/alp.pkl'],
+                              ['fold_2_1/X_train/inf_params/alp.pkl', 'fold_1_1/Y_test/inf_params/alp.pkl'],
+                              ['fold_2_2/X_train/inf_params/alp.pkl', 'fold_1_2/Y_test/inf_params/alp.pkl']]
+        elif theme == 'fixed':
+            directory_list = [['fold_1_1/X_train/inf_params/alp.pkl', 'fold_2_2/Y_test/inf_params/alp.pkl'],
+                              ['fold_1_2/X_train/inf_params/alp.pkl', 'fold_2_1/Y_test/inf_params/alp.pkl'],
+                              ['fold_2_1/X_train/inf_params/alp.pkl', 'fold_1_2/Y_test/inf_params/alp.pkl'],
+                              ['fold_2_2/X_train/inf_params/alp.pkl', 'fold_1_1/Y_test/inf_params/alp.pkl']]
+
     def plot_training_loss(self, metrics=['free_energy']):
         models = self.config_root['batch_variable']['model']
         n_states = self.config_root['batch_variable']['n_states']
