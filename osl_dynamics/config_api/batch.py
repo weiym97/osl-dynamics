@@ -501,7 +501,7 @@ class BatchAnalysis:
                             os.path.join(save_dir, directory[0]),
                             os.path.join(save_dir, directory[1]),
                             filename=os.path.join(spatial_directory,
-                                                  f"{model}_{n_state}_{mode}_{count}.jpg"))
+                                                  f"{model}_{n_state}_{mode}_{theme}_{count}.jpg"))
                         count += 1
                         metrics[model][str(int(n_state))].append(temp)
         for model in models:
