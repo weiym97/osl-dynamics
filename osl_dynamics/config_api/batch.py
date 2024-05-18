@@ -444,7 +444,17 @@ class BatchAnalysis:
                               ['fold_1_2/X_train/inf_params/alp.pkl', 'fold_2_1/Y_test/inf_params/alp.pkl'],
                               ['fold_2_1/X_train/inf_params/alp.pkl', 'fold_1_2/Y_test/inf_params/alp.pkl'],
                               ['fold_2_2/X_train/inf_params/alp.pkl', 'fold_1_1/Y_test/inf_params/alp.pkl']]
-
+        else:
+            raise ValueError('Invalid theme presented!')
+    def spatial_analysis(self,demean=False,inset_start_index=None,theme='reproducibility'):
+        if theme == 'reproducibility':
+            directory_list = [['fold_1_1/Y_train/inf_params/covs.npy','fold_2_1/Y_train/inf_params/covs.npy'],
+                              ['fold_1_2/Y_train/inf_params/covs.npy','fold_2_2/Y_train/inf_params/covs.npy']]
+        elif theme == 'fixed':
+            directory_list = [['fold_1_1/Y_train/inf_params/covs.npy','fold_1_2/X_train/dual_estimates/covs.npy'],
+                              ['fold_1_2/Y_train/inf_params/covs.npy','fold_1_1/X_train/dual_estimates/covs.npy'],
+                              ['fold_2_1/Y_train/inf_params/covs.npy','fold_2_2/X_train/dual_estimates/covs.npy'],
+                              ['fold_2_2/Y_train/inf_params/covs.npy','fold_2_1/X_train/dual_estimates/covs.npy']]
     def plot_training_loss(self, metrics=['free_energy']):
         models = self.config_root['batch_variable']['model']
         n_states = self.config_root['batch_variable']['n_states']
