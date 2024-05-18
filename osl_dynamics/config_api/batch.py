@@ -482,6 +482,38 @@ class BatchAnalysis:
         else:
             raise ValueError('Invalid theme presented!')
 
+        models = self.config_root['batch_variable']['model']
+        n_states = self.config_root['batch_variable']['n_states']
+        modes = self.config_root['batch_variable']['mode']
+        metrics = {model: {str(int(num)): [] for num in n_states} for model in models}
+        spatial_directory = os.path.join(self.analysis_path,'spatial_analysis')
+        if not os.path.exists(spatial_directory):
+            os.makedirs(spatial_directory)
+        for model in models:
+            for n_state in n_states:
+                for mode in modes:
+                    save_dir = (f"{self.config_root['save_dir']}/"
+                                f"{model}_ICA_{self.config_root['non_batch_variable']['n_channels']}_state_{n_state}/"
+                                f"{mode}/")
+                    count = 1
+                    for directory in directory_list:
+                        temp = self._spatial_reproducibility(
+                            os.path.join(save_dir, directory[0]),
+                            os.path.join(save_dir, directory[1]),
+                            filename=os.path.join(spatial_directory,
+                                                  f"{model}_{n_state}_{mode}_{count}.jpg"))
+                        count += 1
+                        metrics[model][str(int(n_states))].append(temp)
+        for model in models:
+            temp_keys = list(metrics[model].keys())
+            temp_values = [metrics[model][key] for key in temp_keys]
+            plot_box(data=temp_values,
+                     labels=temp_keys,
+                     demean=demean,
+                     inset_start_index=inset_start_index,
+                     filename=os.path.join(self.analysis_path, f'{model}_spatial_analysis_{theme}.jpg')
+                     )
+
 
     def plot_training_loss(self, metrics=['free_energy']):
         models = self.config_root['batch_variable']['model']
@@ -593,9 +625,35 @@ class BatchAnalysis:
                           filename=filename)
         return np.mean(np.diagonal(riem_reorder))
 
-    def _temporal_reproducibility(self,alpha_1,alpha_2):
+    def _spatial_reproducibility(self,cov_1,cov_2,filename=None):
+        from osl_dynamics.inference.metrics import twopair_riemannian_distance
         from osl_dynamics.inference.modes import hungarian_pair
         from osl_dynamics.utils.plotting import plot_mode_pairing
+        if isinstance(cov_1,str):
+            cov_1 = np.load(cov_1)
+        if isinstance(cov_2,str):
+            cov_2 = np.load(cov_2)
+        riem = twopair_riemannian_distance(cov_1, cov_2)
+        indice, riem_reorder = hungarian_pair(riem, distance=True)
+        plot_mode_pairing(riem_reorder, indice, x_label='2nd half', y_label='1st half',
+                          filename=filename)
+        return np.mean(np.diagonal(riem_reorder))
+
+    def _temporal_reproducibility(self,alpha_1,alpha_2):
+        from osl_dynamics.inference.metrics import alpha_correlation
+        from osl_dynamics.inference.modes import hungarian_pair
+        from osl_dynamics.utils.plotting import plot_mode_pairing
+
+        if isinstance(alpha_1,str):
+            with open(alpha_1, 'rb') as file:
+                alpha_1 = pickle.load(file)
+
+        if isinstance(alpha_2,str):
+            with open(alpha_2, 'rb') as file:
+                alpha_2 = pickle.load(file)
+
+        #if alpha_1[0].ndim == 1:
+
 
 
 
