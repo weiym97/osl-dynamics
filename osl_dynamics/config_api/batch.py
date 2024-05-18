@@ -507,7 +507,7 @@ class BatchAnalysis:
                             metrics[model][str(int(n_state))].append(temp)
                         except Exception:
                             print(f'Case {model} {n_state} {mode} {theme} fails!')
-                            metrics[model][str(int(n_states))].append(np.nan)
+                            metrics[model][str(int(n_state))].append(np.nan)
         for model in models:
             temp_keys = list(metrics[model].keys())
             temp_values = [metrics[model][key] for key in temp_keys]
