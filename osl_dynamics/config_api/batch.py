@@ -497,13 +497,17 @@ class BatchAnalysis:
                                 f"{mode}/")
                     count = 1
                     for directory in directory_list:
-                        temp = self._spatial_reproducibility(
-                            os.path.join(save_dir, directory[0]),
-                            os.path.join(save_dir, directory[1]),
-                            filename=os.path.join(spatial_directory,
-                                                  f"{model}_{n_state}_{mode}_{theme}_{count}.jpg"))
-                        count += 1
-                        metrics[model][str(int(n_state))].append(temp)
+                        try:
+                            temp = self._spatial_reproducibility(
+                                os.path.join(save_dir, directory[0]),
+                                os.path.join(save_dir, directory[1]),
+                                filename=os.path.join(spatial_directory,
+                                                      f"{model}_{n_state}_{mode}_{theme}_{count}.jpg"))
+                            count += 1
+                            metrics[model][str(int(n_state))].append(temp)
+                        except Exception:
+                            print(f'Case {model} {n_state} {mode} {theme} fails!')
+                            metrics[model][str(int(n_states))].append(np.nan)
         for model in models:
             temp_keys = list(metrics[model].keys())
             temp_values = [metrics[model][key] for key in temp_keys]
