@@ -485,6 +485,7 @@ class BatchAnalysis:
         models = self.config_root['batch_variable']['model']
         n_states = self.config_root['batch_variable']['n_states']
         modes = self.config_root['batch_variable']['mode']
+        modes = [mode for mode in modes if 'cv' in mode]
         metrics = {model: {str(int(num)): [] for num in n_states} for model in models}
         spatial_directory = os.path.join(self.analysis_path,'spatial_analysis')
         if not os.path.exists(spatial_directory):
