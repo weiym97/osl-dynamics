@@ -16,7 +16,7 @@ from matplotlib.path import Path
 from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
 from nilearn.plotting import plot_markers
 
-from osl_dynamics.array_ops import get_one_hot, demean_list
+from osl_dynamics.array_ops import get_one_hot, demean_list,filter_nan_values
 from osl_dynamics.utils.misc import override_dict_defaults
 from osl_dynamics.utils.topoplots import Topology
 from osl_dynamics.utils.parcellation import Parcellation
@@ -2705,6 +2705,8 @@ def plot_box(
 
     if demean:
         data = demean_list(data)
+
+    data = filter_nan_values(data)
 
     # Box plot
     bp = ax.boxplot(data, labels=labels, **plot_kwargs)
