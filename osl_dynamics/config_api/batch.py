@@ -467,7 +467,7 @@ class BatchAnalysis:
                             temp = self._temporal_reproducibility(
                                 os.path.join(save_dir,directory[0]),
                                 os.path.join(save_dir,directory[1]),
-                                n_states = n_states,
+                                n_states = n_state,
                                 filename=os.path.join(temporal_directory,
                                     f"{model}_{n_state}_{mode}_{theme}_{count}.jpg"))
                             count += 1
