@@ -450,16 +450,31 @@ class BatchAnalysis:
         models = self.config_root['batch_variable']['model']
         n_states = self.config_root['batch_variable']['n_states']
         modes = self.config_root['batch_variable']['mode']
+        modes = [mode for mode in modes if 'cv' in mode]
         metrics = {model: {str(int(num)): [] for num in n_states} for model in models}
+        temporal_directory = os.path.join(self.analysis_path, 'temporal_analysis')
+        if not os.path.exists(temporal_directory):
+            os.makedirs(temporal_directory)
         for model in models:
             for n_state in n_states:
                 for mode in modes:
                     save_dir = (f"{self.config_root['save_dir']}/"
                                 f"{model}_ICA_{self.config_root['non_batch_variable']['n_channels']}_state_{n_state}/"
                                 f"{mode}/")
+                    count = 1
                     for directory in directory_list:
-                        temp = self._temporal_reproducibility(os.path.join(save_dir,directory[0]),os.path.join(save_dir,directory[1]))
-                        metrics[model][str(int(n_states))].append(temp)
+                        try:
+                            temp = self._temporal_reproducibility(
+                                os.path.join(save_dir,directory[0]),
+                                os.path.join(save_dir,directory[1]),
+                                n_states = n_states,
+                                filename=os.path.join(temporal_directory,
+                                    f"{model}_{n_state}_{mode}_{theme}_{count}.jpg"))
+                            count += 1
+                            metrics[model][str(int(n_state))].append(temp)
+                        except Exception:
+                            print(f'Case {model} {n_state} {mode} {theme} fails!')
+                            metrics[model][str(int(n_state))].append(np.nan)
         for model in models:
             temp_keys = list(metrics[model].keys())
             temp_values = [metrics[model][key] for key in temp_keys]
@@ -644,7 +659,7 @@ class BatchAnalysis:
                           filename=filename)
         return np.mean(np.diagonal(riem_reorder))
 
-    def _temporal_reproducibility(self,alpha_1,alpha_2):
+    def _temporal_reproducibility(self,alpha_1,alpha_2,n_states,filename=None):
         from osl_dynamics.inference.metrics import alpha_correlation
         from osl_dynamics.inference.modes import hungarian_pair
         from osl_dynamics.utils.plotting import plot_mode_pairing
@@ -658,6 +673,7 @@ class BatchAnalysis:
                 alpha_2 = pickle.load(file)
 
         #if alpha_1[0].ndim == 1:
+        return 1
 
 
 
