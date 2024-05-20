@@ -95,9 +95,7 @@ if __name__ == '__main__':
         subj_run_names.append(subject_name)
         dataloc.append(line)
 
-    print(subj_run_names)
-    print(dataloc)
-    '''
+
     for subname, subpath in zip(subj_run_names, dataloc):
         print(subname)
         data_img = nibabel.load(subpath)
@@ -108,7 +106,5 @@ if __name__ == '__main__':
         np.save(outname, Ps)
         outname = outpath  + subname + '_timecourses.npy'
         np.save(outname, As)
-
-    '''
 
 
