@@ -94,6 +94,9 @@ if __name__ == '__main__':
 
         subj_run_names.append(subject_name)
         dataloc.append(line)
+
+    print(subj_run_names)
+    print(dataloc)
     '''
     for subname, subpath in zip(subj_run_names, dataloc):
         print(subname)
