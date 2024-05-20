@@ -463,7 +463,7 @@ class BatchAnalysis:
                                 f"{mode}/")
                     count = 1
                     for directory in directory_list:
-                        try:
+                        #try:
                             temp = self._temporal_reproducibility(
                                 os.path.join(save_dir,directory[0]),
                                 os.path.join(save_dir,directory[1]),
@@ -472,9 +472,9 @@ class BatchAnalysis:
                                     f"{model}_{n_state}_{mode}_{theme}_{count}.jpg"))
                             count += 1
                             metrics[model][str(int(n_state))].append(temp)
-                        except Exception:
-                            print(f'Case {model} {n_state} {mode} {theme} fails!')
-                            metrics[model][str(int(n_state))].append(np.nan)
+                        #except Exception:
+                        #    print(f'Case {model} {n_state} {mode} {theme} fails!')
+                        #    metrics[model][str(int(n_state))].append(np.nan)
         for model in models:
             temp_keys = list(metrics[model].keys())
             temp_values = [metrics[model][key] for key in temp_keys]
