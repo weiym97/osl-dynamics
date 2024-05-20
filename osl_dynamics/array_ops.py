@@ -454,6 +454,34 @@ def demean_list(data):
 
     return [[elem for elem in row if not np.isnan(elem)] for row in data]
 
+def filter_nan_values(data):
+    '''
+    Filter out the nan values across a list of lists.
+    Return the filtered list
+    Parameters
+    ----------
+    data: list
+        the input list to be filtered
+
+    Returns
+    -------
+    filtered_data: list
+        the filtered data. Nan values are chopped out.
+        '''
+    # Check whether the input is a list
+    if not isinstance(data, list):
+        raise TypeError('The input should be a list of lists!')
+    filtered_data = []
+    for sublist in data:
+        if not isinstance(sublist, list):
+            raise TypeError('The input should be a list of lists!')
+        filtered_sublist = [item for item in sublist if not np.isnan(item)]
+        filtered_data.append(filtered_sublist)
+
+    return filtered_data
+
+
+
 def convert_arrays_to_dtype(arrays, dtype):
     """
     Convert a list of numpy arrays to the specified data type.
