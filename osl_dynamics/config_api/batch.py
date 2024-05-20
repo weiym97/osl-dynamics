@@ -661,8 +661,9 @@ class BatchAnalysis:
 
     def _temporal_reproducibility(self,alpha_1,alpha_2,n_states,filename=None):
         from osl_dynamics.inference.metrics import alpha_correlation
-        from osl_dynamics.inference.modes import hungarian_pair
+        from osl_dynamics.inference.modes import hungarian_pair,argmax_time_courses
         from osl_dynamics.utils.plotting import plot_mode_pairing
+        from osl_dynamics.array_ops import get_one_hot
 
         if isinstance(alpha_1,str):
             with open(alpha_1, 'rb') as file:
@@ -672,8 +673,20 @@ class BatchAnalysis:
             with open(alpha_2, 'rb') as file:
                 alpha_2 = pickle.load(file)
 
-        #if alpha_1[0].ndim == 1:
-        return 1
+        # Get one-hot coding if the original one is not
+        if alpha_1[0].ndim == 1:
+            alpha_1 = get_one_hot(alpha_1,n_states)
+        if alpha_2[0].ndim == 1:
+            alpha_2 = get_one_hot(alpha_2,n_states)
+        # Argmax time courses.
+        alpha_1 = argmax_time_courses(alpha_1)
+        alpha_2 = argmax_time_courses(alpha_2)
+
+        corr = alpha_correlation(alpha_1,alpha_2,return_diagonal=False)
+        indice, corr_reorder = hungarian_pair(corr, distance=False)
+        plot_mode_pairing(corr_reorder, indice, x_label='2nd half', y_label='1st half',
+                          filename=filename)
+        return np.mean(np.diagonal(corr_reorder))
 
 
 
