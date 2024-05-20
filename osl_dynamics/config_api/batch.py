@@ -475,6 +475,9 @@ class BatchAnalysis:
                         except Exception:
                             print(f'Case {model} {n_state} {mode} {theme} fails!')
                             metrics[model][str(int(n_state))].append(np.nan)
+        # Save the dictionary to a file
+        with open(os.path.join(self.analysis_path, f'{model}_temporal_analysis_{theme}.pkl'), 'wb') as file:
+            pickle.dump(metrics, file)
         for model in models:
             temp_keys = list(metrics[model].keys())
             temp_values = [metrics[model][key] for key in temp_keys]
