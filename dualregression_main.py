@@ -102,9 +102,9 @@ if __name__ == '__main__':
         data = data_img.get_fdata().T
 
         Ps, As = runDR_v2(data, gICA, desnorm=True)
-        outname = outpath  + subname + '_smaps.npy'
+        outname = os.path.join(outpath, f'{subname}_smaps.npy')
         np.save(outname, Ps)
-        outname = outpath  + subname + '_timecourses.npy'
+        outname = os.path.join(outpath, f'{subname}_timecourses.npy')
         np.save(outname, As)
 
 
