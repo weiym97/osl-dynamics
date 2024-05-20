@@ -38,10 +38,11 @@ def get_one_hot(values, n_states=None):
 
     Parameters
     ----------
-    values : np.ndarray
+    values : np.ndarray | list[np.ndarray]
         1D array of categorical values with shape (n_samples,). The values
         should be integers (0, 1, 2, 3, ... , :code:`n_states` - 1). Or 2D
         array of shape (n_samples, n_states) to be binarized.
+        Or list of np.ndarray
     n_states : int, optional
         Total number of states in :code:`values`. Must be at least the number
         of states present in :code:`values`. Default is the number of unique
@@ -49,10 +50,16 @@ def get_one_hot(values, n_states=None):
 
     Returns
     -------
-    one_hot : np.ndarray
+    one_hot : np.ndarray | list[np.ndarray]
         A 2D array containing the one-hot encoded form of :code:`values`.
         Shape is (n_samples, n_states).
+        Or list of 2D arrays
     """
+    if isinstance(values,list):
+        result = []
+        for value in values:
+            result.append(get_one_hot(value,n_states))
+        return result
     if values.ndim == 2:
         values = values.argmax(axis=1)
     if n_states is None:

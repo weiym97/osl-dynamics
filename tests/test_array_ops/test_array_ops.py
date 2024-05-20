@@ -55,6 +55,24 @@ def test_get_one_hot():
     ])
     npt.assert_equal(get_one_hot(input_4, n_states=4), output_4)
 
+    # Case 5: list of Categorical input, and input n_states
+    input_5_1 = np.array([0, 2, 0, 1])
+    output_5_1 = np.array([
+        [1, 0, 0, 0],
+        [0, 0, 1, 0],
+        [1, 0, 0, 0],
+        [0, 1, 0, 0]
+    ])
+    input_5_2 = np.array([0, 0, 1])
+    output_5_2 = np.array([
+        [1, 0, 0, 0],
+        [1, 0, 0, 0],
+        [0, 1, 0, 0]
+    ])
+    input_5 = [input_5_1,input_5_2]
+    output_5 = get_one_hot(input_5,n_states=4)
+    npt.assert_equal(output_5[0], output_5_1)
+    npt.assert_equal(output_5[1],output_5_2)
 
 def test_cov2std():
     from osl_dynamics.array_ops import cov2std
