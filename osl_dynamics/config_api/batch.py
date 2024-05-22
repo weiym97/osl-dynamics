@@ -425,13 +425,11 @@ class BatchAnalysis:
             plot_box(data=temp_values,
                      labels=temp_keys,
                      demean=demean,
-                     fig_kwargs={"figsize": (7, 4)},
                      plot_kwargs = {"showmeans": False},
-                     title='Bi-cross-validation result',
                      x_label=r'$N_{states}$',
                      y_label='Demeaned log likelihood',
                      inset_start_index=inset_start_index,
-                     filename=os.path.join(self.analysis_path, f'{model}_{folder.split("/")[0]}_{object}.jpg')
+                     filename=os.path.join(self.analysis_path, f'{model}_{folder.split("/")[0]}_{object}.pdf')
                      )
 
 
