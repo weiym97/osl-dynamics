@@ -425,7 +425,7 @@ class BatchAnalysis:
             plot_box(data=temp_values,
                      labels=temp_keys,
                      demean=demean,
-                     fig_kwargs={"figsize": (20, 15)},
+                     fig_kwargs={"figsize": (7, 4)},
                      plot_kwargs = {"showmeans": False},
                      title='Bi-cross-validation result',
                      x_label=r'$N_{states}$',
