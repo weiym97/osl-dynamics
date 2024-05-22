@@ -2739,7 +2739,7 @@ def plot_box(
         # ax.text(max_median_index + 1, bp['caps'][max_median_index * 2 + 1].get_data()[1], '*', ha='center', va='bottom')
 
     if inset_start_index is not None:
-        small_ax = fig.add_axes([0.65, 0.2, 0.3, 0.3])  # Adjust these values as needed for positioning
+        small_ax = fig.add_axes([0.65, 0.3, 0.3, 0.3])  # Adjust these values as needed for positioning
         small_bp = small_ax.boxplot(data[inset_start_index:], labels=labels[inset_start_index:], **plot_kwargs)
         small_ax.set_xticklabels(labels[inset_start_index:], rotation=45)
 
