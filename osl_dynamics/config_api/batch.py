@@ -425,7 +425,6 @@ class BatchAnalysis:
             plot_box(data=temp_values,
                      labels=temp_keys,
                      demean=demean,
-                     plot_kwargs = {"showmeans": False},
                      x_label=r'$N_{states}$',
                      y_label='Demeaned log likelihood',
                      inset_start_index=inset_start_index,
