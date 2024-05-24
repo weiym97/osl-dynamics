@@ -105,6 +105,6 @@ if __name__ == '__main__':
         outname = os.path.join(outpath, f'{subname}_smaps.npy')
         np.save(outname, Ps)
         outname = os.path.join(outpath, f'{subname}_timecourses.npy')
-        np.save(outname, As)
+        np.save(outname, As.T)
 
 
