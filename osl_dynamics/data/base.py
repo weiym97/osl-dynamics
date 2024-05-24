@@ -40,6 +40,8 @@ class Data:
           same subject.
         - A list of numpy arrays. Each numpy array should be the data for a
           subject or session.
+        - (Added by Yiming 24th May 2024) A path to a txt file containing the
+          :code:`.npy` or :code:`.txt` files
 
         The data files or numpy arrays should be in the format (n_samples,
         n_channels). If your data is in (n_channels, n_samples) format, use
