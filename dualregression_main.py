@@ -71,8 +71,18 @@ if __name__ == '__main__':
     group_ica_path = str(sys.argv[1])
     raw_file_list_dir = str(sys.argv[2])
     outpath = str(sys.argv[3])
+
     if not os.path.exists(outpath):
         os.makedirs(outpath)
+
+    smaps_path = os.path.join(outpath,'spatial_maps/')
+    timecourses_path = os.path.join(outpath,'node_timeseries/')
+    if not os.path.exists(smaps_path):
+        os.makedirs(smaps_path)
+    if not os.path.exists(timecourses_path):
+        os.makedirs(timecourses_path)
+
+
 
     gICA_img = nibabel.load(group_ica_path)
     gICA = gICA_img.get_fdata().T
@@ -102,9 +112,9 @@ if __name__ == '__main__':
         data = data_img.get_fdata().T
 
         Ps, As = runDR_v2(data, gICA, desnorm=True)
-        outname = os.path.join(outpath, f'{subname}_smaps.npy')
+        outname = os.path.join(smaps_path, f'{subname}_smaps.npy')
         np.save(outname, Ps)
-        outname = os.path.join(outpath, f'{subname}_timecourses.npy')
+        outname = os.path.join(timecourses_path, f'{subname}_timecourses.npy')
         np.save(outname, As.T)
 
 
