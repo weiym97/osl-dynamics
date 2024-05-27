@@ -711,8 +711,8 @@ class BatchAnalysis:
             mean_off_diagonal = np.mean(corr_reorder[off_diagonal_indices])
             var_off_diagonal = np.var(corr_reorder[off_diagonal_indices])
 
-            if var_off_diagonal == 0:
-                var_off_diagonal = mean_off_diagonal
+            if n_states == 2:
+                var_off_diagonal = corr_reorder[0,1] ** 2
 
             # Return the mean diagonal value divided by the mean off-diagonal value
             return (mean_diagonal - mean_off_diagonal) / np.sqrt(var_off_diagonal)
