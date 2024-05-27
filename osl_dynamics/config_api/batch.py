@@ -432,7 +432,7 @@ class BatchAnalysis:
                      )
 
 
-    def temporal_analysis(self,demean=False, inset_start_index=None,theme='reproducibility'):
+    def temporal_analysis(self,demean=False, inset_start_index=None,theme='reproducibility',normalisation=False):
         if theme == 'reproducibility':
             directory_list = [['fold_1_1/X_train/inf_params/alp.pkl','fold_1_2/X_train/inf_params/alp.pkl'],
                               ['fold_2_1/X_train/inf_params/alp.pkl','fold_2_2/X_train/inf_params/alp.pkl']]
@@ -470,6 +470,7 @@ class BatchAnalysis:
                                 os.path.join(save_dir,directory[0]),
                                 os.path.join(save_dir,directory[1]),
                                 n_states = n_state,
+                                normalisation=normalisation,
                                 filename=os.path.join(temporal_directory,
                                     f"{model}_{n_state}_{mode}_{theme}_{count}.jpg"))
                             count += 1
@@ -487,10 +488,10 @@ class BatchAnalysis:
                      labels=temp_keys,
                      demean=demean,
                      inset_start_index=inset_start_index,
-                     filename=os.path.join(self.analysis_path, f'{model}_temporal_analysis_{theme}.jpg')
+                     filename=os.path.join(self.analysis_path, f'{model}_temporal_analysis_{theme}{"_norm" if normalisation else ""}.jpg')
                      )
 
-    def spatial_analysis(self,demean=False,inset_start_index=None,theme='reproducibility'):
+    def spatial_analysis(self,demean=False,inset_start_index=None,theme='reproducibility',normalisation=False):
         if theme == 'reproducibility':
             directory_list = [['fold_1_1/Y_train/inf_params/covs.npy','fold_2_1/Y_train/inf_params/covs.npy'],
                               ['fold_1_2/Y_train/inf_params/covs.npy','fold_2_2/Y_train/inf_params/covs.npy']]
@@ -522,6 +523,7 @@ class BatchAnalysis:
                             temp = self._spatial_reproducibility(
                                 os.path.join(save_dir, directory[0]),
                                 os.path.join(save_dir, directory[1]),
+                                normalisation=normalisation,
                                 filename=os.path.join(spatial_directory,
                                                       f"{model}_{n_state}_{mode}_{theme}_{count}.jpg"))
                             count += 1
@@ -536,7 +538,7 @@ class BatchAnalysis:
                      labels=temp_keys,
                      demean=demean,
                      inset_start_index=inset_start_index,
-                     filename=os.path.join(self.analysis_path, f'{model}_spatial_analysis_{theme}.jpg')
+                     filename=os.path.join(self.analysis_path, f'{model}_spatial_analysis_{theme}{"_norm" if normalisation else ""}.jpg')
                      )
 
 
@@ -650,7 +652,7 @@ class BatchAnalysis:
                           filename=filename)
         return np.mean(np.diagonal(riem_reorder))
 
-    def _spatial_reproducibility(self,cov_1,cov_2,filename=None):
+    def _spatial_reproducibility(self,cov_1,cov_2,normalisation=False,filename=None):
         from osl_dynamics.inference.metrics import twopair_riemannian_distance
         from osl_dynamics.inference.modes import hungarian_pair
         from osl_dynamics.utils.plotting import plot_mode_pairing
@@ -662,9 +664,17 @@ class BatchAnalysis:
         indice, riem_reorder = hungarian_pair(riem, distance=True)
         plot_mode_pairing(riem_reorder, indice, x_label='2nd half', y_label='1st half',
                           filename=filename)
-        return np.mean(np.diagonal(riem_reorder))
+        mean_diagonal = np.mean(np.diagonal(riem_reorder))
+        if normalisation:
+            off_diagonal_indices = np.where(~np.eye(riem_reorder.shape[0], dtype=bool))
+            mean_off_diagonal = np.mean(riem_reorder[off_diagonal_indices])
 
-    def _temporal_reproducibility(self,alpha_1,alpha_2,n_states,filename=None):
+            # Return the mean diagonal value divided by the mean off-diagonal value
+            return mean_diagonal / mean_off_diagonal
+        else:
+            return mean_diagonal
+
+    def _temporal_reproducibility(self,alpha_1,alpha_2,n_states,normalisation=False,filename=None):
         from osl_dynamics.inference.metrics import alpha_correlation
         from osl_dynamics.inference.modes import hungarian_pair,argmax_time_courses
         from osl_dynamics.utils.plotting import plot_mode_pairing
@@ -691,7 +701,15 @@ class BatchAnalysis:
         indice, corr_reorder = hungarian_pair(corr, distance=False)
         plot_mode_pairing(corr_reorder, indice, x_label='2nd half', y_label='1st half',
                           filename=filename)
-        return np.mean(np.diagonal(corr_reorder))
+        mean_diagonal = np.mean(np.diagonal(corr_reorder))
+        if normalisation:
+            off_diagonal_indices = np.where(~np.eye(corr_reorder.shape[0], dtype=bool))
+            mean_off_diagonal = np.mean(corr_reorder[off_diagonal_indices])
+
+            # Return the mean diagonal value divided by the mean off-diagonal value
+            return mean_diagonal / mean_off_diagonal
+        else:
+            return mean_diagonal
 
 
 
