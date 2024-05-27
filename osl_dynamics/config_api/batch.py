@@ -668,9 +668,10 @@ class BatchAnalysis:
         if normalisation:
             off_diagonal_indices = np.where(~np.eye(riem_reorder.shape[0], dtype=bool))
             mean_off_diagonal = np.mean(riem_reorder[off_diagonal_indices])
+            var_off_diagonal = np.var(riem_reorder[off_diagonal_indices])
 
             # Return the mean diagonal value divided by the mean off-diagonal value
-            return mean_diagonal / mean_off_diagonal
+            return (mean_diagonal - mean_off_diagonal) / np.sqrt(var_off_diagonal)
         else:
             return mean_diagonal
 
@@ -705,9 +706,10 @@ class BatchAnalysis:
         if normalisation:
             off_diagonal_indices = np.where(~np.eye(corr_reorder.shape[0], dtype=bool))
             mean_off_diagonal = np.mean(corr_reorder[off_diagonal_indices])
+            var_off_diagonal = np.var(corr_reorder[off_diagonal_indices])
 
             # Return the mean diagonal value divided by the mean off-diagonal value
-            return mean_diagonal / mean_off_diagonal
+            return (mean_diagonal - mean_off_diagonal) / np.sqrt(var_off_diagonal)
         else:
             return mean_diagonal
 
