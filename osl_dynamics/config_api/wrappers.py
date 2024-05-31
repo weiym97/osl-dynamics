@@ -873,6 +873,7 @@ def log_likelihood(data, output_dir ):
     output_dir : str
         Path to output directory.
     """
+    raise ValueError('We are here in the log likelihood wrapper!')
     if data is None:
         raise ValueError("data must be passed.")
 

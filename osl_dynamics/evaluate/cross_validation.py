@@ -1438,11 +1438,6 @@ class CVHMM(CVBase):
                                                  save_dir=os.path.join(config['save_dir'], 'X_train/'))
             temporal_X_test = self.infer_temporal(config, row_test, column_X, spatial_X_train,
                                                   save_dir=os.path.join(config['save_dir'], 'X_test/'))
-            print('We are in a position for testing!')
-            print('##################################')
-            print('spatial_X_train is: ', spatial_X_train)
-            print('temporal_X_test is: ', temporal_X_test)
-            raise ValueError('For test only!')
             metric = self.calculate_error(config, row_test, column_Y, temporal_X_test, spatial_Y_train,
                                           save_dir=os.path.join(config['save_dir'], 'Y_test/'))
 
