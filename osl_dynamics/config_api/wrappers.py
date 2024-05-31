@@ -192,6 +192,17 @@ def train_hmm(
     }
     config_kwargs = override_dict_defaults(default_config_kwargs, config_kwargs)
     _logger.info(f"Using config_kwargs: {config_kwargs}")
+
+    if config_kwargs['n_states'] == 1:
+        ts = data.time_series(prepared=True, concatenate=False)
+        # Note training_data.keep is in order. You need to preserve the order
+        # between data and alpha.
+        ts = [ts[i] for i in data.keep]
+        # Concatenate across all sessions
+        ts = np.concatenate(ts,axis=0)
+        print(ts.shape)
+        raise ValueError('For test only!')
+
     config = hmm.Config(**config_kwargs)
     model = hmm.Model(config)
     model.summary()
