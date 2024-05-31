@@ -1231,7 +1231,7 @@ class CVHMM(CVBase):
             os.makedirs(save_dir)
         # Do nothing if n_states = 1
         if config['n_states'] == 1:
-            return
+            return '0'
 
         # Create a new directory "config['save_dir']/X_train/inf_params
         if not os.path.exists(f'{save_dir}inf_params/'):
@@ -1284,7 +1284,7 @@ class CVHMM(CVBase):
 
         # Do nothing if n_states = 1
         if config['n_states'] == 1:
-            return
+            return '0'
 
         prepare_config = {}
         prepare_config['load_data'] = config['load_data']
