@@ -1358,7 +1358,7 @@ class CVHMM(CVBase):
 
             prepare_config['log_likelihood'] = {'static_FC':False}
         else:
-            prepare_config['log_likelihood'] = {'static_FC':True}
+            prepare_config['log_likelihood'] = {'static_FC':True,'spatial':spatial}
         # Note the 'keep_list' value is in order (from small to large number)
         prepare_config['keep_list'] = row
 

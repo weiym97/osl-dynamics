@@ -55,10 +55,10 @@ def get_one_hot(values, n_states=None):
         Shape is (n_samples, n_states).
         Or list of 2D arrays
     """
-    if isinstance(values,list):
+    if isinstance(values, list):
         result = []
         for value in values:
-            result.append(get_one_hot(value,n_states))
+            result.append(get_one_hot(value, n_states))
         return result
     if values.ndim == 2:
         values = values.argmax(axis=1)
@@ -160,13 +160,14 @@ def cov2stdcorr(covs):
     normalisation = np.expand_dims(stds, -1) @ np.expand_dims(stds, -2)
     return stds, covs / normalisation
 
+
 def sliding_window_view(
-    x,
-    window_shape,
-    axis=None,
-    *,
-    subok=False,
-    writeable=False,
+        x,
+        window_shape,
+        axis=None,
+        *,
+        subok=False,
+        writeable=False,
 ):
     """Create a sliding window over an array in arbitrary dimensions.
 
@@ -410,6 +411,7 @@ def list_stds(list_of_lists):
     """
     return apply_to_lists(list_of_lists, func=np.std)
 
+
 def npz2list(array):
     '''
     Convert npz instance to a list of numpy arrays.
@@ -424,10 +426,11 @@ def npz2list(array):
     list_of_array: list
         the returned list of np.ndarrays
     '''
-    if isinstance(array,np.ndarray):
+    if isinstance(array, np.ndarray):
         return [array]
-    elif isinstance(array,np.lib.npyio.NpzFile):
+    elif isinstance(array, np.lib.npyio.NpzFile):
         return [array[key] for key in array.keys()]
+
 
 def demean_list(data):
     '''
@@ -444,15 +447,16 @@ def demean_list(data):
         the demeaned data. Nan values are chopped out.
     '''
     # Check whether the input is a list
-    if not isinstance(data,list):
+    if not isinstance(data, list):
         raise TypeError('The input should be a list of lists!')
     data = np.array(data)
     if not data.ndim == 2:
         raise ValueError('The input should be a list of lists!')
 
-    data -= np.nanmean(data,axis=0,keepdims=True)
+    data -= np.nanmean(data, axis=0, keepdims=True)
 
     return [[elem for elem in row if not np.isnan(elem)] for row in data]
+
 
 def filter_nan_values(data):
     '''
@@ -481,7 +485,6 @@ def filter_nan_values(data):
     return filtered_data
 
 
-
 def convert_arrays_to_dtype(arrays, dtype):
     """
     Convert a list of numpy arrays to the specified data type.
@@ -497,7 +500,7 @@ def convert_arrays_to_dtype(arrays, dtype):
     arrays: np.ndarray | list of np.ndarray
         numpy arrays with the specified data type
     """
-    if isinstance(arrays,np.ndarray):
+    if isinstance(arrays, np.ndarray):
         return arrays.astype(dtype)
 
     converted_arrays = []
@@ -505,7 +508,8 @@ def convert_arrays_to_dtype(arrays, dtype):
         converted_arrays.append(arr.astype(dtype))
     return converted_arrays
 
-def estimate_gaussian_distribution(data,nonzero_means=False,keepdims=True,bias=True):
+
+def estimate_gaussian_distribution(data, nonzero_means=False, keepdims=True, bias=True):
     """
     Estimate the mean and covariance of a Gaussian distribution from given data.
 
@@ -533,4 +537,11 @@ def estimate_gaussian_distribution(data,nonzero_means=False,keepdims=True,bias=T
     if keepdims:
         cov = np.expand_dims(cov, axis=0)
 
-    return mean,cov
+    return mean, cov
+
+
+def estimate_gaussian_log_likehood(data, means, covs,average=True):
+    print(f'data shape is: {data.shape}')
+    print(f'means shape is: {means.shape}')
+    print(f'covs shape is: {covs.shape}')
+    raise ValueError('For test only!')

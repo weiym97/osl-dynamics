@@ -852,7 +852,7 @@ def dual_estimation(data, output_dir, n_jobs=1,concatenate=False):
     save(f"{dual_estimates_dir}/means.npy", means)
     save(f"{dual_estimates_dir}/covs.npy", covs)
 
-def log_likelihood(data, output_dir,static_FC=False):
+def log_likelihood(data, output_dir,static_FC=False,spatial=None):
     """Log-likelihood estimation for the data.
 
     This function expects a model has already been trained and the following
@@ -872,24 +872,13 @@ def log_likelihood(data, output_dir,static_FC=False):
         Data object.
     output_dir : str
         Path to output directory.
+    static_FC: bool, optional
+        Whether to work only with static FC, i.e., #states=1
+    spatial: dictionary, optional
+        Only when static_FC = True, use the spatial map file directory here.
     """
-    print('We are now calculating log likelihood:')
-    print(f'Static FC is: {static_FC}')
-    raise ValueError('We are here in the log likelihood wrapper!')
     if data is None:
         raise ValueError("data must be passed.")
-
-    # Directories
-    model_dir = f"{output_dir}/model"
-    inf_params_dir = f"{output_dir}/inf_params"
-
-    #  Load model
-    from osl_dynamics import models
-
-    model = models.load(model_dir)
-
-    # Load the inferred state probabilities
-    alpha = load(f"{inf_params_dir}/alp.pkl")
 
     # Get the session-specific data
     ts = data.time_series(prepared=True, concatenate=False)
@@ -898,17 +887,40 @@ def log_likelihood(data, output_dir,static_FC=False):
     # between data and alpha.
     ts = [ts[i] for i in data.keep]
 
-    if len(alpha) != len(ts):
-        raise ValueError(
-            "len(alpha) and training_data.n_sessions must be the same."
-        )
+    if static_FC:
+        means = np.load(spatial['means'])
+        covs = np.load(spatial['covs'])
+    else:
+        # Directories
+        model_dir = f"{output_dir}/model"
+        inf_params_dir = f"{output_dir}/inf_params"
 
-    # Stack both ts and alpha
-    alpha = np.stack(alpha)
+        #  Load model
+        from osl_dynamics import models
+
+        model = models.load(model_dir)
+
+        # Load the inferred state probabilities
+        alpha = load(f"{inf_params_dir}/alp.pkl")
+
+
+
+        if len(alpha) != len(ts):
+            raise ValueError(
+                "len(alpha) and training_data.n_sessions must be the same."
+            )
+
+        # Stack both ts and alpha
+        alpha = np.stack(alpha)
+
     ts = np.stack(ts)
 
-    # Get posterior expected log-likelihood (averaged over session)
-    metrics = float(model.get_posterior_expected_log_likelihood(ts,alpha)) / len(ts)
+    if static_FC:
+        from osl_dynamics.array_ops import estimate_gaussian_log_likelihood
+        estimate_gaussian_log_likelihood(ts,means,covs,average=True)
+    else:
+        # Get posterior expected log-likelihood (averaged over session)
+        metrics = float(model.get_posterior_expected_log_likelihood(ts,alpha)) / len(ts)
 
     # Save
     with open(f"{output_dir}metrics.json", "w") as file:
