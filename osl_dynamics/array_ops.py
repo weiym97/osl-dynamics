@@ -490,7 +490,7 @@ def convert_arrays_to_dtype(arrays, dtype):
     ----------
     arrays: np.ndarray | list of np.ndarray
         the arrays  to convert
-    - dtype: Desired data type (e.g., np.float16, np.float32, np.float64)
+    dtype: Desired data type (e.g., np.float16, np.float32, np.float64)
 
     Returns
     -------
@@ -504,3 +504,33 @@ def convert_arrays_to_dtype(arrays, dtype):
     for arr in arrays:
         converted_arrays.append(arr.astype(dtype))
     return converted_arrays
+
+def estimate_gaussian_distribution(data,nonzero_means=False,keepdims=True,bias=True):
+    """
+    Estimate the mean and covariance of a Gaussian distribution from given data.
+
+    Parameters
+    ----------
+    data: np.ndarray
+        the (N,M) data to estimate. N is the #samples, and M is #dimensions.
+    nonzero_means: bool,optional
+        Whether we would like the output means to be zero.
+    keepdims: bool,optional
+        Whether to keep the first dimension in the output
+    bias: bool,optional
+        Used in the covariance estimation.
+    """
+    if nonzero_means:
+        mean = np.mean(data, axis=0, keepdims=keepdims)
+    else:
+        mean = np.zeros((1, data.shape[1])) if keepdims else np.zeros(data.shape[1])
+
+    # Subtract the mean from the data to center it
+    centered_data = data - mean
+
+    # Calculate the covariance matrix
+    cov = np.cov(centered_data, rowvar=False, bias=bias)
+    if keepdims:
+        cov = np.expand_dims(cov, axis=0)
+
+    return mean,cov

@@ -294,3 +294,31 @@ def test_convert_arrays_to_dtype():
     for i in range(len(converted_arrays)):
         npt.assert_allclose(converted_arrays[i], expected_float32[i])
         assert converted_arrays[i].dtype == expected_float32[i].dtype
+
+def test_estimate_gaussian_distribution():
+    from osl_dynamics.array_ops import estimate_gaussian_distribution
+
+    # Generate synthetic data
+    np.random.seed(0)
+    data = np.array([[1.,-1.],[3.,5.],[5.,8.]])
+
+    # Test case 1: nonzero_means=True, keepdims=True
+    mean, cov = estimate_gaussian_distribution(data, nonzero_means=True, keepdims=True)
+    npt.assert_almost_equal(mean, np.array([[3.,4.]]))
+    npt.assert_almost_equal(cov, np.array([[[8/3,6.],[6.,14.]]]))
+
+    # Test case 2: nonzero_means=False, keepdims=True
+    mean, cov = estimate_gaussian_distribution(data, nonzero_means=False, keepdims=True)
+    npt.assert_almost_equal(mean, np.array([[0.,0.]]))
+    npt.assert_almost_equal(cov,np.array([[[8/3,6.],[6.,14.]]]))
+
+    # Test case 3: nonzero_means=True, keepdims=False
+    mean, cov = estimate_gaussian_distribution(data, nonzero_means=True, keepdims=False)
+    npt.assert_almost_equal(mean,np.array([3.,4.]))
+    npt.assert_almost_equal(cov, np.array([[8/3,6.],[6.,14.]]))
+
+    # Test case 4: nonzero_means=False, keepdims=False
+    mean, cov = estimate_gaussian_distribution(data, nonzero_means=False, keepdims=False)
+    npt.assert_almost_equal(mean, np.array([0.,0.]))
+    npt.assert_almost_equal(cov, np.array([[8/3,6.],[6.,14.]]))
+
