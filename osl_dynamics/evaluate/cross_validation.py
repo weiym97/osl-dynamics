@@ -1229,6 +1229,9 @@ class CVHMM(CVBase):
             save_dir = os.path.join(config['save_dir'], 'infer_spatial/')
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
+        # Do nothing if n_states = 1
+        if config['n_states'] == 1:
+            return 0
 
         # Create a new directory "config['save_dir']/X_train/inf_params
         if not os.path.exists(f'{save_dir}inf_params/'):
@@ -1255,6 +1258,7 @@ class CVHMM(CVBase):
 
         with open(f'{save_dir}/prepared_config.yaml', 'w') as file:
             yaml.safe_dump(prepare_config, file, default_flow_style=False, sort_keys=False)
+
         run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
                                save_dir)
 
@@ -1277,6 +1281,10 @@ class CVHMM(CVBase):
             save_dir = os.path.join(config['save_dir'], 'infer_temporal/')
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
+
+        # Do nothing if n_states = 1
+        if config['n_states'] == 1:
+            return 0
 
         prepare_config = {}
         prepare_config['load_data'] = config['load_data']
@@ -1430,6 +1438,11 @@ class CVHMM(CVBase):
                                                  save_dir=os.path.join(config['save_dir'], 'X_train/'))
             temporal_X_test = self.infer_temporal(config, row_test, column_X, spatial_X_train,
                                                   save_dir=os.path.join(config['save_dir'], 'X_test/'))
+            print('We are in a position for testing!')
+            print('##################################')
+            print('spatial_X_train is: ', spatial_X_train)
+            print('temporal_X_test is: ', temporal_X_test)
+            raise ValueError('For test only!')
             metric = self.calculate_error(config, row_test, column_Y, temporal_X_test, spatial_Y_train,
                                           save_dir=os.path.join(config['save_dir'], 'Y_test/'))
 
