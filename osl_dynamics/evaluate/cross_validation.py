@@ -1335,7 +1335,7 @@ class CVHMM(CVBase):
             with open(temporal, 'wb') as file:
                 pickle.dump(alpha, file)
 
-        shutil.move(temporal, f'{save_dir}inf_params/')
+            shutil.move(temporal, f'{save_dir}inf_params/')
 
 
 
@@ -1347,15 +1347,18 @@ class CVHMM(CVBase):
             prepare_config['load_data']['prepare']['select'] = {}
         prepare_config['load_data']['prepare']['select']['channels'] = column
 
-        prepare_config[f'build_{config["model"]}'] = {
-            'config_kwargs':
-                {key: config[key] for key in self.train_keys if key in config},
-        }
-        prepare_config[f'build_{config["model"]}']['config_kwargs']['n_channels'] = len(column)
-        prepare_config[f'build_{config["model"]}']['config_kwargs']['initial_means'] = spatial['means']
-        prepare_config[f'build_{config["model"]}']['config_kwargs']['initial_covariances'] = spatial['covs']
+        if config['n_states'] > 1:
+            prepare_config[f'build_{config["model"]}'] = {
+                'config_kwargs':
+                    {key: config[key] for key in self.train_keys if key in config},
+            }
+            prepare_config[f'build_{config["model"]}']['config_kwargs']['n_channels'] = len(column)
+            prepare_config[f'build_{config["model"]}']['config_kwargs']['initial_means'] = spatial['means']
+            prepare_config[f'build_{config["model"]}']['config_kwargs']['initial_covariances'] = spatial['covs']
 
-        prepare_config['log_likelihood'] = {}
+            prepare_config['log_likelihood'] = {'static_FC':False}
+        else:
+            prepare_config['log_likelihood'] = {'static_FC':True}
         # Note the 'keep_list' value is in order (from small to large number)
         prepare_config['keep_list'] = row
 
