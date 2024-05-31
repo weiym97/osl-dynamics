@@ -193,6 +193,7 @@ def train_hmm(
     config_kwargs = override_dict_defaults(default_config_kwargs, config_kwargs)
     _logger.info(f"Using config_kwargs: {config_kwargs}")
 
+    # Deal with the special case of static FC model (n_state = 1 )
     if config_kwargs['n_states'] == 1:
         ts = data.time_series(prepared=True, concatenate=False)
         # Note training_data.keep is in order. You need to preserve the order
@@ -200,8 +201,16 @@ def train_hmm(
         ts = [ts[i] for i in data.keep]
         # Concatenate across all sessions
         ts = np.concatenate(ts,axis=0)
-        print(ts.shape)
-        raise ValueError('For test only!')
+
+        from osl_dynamics.array_ops import estimate_gaussian_distribution
+        means,covs = estimate_gaussian_distribution(ts,nonzero_means=config_kwargs['learn_means'])
+
+        inf_params_dir = output_dir + "/inf_params"
+        os.makedirs(inf_params_dir, exist_ok=True)
+
+        save(f"{inf_params_dir}/means.npy", means)
+        save(f"{inf_params_dir}/covs.npy", covs)
+        return
 
     config = hmm.Config(**config_kwargs)
     model = hmm.Model(config)
