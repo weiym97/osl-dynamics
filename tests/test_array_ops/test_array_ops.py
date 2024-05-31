@@ -322,3 +322,8 @@ def test_estimate_gaussian_distribution():
     npt.assert_almost_equal(mean, np.array([0.,0.]))
     npt.assert_almost_equal(cov, np.array([[8/3,6.],[6.,14.]]))
 
+def test_estimate_gaussian_log_likelihood():
+    from osl_dynamics.array_ops import estimate_gaussian_log_likelihood
+
+
+

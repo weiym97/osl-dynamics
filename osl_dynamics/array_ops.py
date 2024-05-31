@@ -540,8 +540,61 @@ def estimate_gaussian_distribution(data, nonzero_means=False, keepdims=True, bia
     return mean, cov
 
 
-def estimate_gaussian_log_likelihood(data, means, covs,average=True):
-    print(f'data shape is: {data.shape}')
-    print(f'means shape is: {means.shape}')
-    print(f'covs shape is: {covs.shape}')
-    raise ValueError('For test only!')
+import numpy as np
+from scipy.stats import multivariate_normal
+
+
+def estimate_gaussian_log_likelihood(data, means, covs, average=True):
+    """
+    Calculate the Gaussian log-likelihood given the data, means, and covariances.
+
+    Parameters
+    ----------
+    data : np.ndarray
+        The data to estimate the log-likelihood for. The last dimension should be the number of channels.
+        All previous dimensions will be reshaped to form a 2D array where each row is a data point.
+    means : np.ndarray
+        The means of the Gaussian distribution. Should be of shape (channels,) or (1, channels).
+    covs : np.ndarray
+        The covariances of the Gaussian distribution. Should be of shape (channels, channels) or (1, channels, channels).
+    average : bool, optional
+        Whether to average the log-likelihood across all data points (default is True).
+
+    Returns
+    -------
+    float
+        The log-likelihood of the data under the Gaussian distribution.
+        If `average` is True, returns the average log-likelihood per data point.
+        Otherwise, returns the total log-likelihood.
+
+    Raises
+    ------
+    ValueError
+        If the last dimension (number of channels) is not compatible across data, means, and covs.
+    """
+    from scipy.stats import multivariate_normal
+
+    # Check if the last dimension is compatible
+    data_channels = data.shape[-1]
+    means_channels = means.shape[-1] if len(means.shape) > 1 else means.shape[0]
+    covs_channels = covs.shape[-1]
+
+    if data_channels != means_channels or data_channels != covs_channels:
+        raise ValueError("The number of channels in data, means, and covs must be compatible.")
+
+    # Reshape data to 2D array (num_samples, num_channels)
+    data = data.reshape(-1, data_channels)
+
+    # Handle broadcasting of means and covs
+    if means.ndim == 1:
+        means = means.reshape(1, -1)
+    if covs.ndim == 2:
+        covs = covs.reshape(1, data_channels, data_channels)
+
+    # Calculate the log-likelihood using scipy's multivariate_normal
+    log_likelihoods = multivariate_normal.logpdf(data, mean=means[0], cov=covs[0])
+
+    if average:
+        return np.mean(log_likelihoods)
+    else:
+        return np.sum(log_likelihoods)
