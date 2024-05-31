@@ -540,7 +540,7 @@ def estimate_gaussian_distribution(data, nonzero_means=False, keepdims=True, bia
     return mean, cov
 
 
-def estimate_gaussian_log_likehood(data, means, covs,average=True):
+def estimate_gaussian_log_likelihood(data, means, covs,average=True):
     print(f'data shape is: {data.shape}')
     print(f'means shape is: {means.shape}')
     print(f'covs shape is: {covs.shape}')
