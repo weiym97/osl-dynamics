@@ -1324,7 +1324,10 @@ class CVHMM(CVBase):
 
         if not os.path.exists(f'{save_dir}inf_params/'):
             os.makedirs(f'{save_dir}inf_params/')
-
+        print('We are here for test only!')
+        print('The variable temporal is: ',temporal)
+        print('##############################')
+        raise ValueError('For test only!')
         # Compress the file
         if os.path.exists(temporal):
             from osl_dynamics.array_ops import convert_arrays_to_dtype
