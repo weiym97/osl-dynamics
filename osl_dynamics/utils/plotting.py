@@ -2736,8 +2736,10 @@ def plot_box(
         default_text_kwargs = {'fontsize': 'large', 'ha': 'center', 'va': 'bottom'}
         text_kwargs = override_dict_defaults(default_text_kwargs, text_kwargs)
         # Add asterisk at maximum median value box
-        max_median_index = np.argmax([np.median(d) for d in data])
-        max_median_value = np.max([np.median(d) for d in data])
+        data_median = [np.nanmedian(d) for d in data]
+        # Deal with the nan values.
+        data_median = [-np.inf if np.isnan(m) else m for m in data_median]
+        max_median_index = np.argmax(data_median)
         ax.text(max_median_index + 1, ax.get_ylim()[1], '*', **text_kwargs)
         # ax.text(max_median_index + 1, bp['caps'][max_median_index * 2 + 1].get_data()[1], '*', ha='center', va='bottom')
 
