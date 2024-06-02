@@ -255,7 +255,14 @@ def test_demean_list():
         [0., 0., 0.],
         [1.,5.,3.]
     ]
+    answer_1_p = [
+        [0.,0.,0.],
+        [1.,5.,3.],
+        [2.,10.,6.]
+    ]
     npt.assert_allclose(demean_list(data_1), answer_1, atol=1e-8)
+    npt.assert_allclose(demean_list(data_1,0),answer_1_p,atol=1e-8)
+
 
     data_2 = [
         [1., 5., np.nan],
@@ -268,6 +275,23 @@ def test_demean_list():
         [1., 1.5]
     ]
     npt.assert_allclose(demean_list(data_2), answer_2, atol=1e-8)
+
+    data_3 = [
+        [1., 5., 7.],
+        [np.nan, 10., 6.],
+        [3., np.nan, 9.]
+    ]
+    answer_3 = [
+        [0.,0.,0.],
+        [5., -1],
+        [2., 2.]
+    ]
+    output_3 = demean_list(data_3,0)
+    npt.assert_allclose(output_3[0], answer_3[0], atol=1e-8)
+    npt.assert_allclose(output_3[1], answer_3[1], atol=1e-8)
+    npt.assert_allclose(output_3[2], answer_3[2], atol=1e-8)
+
+
 
 def test_filter_nan_values():
     from osl_dynamics.array_ops import filter_nan_values

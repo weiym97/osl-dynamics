@@ -2600,6 +2600,7 @@ def plot_box(
         plot_samples=True,
         mark_best=True,
         demean=False,
+        demean_index=0,
         inset_start_index=None,
         y_range=None,
         x_label=None,
@@ -2626,6 +2627,8 @@ def plot_box(
         Whether to mark the best performed model.
     demean: bool, optional
         Whether to demean *across* the list
+    demean_index: int, optional
+        The index to use as the baseline for demeaning. If -1, demean across the mean of all data points.
     inset_start_index: int, optional
         If specified, add an inset using data and labels
         starting from the index.
@@ -2704,7 +2707,7 @@ def plot_box(
         fig, ax = create_figure(**fig_kwargs)
 
     if demean:
-        data = demean_list(data)
+        data = demean_list(data,demean_index=demean_index)
 
     data = filter_nan_values(data)
 

@@ -432,7 +432,7 @@ def npz2list(array):
         return [array[key] for key in array.keys()]
 
 
-def demean_list(data):
+def demean_list(data,demean_index=-1):
     '''
     demean across a list of lists.
     Return the de-meaned list
@@ -440,7 +440,8 @@ def demean_list(data):
     ----------
     data: list
         the input list to be demeaned
-
+    demean_index: int, optional
+        The index to use as the baseline for demeaning. If -1, demean across the mean of all data points.
     Returns
     -------
     demeaned_data: list
@@ -452,8 +453,13 @@ def demean_list(data):
     data = np.array(data)
     if not data.ndim == 2:
         raise ValueError('The input should be a list of lists!')
-
-    data -= np.nanmean(data, axis=0, keepdims=True)
+    if demean_index == -1:
+        data -= np.nanmean(data, axis=0, keepdims=True)
+    else:
+        if demean_index < 0 or demean_index >= data.shape[0]:
+            raise IndexError('demean_index out of range')
+        mean_values = data[demean_index: demean_index + 1, :]
+        data = data - mean_values
 
     return [[elem for elem in row if not np.isnan(elem)] for row in data]
 
