@@ -917,7 +917,7 @@ def log_likelihood(data, output_dir,static_FC=False,spatial=None):
 
     if static_FC:
         from osl_dynamics.array_ops import estimate_gaussian_log_likelihood
-        estimate_gaussian_log_likelihood(ts,means,covs,average=True)
+        metrics = float(estimate_gaussian_log_likelihood(ts,means,covs,average=True))
     else:
         # Get posterior expected log-likelihood (averaged over session)
         metrics = float(model.get_posterior_expected_log_likelihood(ts,alpha)) / len(ts)
