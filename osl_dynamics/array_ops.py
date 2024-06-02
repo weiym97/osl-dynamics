@@ -448,9 +448,14 @@ def demean_list(data,demean_index=-1):
         the demeaned data. Nan values are chopped out.
     '''
     # Check whether the input is a list
+    print('#############################')
+    print('We are in the function')
+    print('Demean_index is: ',demean_index)
+    print('############################')
     if not isinstance(data, list):
         raise TypeError('The input should be a list of lists!')
     data = np.array(data)
+    print('data shape is:',data.shape)
     if not data.ndim == 2:
         raise ValueError('The input should be a list of lists!')
     if demean_index == -1:
@@ -460,6 +465,8 @@ def demean_list(data,demean_index=-1):
             raise IndexError('demean_index out of range')
         mean_values = data[demean_index: demean_index + 1, :]
         data = data - mean_values
+
+        print(data)
 
     return [[elem for elem in row if not np.isnan(elem)] for row in data]
 
