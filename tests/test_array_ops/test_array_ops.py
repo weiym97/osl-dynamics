@@ -325,5 +325,36 @@ def test_estimate_gaussian_distribution():
 def test_estimate_gaussian_log_likelihood():
     from osl_dynamics.array_ops import estimate_gaussian_log_likelihood
 
+    def multivariate_gaussian_log_likelihood(x, mu, cov):
+        """
+        Calculate the log-likelihood for a multivariate Gaussian distribution.
 
+        Parameters:
+            x (ndarray): Observations (N, d), where N is the number of samples and d is the dimensionality.
+            mu (ndarray): Mean vector of the distribution (d,).
+            cov (ndarray): Covariance matrix of the distribution (d, d).
 
+        Returns:
+            float: Log-likelihood value.
+        """
+        # Dimensionality of the data
+        d = len(mu)
+
+        # Calculate the log determinant of the covariance matrix
+        log_det_cov = np.log(np.linalg.det(cov))
+
+        # Calculate the quadratic term in the exponent
+        quad_term = np.sum((x - mu) @ np.linalg.inv(cov) * (x - mu), axis=1)
+
+        # Calculate the log-likelihood
+        log_likelihood = -0.5 * (d * np.log(2 * np.pi) + log_det_cov + quad_term)
+
+        return log_likelihood
+
+    means = np.zeros((1, 2))
+    covs = np.array([[[1.5, 0.8], [0.8, 1.5]]])
+
+    data = np.array([[1., 0., 1., ], [-1., 0., 0.]]).T
+    ll = estimate_gaussian_log_likelihood(data,means,covs)
+    answer = np.mean(multivariate_gaussian_log_likelihood(data,np.squeeze(means),np.squeeze(covs))),
+    npt.assert_almost_equal(answer,ll)

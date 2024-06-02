@@ -539,11 +539,6 @@ def estimate_gaussian_distribution(data, nonzero_means=False, keepdims=True, bia
 
     return mean, cov
 
-
-import numpy as np
-from scipy.stats import multivariate_normal
-
-
 def estimate_gaussian_log_likelihood(data, means, covs, average=True):
     """
     Calculate the Gaussian log-likelihood given the data, means, and covariances.
