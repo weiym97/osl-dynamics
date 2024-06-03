@@ -115,6 +115,24 @@ def build_hmm(
     _logger.info(f"Saving model to: {model_dir}")
     model.save(model_dir)
 
+def train_swc(
+    data,
+    output_dir,
+    cconfig_kwargs,
+    init_kwargs=None,
+    fit_kwargs=None,
+    save_inf_params=True,
+    calculate_free_energy=True
+):
+    """
+    Fit a Sliding Window Correlation Model.
+    """
+
+    if data is None:
+        raise ValueError("data must be passed.")
+
+    init_kwargs = {} if init_kwargs is None else init_kwargs
+    fit_kwargs = {} if fit_kwargs is None else fit_kwargs
 
 def train_hmm(
     data,
