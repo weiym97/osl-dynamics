@@ -83,7 +83,7 @@ def sliding_window_connectivity(
         ts = data[i]
         n_samples = ts.shape[0]
         n_channels = ts.shape[1]
-        n_windows = (n_samples - window_length - 1) // step_size + 1
+        n_windows = (n_samples - window_length) // step_size + 1
 
         # Preallocate an array to hold moving average values
         swc = np.empty([n_windows, n_channels, n_channels], dtype=np.float32)
