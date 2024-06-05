@@ -75,16 +75,25 @@ class Config(BaseModelConfig):
     model_name: str = "SWC"
 
     # Observation model parameters
-    window_type: str = 'rectanglular'
+    window_length: int = None
+    window_offset: int = None
+    window_type: str = 'rectangular'
     learn_means: bool = None
     learn_covariances: bool = None
     diagonal_covariances: bool = False
     covariances_epsilon: float = None
 
+    # The following parameters are redundant
+    # Just to make the implementation compatible with the base class
+    batch_size: int = 32
+    n_epochs: int = 1
+    learning_rate: float = 0.001
+    lr_decay: float = 0.001
 
     def __post_init__(self):
         self.validate_observation_model_parameters()
         self.validate_dimension_parameters()
+        self.validate_training_parameters()
 
     def validate_observation_model_parameters(self):
         if self.learn_means is None or self.learn_covariances is None:
@@ -131,23 +140,35 @@ class Model(ModelBase):
 
     def fit(self, dataset, verbose=1, **kwargs):
         ts = dataset.time_series()
-        ts = np.array([ts[i] for i in dataset.keep])
+        # The if-condition revert the concatenation in dataset.time_series()
+        if dataset.n_sessions == 1:
+            ts = [ts]
+        ts = [ts[i] for i in dataset.keep]
         swc = connectivity.sliding_window_connectivity(ts, window_length=self.config.window_length, step_size=self.config.window_offset,
-                                                       conn_type="corr")
-
+                                                       conn_type="cov")
         kmeans = KMeans(n_clusters=self.config.n_states, verbose=0)
 
         # Get indices that correspond to an upper triangle of a matrix
         # (not including the diagonal)
-        i, j = np.triu_indices(self.config.n_channels, k=1)
+        i, j = np.triu_indices(self.config.n_channels, k=0)
 
         # Now let's convert the sliding window connectivity matrices to a series of vectors
-        swc_vectors = swc[:, i, j]
-
-        # Check the shape of swc vectors
-        print(f'SWC vectors shape: {swc_vectors.shape}')
+        swc_vectors = np.concatenate(swc,axis=0)[:, i, j]
 
         # Fitting
-        kmeans.fit(swc_vectors)  # should take a few seconds
+        kmeans.fit(swc_vectors)
 
         centroids = kmeans.cluster_centers_
+
+        kmean_networks = np.empty([self.config.n_states, self.config.n_channels, self.config.n_channels])
+        kmean_networks[:, i, j] = centroids
+        kmean_networks[:, j, i] = centroids
+
+        time_courses = kmeans.labels_
+        time_courses_split = np.split(time_courses, np.cumsum([sw.shape[0] for sw in swc])[:-1])
+
+
+        return kmean_networks,time_courses_split
+
+    def compile(self,optimizer=None):
+        pass
