@@ -60,10 +60,11 @@ def load_data(inputs, kwargs=None, prepare=None):
     data.prepare(prepare)
     return data
 
+
 def build_hmm(
-    data,
-    output_dir,
-    config_kwargs,
+        data,
+        output_dir,
+        config_kwargs,
 ):
     """Build up a `Hidden Markov Model <https://osl-dynamics.readthedocs.io/en\
        /latest/autoapi/osl_dynamics/models/hmm/index.html>`_.
@@ -115,14 +116,13 @@ def build_hmm(
     _logger.info(f"Saving model to: {model_dir}")
     model.save(model_dir)
 
+
 def train_swc(
-    data,
-    output_dir,
-    cconfig_kwargs,
-    init_kwargs=None,
-    fit_kwargs=None,
-    save_inf_params=True,
-    calculate_free_energy=True
+        data,
+        output_dir,
+        config_kwargs,
+        init_kwargs=None,
+        fit_kwargs=None,
 ):
     """
     Fit a Sliding Window Correlation Model.
@@ -134,14 +134,50 @@ def train_swc(
     init_kwargs = {} if init_kwargs is None else init_kwargs
     fit_kwargs = {} if fit_kwargs is None else fit_kwargs
 
+    from osl_dynamics.models import swc
+
+    # Create the model object
+    _logger.info("Building model")
+    default_config_kwargs = {
+        "n_channels": data.n_channels,
+        "window_length": 100,
+        "window_offset": 75,
+        "window_type": 'rectangular',
+        'learn_means': False,
+        'learn_covariances': True
+    }
+    config_kwargs = override_dict_defaults(default_config_kwargs, config_kwargs)
+    _logger.info(f"Using config_kwargs: {config_kwargs}")
+
+    config = swc.Config(**config_kwargs)
+    model = swc.Model(config)
+    #model.summary()
+
+    # Training
+    covs, alpha = model.fit(data, **fit_kwargs)
+    inf_params_dir = f'{output_dir}/inf_params/'
+    if not os.path.exists(inf_params_dir):
+        os.makedirs(inf_params_dir, exist_ok=True)
+    # Save trained model
+    _logger.info(f"Saving Sliding Window Correlation results to: {inf_params_dir}")
+
+    # Get the inferred parameters
+    means = np.zeros((config_kwargs['n_states'],config_kwargs['n_channels']))
+
+    # Save inferred parameters
+    save(f"{inf_params_dir}/alp.pkl", alpha)
+    save(f"{inf_params_dir}/means.npy", means)
+    save(f"{inf_params_dir}/covs.npy", covs)
+
+
 def train_hmm(
-    data,
-    output_dir,
-    config_kwargs,
-    init_kwargs=None,
-    fit_kwargs=None,
-    save_inf_params=True,
-    calculate_free_energy=True
+        data,
+        output_dir,
+        config_kwargs,
+        init_kwargs=None,
+        fit_kwargs=None,
+        save_inf_params=True,
+        calculate_free_energy=True
 ):
     """Train a `Hidden Markov Model <https://osl-dynamics.readthedocs.io/en\
     /latest/autoapi/osl_dynamics/models/hmm/index.html>`_.
@@ -218,10 +254,10 @@ def train_hmm(
         # between data and alpha.
         ts = [ts[i] for i in data.keep]
         # Concatenate across all sessions
-        ts = np.concatenate(ts,axis=0)
+        ts = np.concatenate(ts, axis=0)
 
         from osl_dynamics.array_ops import estimate_gaussian_distribution
-        means,covs = estimate_gaussian_distribution(ts,nonzero_means=config_kwargs['learn_means'])
+        means, covs = estimate_gaussian_distribution(ts, nonzero_means=config_kwargs['learn_means'])
 
         inf_params_dir = output_dir + "/inf_params"
         os.makedirs(inf_params_dir, exist_ok=True)
@@ -245,7 +281,6 @@ def train_hmm(
 
     # Training
     history = model.fit(data, **fit_kwargs)
-
 
     # Get the variational free energy
     history["free_energy"] = model.free_energy(data)
@@ -273,10 +308,10 @@ def train_hmm(
     if calculate_free_energy:
         # Make output directory
         metric_dir = output_dir + "/metrics/"
-        os.makedirs(metric_dir,exist_ok=True)
+        os.makedirs(metric_dir, exist_ok=True)
 
         # Get the free energy
-        free_energy = model.free_energy(data,return_components=True)
+        free_energy = model.free_energy(data, return_components=True)
         free_energy, log_likelihood, entropy, prior = model.free_energy(data, return_components=True)
         evidence = model.evidence(data)
         metrics = {'free_energy': float(free_energy),
@@ -293,15 +328,16 @@ def train_hmm(
               x_label='epochs',
               y_label='free energy',
               title='Training loss function',
-              filename=os.path.join(output_dir,'loss_function.jpg'))
+              filename=os.path.join(output_dir, 'loss_function.jpg'))
+
 
 def train_dynemo(
-    data,
-    output_dir,
-    config_kwargs,
-    init_kwargs=None,
-    fit_kwargs=None,
-    save_inf_params=True,
+        data,
+        output_dir,
+        config_kwargs,
+        init_kwargs=None,
+        fit_kwargs=None,
+        save_inf_params=True,
 ):
     """Train `DyNeMo <https://osl-dynamics.readthedocs.io/en/latest/autoapi\
     /osl_dynamics/models/dynemo/index.html>`_.
@@ -436,12 +472,12 @@ def train_dynemo(
 
 
 def train_hive(
-    data,
-    output_dir,
-    config_kwargs,
-    init_kwargs=None,
-    fit_kwargs=None,
-    save_inf_params=True,
+        data,
+        output_dir,
+        config_kwargs,
+        init_kwargs=None,
+        fit_kwargs=None,
+        save_inf_params=True,
 ):
     """ Train a `HIVE Model <https://osl-dynamics.\
     readthedocs.io/en/latest/autoapi/osl_dynamics/models/hive/index.html>`_.
@@ -645,11 +681,11 @@ def get_inf_params(data, output_dir, observation_model_only=False):
 
 
 def plot_power_maps_from_covariances(
-    data,
-    output_dir,
-    mask_file=None,
-    parcellation_file=None,
-    power_save_kwargs=None,
+        data,
+        output_dir,
+        mask_file=None,
+        parcellation_file=None,
+        power_save_kwargs=None,
 ):
     """Plot power maps calculated directly from the inferred covariances.
 
@@ -821,7 +857,7 @@ def plot_state_psds(data, output_dir):
     )
 
 
-def dual_estimation(data, output_dir, n_jobs=1,concatenate=False):
+def dual_estimation(data, output_dir, n_jobs=1, concatenate=False):
     """Dual estimation for session-specific observation model parameters.
 
     This function expects a model has already been trained and the following
@@ -864,13 +900,14 @@ def dual_estimation(data, output_dir, n_jobs=1,concatenate=False):
     alpha = load(f"{inf_params_dir}/alp.pkl")
 
     # Dual estimation
-    means, covs = model.dual_estimation(data, alpha=alpha, n_jobs=n_jobs,concatenate=concatenate)
+    means, covs = model.dual_estimation(data, alpha=alpha, n_jobs=n_jobs, concatenate=concatenate)
 
     # Save
     save(f"{dual_estimates_dir}/means.npy", means)
     save(f"{dual_estimates_dir}/covs.npy", covs)
 
-def log_likelihood(data, output_dir,static_FC=False,spatial=None):
+
+def log_likelihood(data, output_dir, static_FC=False, spatial=None):
     """Log-likelihood estimation for the data.
 
     This function expects a model has already been trained and the following
@@ -921,8 +958,6 @@ def log_likelihood(data, output_dir,static_FC=False,spatial=None):
         # Load the inferred state probabilities
         alpha = load(f"{inf_params_dir}/alp.pkl")
 
-
-
         if len(alpha) != len(ts):
             raise ValueError(
                 "len(alpha) and training_data.n_sessions must be the same."
@@ -935,14 +970,14 @@ def log_likelihood(data, output_dir,static_FC=False,spatial=None):
 
     if static_FC:
         from osl_dynamics.array_ops import estimate_gaussian_log_likelihood
-        metrics = float(estimate_gaussian_log_likelihood(ts,means,covs,average=False)) / len(ts)
+        metrics = float(estimate_gaussian_log_likelihood(ts, means, covs, average=False)) / len(ts)
     else:
         # Get posterior expected log-likelihood (averaged over session)
-        metrics = float(model.get_posterior_expected_log_likelihood(ts,alpha)) / len(ts)
+        metrics = float(model.get_posterior_expected_log_likelihood(ts, alpha)) / len(ts)
 
     # Save
     with open(f"{output_dir}metrics.json", "w") as file:
-        json.dump({'log_likelihood':metrics}, file)
+        json.dump({'log_likelihood': metrics}, file)
 
 
 def multitaper_spectra(data, output_dir, kwargs, nnmf_components=None):
@@ -1160,13 +1195,13 @@ def regression_spectra(data, output_dir, kwargs):
 
 
 def plot_group_ae_networks(
-    data,
-    output_dir,
-    mask_file=None,
-    parcellation_file=None,
-    aec_abs=True,
-    power_save_kwargs=None,
-    conn_save_kwargs=None,
+        data,
+        output_dir,
+        mask_file=None,
+        parcellation_file=None,
+        aec_abs=True,
+        power_save_kwargs=None,
+        conn_save_kwargs=None,
 ):
     """Plot group-level amplitude envelope networks.
 
@@ -1282,14 +1317,14 @@ def plot_group_ae_networks(
 
 
 def plot_group_tde_hmm_networks(
-    data,
-    output_dir,
-    mask_file=None,
-    parcellation_file=None,
-    frequency_range=None,
-    percentile=97,
-    power_save_kwargs=None,
-    conn_save_kwargs=None,
+        data,
+        output_dir,
+        mask_file=None,
+        parcellation_file=None,
+        frequency_range=None,
+        percentile=97,
+        power_save_kwargs=None,
+        conn_save_kwargs=None,
 ):
     """Plot group-level TDE-HMM networks for a specified frequency band.
 
@@ -1460,15 +1495,15 @@ def plot_group_tde_hmm_networks(
 
 
 def plot_group_nnmf_tde_hmm_networks(
-    data,
-    output_dir,
-    nnmf_file,
-    mask_file=None,
-    parcellation_file=None,
-    component=0,
-    percentile=97,
-    power_save_kwargs=None,
-    conn_save_kwargs=None,
+        data,
+        output_dir,
+        nnmf_file,
+        mask_file=None,
+        parcellation_file=None,
+        component=0,
+        percentile=97,
+        power_save_kwargs=None,
+        conn_save_kwargs=None,
 ):
     """Plot group-level TDE-HMM networks using a NNMF component to integrate
     the spectra.
@@ -1658,14 +1693,14 @@ def plot_group_nnmf_tde_hmm_networks(
 
 
 def plot_group_tde_dynemo_networks(
-    data,
-    output_dir,
-    mask_file=None,
-    parcellation_file=None,
-    frequency_range=None,
-    percentile=97,
-    power_save_kwargs=None,
-    conn_save_kwargs=None,
+        data,
+        output_dir,
+        mask_file=None,
+        parcellation_file=None,
+        frequency_range=None,
+        percentile=97,
+        power_save_kwargs=None,
+        conn_save_kwargs=None,
 ):
     """Plot group-level TDE-DyNeMo networks for a specified frequency band.
 
@@ -1839,12 +1874,12 @@ def plot_group_tde_dynemo_networks(
 
 
 def plot_alpha(
-    data,
-    output_dir,
-    session=0,
-    normalize=False,
-    sampling_frequency=None,
-    kwargs=None,
+        data,
+        output_dir,
+        session=0,
+        normalize=False,
+        sampling_frequency=None,
+        kwargs=None,
 ):
     """Plot inferred alphas.
 
@@ -1977,11 +2012,11 @@ def calc_gmm_alpha(data, output_dir, kwargs=None):
 
 
 def plot_hmm_network_summary_stats(
-    data,
-    output_dir,
-    use_gmm_alpha=False,
-    sampling_frequency=None,
-    sns_kwargs=None,
+        data,
+        output_dir,
+        use_gmm_alpha=False,
+        sampling_frequency=None,
+        sns_kwargs=None,
 ):
     """Plot HMM summary statistics for networks as violin plots.
 
@@ -2199,14 +2234,14 @@ def plot_dynemo_network_summary_stats(data, output_dir):
 
 
 def compare_groups_hmm_summary_stats(
-    data,
-    output_dir,
-    group2_indices,
-    separate_tests=False,
-    covariates=None,
-    n_perm=1000,
-    n_jobs=1,
-    sampling_frequency=None,
+        data,
+        output_dir,
+        group2_indices,
+        separate_tests=False,
+        covariates=None,
+        n_perm=1000,
+        n_jobs=1,
+        sampling_frequency=None,
 ):
     """Compare HMM summary statistics between two groups.
 
@@ -2308,7 +2343,7 @@ def compare_groups_hmm_summary_stats(
                 n_jobs=n_jobs,
             )
             pvalues.append(p)
-            _logger.info(f"{names[i]}: {np.sum(p <  0.05)} states have p-value<0.05")
+            _logger.info(f"{names[i]}: {np.sum(p < 0.05)} states have p-value<0.05")
             save(f"{group_diff_dir}/{names[i]}_pvalues.npy", p)
         pvalues = np.array(pvalues)
     else:
