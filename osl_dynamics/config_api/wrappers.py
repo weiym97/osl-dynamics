@@ -152,7 +152,7 @@ def train_swc(
 
     config = swc.Config(**config_kwargs)
     model = swc.Model(config)
-    #model.summary()
+    # model.summary()
 
     # Training
     covs, alpha = model.fit(data, **fit_kwargs)
@@ -163,12 +163,13 @@ def train_swc(
     _logger.info(f"Saving Sliding Window Correlation results to: {inf_params_dir}")
 
     # Get the inferred parameters
-    means = np.zeros((config_kwargs['n_states'],config_kwargs['n_channels']))
+    means = np.zeros((config_kwargs['n_states'], config_kwargs['n_channels']))
 
     # Save inferred parameters
     save(f"{inf_params_dir}/alp.pkl", alpha)
     save(f"{inf_params_dir}/means.npy", means)
     save(f"{inf_params_dir}/covs.npy", covs)
+
 
 def train_swc_spatial(
         data,
@@ -209,22 +210,23 @@ def train_swc_spatial(
     model = swc.Model(config)
 
     # Load alpha
-    with open(f'{output_dir}/inf_params/alp.pkl','rb') as file:
+    with open(f'{output_dir}/inf_params/alp.pkl', 'rb') as file:
         alpha = pickle.load(file)
     # Training
-    covs = model.infer_spatial(data,alpha, **fit_kwargs)
+    covs = model.infer_spatial(data, alpha, **fit_kwargs)
     dual_estimates_dir = f'{output_dir}/dual_estimates/'
     if not os.path.exists(dual_estimates_dir):
         os.makedirs(dual_estimates_dir)
     _logger.info(f"Saving Sliding Window Correlation infer_spatial results to: {dual_estimates_dir}")
 
     # Get the inferred parameters
-    means = np.zeros((config_kwargs['n_states'],config_kwargs['n_channels']))
+    means = np.zeros((config_kwargs['n_states'], config_kwargs['n_channels']))
 
     # Save inferred parameters
 
     save(f"{dual_estimates_dir}/means.npy", means)
     save(f"{dual_estimates_dir}/covs.npy", covs)
+
 
 def train_swc_temporal(
         data,
@@ -268,13 +270,70 @@ def train_swc_temporal(
     means = np.load(f'{inf_params_dir}/means.npy')
     covs = np.load(f'{inf_params_dir}/covs.npy')
     # Training
-    alpha = model.infer_temporal(data,means,covs, **fit_kwargs)
+    alpha = model.infer_temporal(data, means, covs, **fit_kwargs)
     _logger.info(f"Saving Sliding Window Correlation infer_temporal results to: {inf_params_dir}")
 
     # Save inferred parameters
     with open(f'{inf_params_dir}/alp.pkl', 'wb') as file:
         pickle.dump(alpha, file)
     return f'{inf_params_dir}/alp.pkl'
+
+
+def train_swc_log_likelihood(
+        data,
+        output_dir,
+        config_kwargs,
+        init_kwargs=None,
+        fit_kwargs=None,
+):
+    """
+    Fit a Sliding Window Correlation Model, calculating the average log likelihood
+    of the window while keeping the temporal and spatial statistics fixed
+    The input should be found in
+    f'{output_dir}/inf_params/alp.pkl' &
+    f'{output_dir}/inf_params/means.npy' f'{output_dir}/inf_params/covs.npy',
+    The output should be a json file found in f'{output_dir}/metrics.json'
+
+    """
+    if data is None:
+        raise ValueError("data must be passed.")
+
+    init_kwargs = {} if init_kwargs is None else init_kwargs
+    fit_kwargs = {} if fit_kwargs is None else fit_kwargs
+
+    from osl_dynamics.models import swc
+
+    # Create the model object
+    _logger.info("Building model")
+    default_config_kwargs = {
+        "n_channels": data.n_channels,
+        "window_length": 100,
+        "window_offset": 75,
+        "window_type": 'rectangular',
+        'learn_means': False,
+        'learn_covariances': True
+    }
+    config_kwargs = override_dict_defaults(default_config_kwargs, config_kwargs)
+    _logger.info(f"Using config_kwargs: {config_kwargs}")
+
+    config = swc.Config(**config_kwargs)
+    model = swc.Model(config)
+
+    inf_params_dir = f'{output_dir}/inf_params/'
+    # Read all the parameters
+    means = np.load(f'{inf_params_dir}/means.npy')
+    covs = np.load(f'{inf_params_dir}/covs.npy')
+    with open(f'{inf_params_dir}/alp.pkl', 'rb') as file:
+        alpha = pickle.load(file)
+    # Note: the metrics should be the average log likelihood of the window
+    metrics = model.log_likelihood(data, alpha, means, covs, **fit_kwargs) * config_kwargs['window_length']
+    _logger.info(f"Saving Sliding Window Correlation log_likelihood results to: {output_dir}/metrics.json")
+
+    # Save inferred parameters
+    with open(f'{output_dir}/metrics.json', 'w') as file:
+        json.dump({'log_likelihood':float(metrics)}, file)
+    return f'{output_dir}/metrics.json'
+
 
 def train_hmm(
         data,

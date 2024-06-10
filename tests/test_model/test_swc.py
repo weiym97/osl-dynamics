@@ -206,8 +206,6 @@ def test_swc_log_likelihood():
     swc = swc.Model(config)
     average_log_likelihood = swc.log_likelihood(dataset, alpha, means, covs)
 
-    log_likelihood_answer = 1
-
     def log_likelihood_calculator(x, mean, cov):
         inv_cov = np.linalg.inv(cov)
         det_cov = np.linalg.det(cov)
