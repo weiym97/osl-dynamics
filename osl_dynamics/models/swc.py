@@ -35,6 +35,7 @@ from osl_dynamics.simulation import HMM
 from osl_dynamics.utils.misc import set_logging_level
 from osl_dynamics.inference.modes import argmax_time_courses
 from osl_dynamics.analysis import connectivity
+from osl_dynamics.array_ops import estimate_gaussian_log_likelihood
 
 _logger = logging.getLogger("osl-dynamics")
 
@@ -206,5 +207,53 @@ class Model(ModelBase):
         kmean_networks[:, j, i] = centroids
 
         return kmean_networks
+
+    def infer_temporal(self, dataset, means, covs, verbose=1, **kwargs):
+        ts = dataset.time_series()
+        if dataset.n_sessions == 1:
+            ts = [ts]
+        ts = [ts[i] for i in dataset.keep]
+
+        all_labels = []
+
+        for subject_ts in ts:
+            subject_labels = []
+            for start in range(0, subject_ts.shape[0] - self.config.window_length + 1, self.config.window_offset):
+                window_ts = subject_ts[start:start + self.config.window_length]
+
+                log_likelihoods = [
+                    estimate_gaussian_log_likelihood(window_ts, means[state], covs[state], average=True)
+                    for state in range(self.config.n_states)
+                ]
+
+                subject_labels.append(np.argmax(log_likelihoods))
+            all_labels.append(np.array(subject_labels))
+
+        return all_labels
+
+    def log_likelihood(self, dataset, alpha, means, covs, verbose=1, **kwargs):
+        ts = dataset.time_series()
+        if dataset.n_sessions == 1:
+            ts = [ts]
+        ts = [ts[i] for i in dataset.keep]
+
+        assert len(ts) == len(alpha), "Length of time series and alpha must match"
+        for i in range(len(ts)):
+            assert len(alpha[i]) == (len(ts[i]) - self.config.window_length) // self.config.window_offset + 1
+
+        total_log_likelihood = 0
+        total_window_number = 0
+
+        for subject_ts, subject_alpha in zip(ts, alpha):
+            for start, label in zip(
+                    range(0, subject_ts.shape[0] - self.config.window_length + 1, self.config.window_offset),
+                    subject_alpha):
+                window_ts = subject_ts[start:start + self.config.window_length]
+                total_log_likelihood += estimate_gaussian_log_likelihood(window_ts, means[label], covs[label],
+                                                                         average=True)
+                total_window_number += 1
+
+        average_log_likelihood = total_log_likelihood / total_window_number
+        return average_log_likelihood
     def compile(self, optimizer=None):
         pass
