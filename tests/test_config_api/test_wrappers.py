@@ -24,6 +24,8 @@ def test_load_data():
 
 def test_train_swc():
     import os
+    import pickle
+    import shutil
     import yaml
     from osl_dynamics.config_api.wrappers import train_swc
     from osl_dynamics.config_api.pipeline import run_pipeline_from_file
@@ -31,6 +33,10 @@ def test_train_swc():
     save_dir = './test_train_swc/'
     data_dir = f'{save_dir}/data/'
     output_dir = f'{save_dir}/result/'
+
+    if os.path.isdir(save_dir):
+        # Remove the directory
+        shutil.rmtree(save_dir)
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
     if not os.path.exists(data_dir):
@@ -73,5 +79,27 @@ def test_train_swc():
     with open(f'{output_dir}train_config.yaml', "w") as file:
         yaml.safe_dump(yaml.safe_load(config), file, default_flow_style=False)
     run_pipeline_from_file(f'{output_dir}train_config.yaml', output_dir)
+
+    # After running, check the files in the directory
+    inf_params_dir = f'{output_dir}/inf_params/'
+    means = np.load(f'{inf_params_dir}/means.npy')
+    covs = np.load(f'{inf_params_dir}/covs.npy')
+    with open(f'{inf_params_dir}/alp.pkl','rb') as file:
+        labels = pickle.load(file)
+
+    covs_answer = np.array([[[2.5, -2.5], [-2.5, 2.5]],
+                            [[52., 48.], [48., 52.]],
+                            [[54.5, 47.75], [47.75, 54.5]]])
+    labels_answer = [np.array([0, 1]), np.array([1, 2])]
+
+    # Reorder and covs and update the labels accordingly
+    order = np.argsort(covs[:, 0, 0])
+    reordered_covs = covs[order]
+    label_mapping = {old: new for new, old in enumerate(order)}
+    reordered_labels = [np.array([label_mapping[label] for label in session_labels]) for session_labels in labels]
+
+    npt.assert_array_equal(means,np.zeros((3,2)))
+    npt.assert_array_equal(covs_answer, reordered_covs)
+    npt.assert_array_equal(labels_answer, reordered_labels)
 
 
