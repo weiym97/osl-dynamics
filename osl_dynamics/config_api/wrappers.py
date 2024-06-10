@@ -214,6 +214,8 @@ def train_swc_spatial(
     # Training
     covs = model.infer_spatial(data,alpha, **fit_kwargs)
     dual_estimates_dir = f'{output_dir}/dual_estimates/'
+    if not os.path.exists(dual_estimates_dir):
+        os.makedirs(dual_estimates_dir)
     _logger.info(f"Saving Sliding Window Correlation infer_spatial results to: {dual_estimates_dir}")
 
     # Get the inferred parameters
@@ -223,6 +225,56 @@ def train_swc_spatial(
 
     save(f"{dual_estimates_dir}/means.npy", means)
     save(f"{dual_estimates_dir}/covs.npy", covs)
+
+def train_swc_temporal(
+        data,
+        output_dir,
+        config_kwargs,
+        init_kwargs=None,
+        fit_kwargs=None,
+):
+    """
+    Fit a Sliding Window Correlation Model, inferring the temporal statistics
+    while keeping the spatial statistics fixed
+    f'{output_dir}/inf_params/means.npy' f'{output_dir}/inf_params/covs.npy'
+    The output alpha should be saved in f'{output_dir}/inf_params/alp.pkl'
+    """
+
+    if data is None:
+        raise ValueError("data must be passed.")
+
+    init_kwargs = {} if init_kwargs is None else init_kwargs
+    fit_kwargs = {} if fit_kwargs is None else fit_kwargs
+
+    from osl_dynamics.models import swc
+
+    # Create the model object
+    _logger.info("Building model")
+    default_config_kwargs = {
+        "n_channels": data.n_channels,
+        "window_length": 100,
+        "window_offset": 75,
+        "window_type": 'rectangular',
+        'learn_means': False,
+        'learn_covariances': True
+    }
+    config_kwargs = override_dict_defaults(default_config_kwargs, config_kwargs)
+    _logger.info(f"Using config_kwargs: {config_kwargs}")
+
+    config = swc.Config(**config_kwargs)
+    model = swc.Model(config)
+
+    inf_params_dir = f'{output_dir}/inf_params/'
+    means = np.load(f'{inf_params_dir}/means.npy')
+    covs = np.load(f'{inf_params_dir}/covs.npy')
+    # Training
+    alpha = model.infer_temporal(data,means,covs, **fit_kwargs)
+    _logger.info(f"Saving Sliding Window Correlation infer_temporal results to: {inf_params_dir}")
+
+    # Save inferred parameters
+    with open(f'{inf_params_dir}/alp.pkl', 'wb') as file:
+        pickle.dump(alpha, file)
+    return f'{inf_params_dir}/alp.pkl'
 
 def train_hmm(
         data,
