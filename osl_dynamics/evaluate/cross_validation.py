@@ -1555,12 +1555,11 @@ class CVSWC(CVBase):
             prepare_config['load_data']['prepare']['select'] = {}
         prepare_config['load_data']['prepare']['select']['channels'] = column
 
-        prepare_config[f'build_{config["model"]}'] = {
+        prepare_config[f'train_{config["model"]}_spatial'] = {
             'config_kwargs':
                 {key: config[key] for key in self.train_keys if key in config},
         }
-        prepare_config[f'build_{config["model"]}']['config_kwargs']['n_channels'] = len(column)
-        prepare_config['dual_estimation'] = {'concatenate': True}
+        prepare_config[f'train_{config["model"]}_spatial']['config_kwargs']['n_channels'] = len(column)
 
         # Note the 'keep_list' value is in order (from small to large number)
         prepare_config['keep_list'] = row
@@ -1570,16 +1569,6 @@ class CVSWC(CVBase):
 
         run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
                                save_dir)
-
-        # Compress the representation of alp.pkl file
-        if os.path.exists(f'{save_dir}inf_params/alp.pkl'):
-            from osl_dynamics.inference.modes import prob2onehot
-            with open(f'{save_dir}inf_params/alp.pkl', 'rb') as file:
-                alpha = pickle.load(file)
-            alpha = prob2onehot(alpha)
-            os.remove(f'{save_dir}inf_params/alp.pkl')
-            with open(f'{save_dir}inf_params/alp.pkl', 'wb') as file:
-                pickle.dump(alpha, file)
 
         return {'means': f'{save_dir}/dual_estimates/means.npy',
                 'covs': f'{save_dir}/dual_estimates/covs.npy'}

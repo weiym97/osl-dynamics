@@ -16,6 +16,7 @@ where:
 
 import os
 import json
+import pickle
 import logging
 from pathlib import Path
 
@@ -169,6 +170,59 @@ def train_swc(
     save(f"{inf_params_dir}/means.npy", means)
     save(f"{inf_params_dir}/covs.npy", covs)
 
+def train_swc_spatial(
+        data,
+        output_dir,
+        config_kwargs,
+        init_kwargs=None,
+        fit_kwargs=None,
+):
+    """
+    Fit a Sliding Window Correlation Model, inferring the spatial statistics
+    while keeping the temporal labels fixed f'{output_dir}/inf_params/alp.pkl'
+    The output means and covs should be saved in
+    f'{output_dir}/dual_estimates/means.npy', f'{output_dir}/dual_estimates/covs.npy'
+    """
+
+    if data is None:
+        raise ValueError("data must be passed.")
+
+    init_kwargs = {} if init_kwargs is None else init_kwargs
+    fit_kwargs = {} if fit_kwargs is None else fit_kwargs
+
+    from osl_dynamics.models import swc
+
+    # Create the model object
+    _logger.info("Building model")
+    default_config_kwargs = {
+        "n_channels": data.n_channels,
+        "window_length": 100,
+        "window_offset": 75,
+        "window_type": 'rectangular',
+        'learn_means': False,
+        'learn_covariances': True
+    }
+    config_kwargs = override_dict_defaults(default_config_kwargs, config_kwargs)
+    _logger.info(f"Using config_kwargs: {config_kwargs}")
+
+    config = swc.Config(**config_kwargs)
+    model = swc.Model(config)
+
+    # Load alpha
+    with open(f'{output_dir}/inf_params/alp.pkl','rb') as file:
+        alpha = pickle.load(file)
+    # Training
+    covs = model.infer_spatial(data,alpha, **fit_kwargs)
+    dual_estimates_dir = f'{output_dir}/dual_estimates/'
+    _logger.info(f"Saving Sliding Window Correlation infer_spatial results to: {dual_estimates_dir}")
+
+    # Get the inferred parameters
+    means = np.zeros((config_kwargs['n_states'],config_kwargs['n_channels']))
+
+    # Save inferred parameters
+
+    save(f"{dual_estimates_dir}/means.npy", means)
+    save(f"{dual_estimates_dir}/covs.npy", covs)
 
 def train_hmm(
         data,
