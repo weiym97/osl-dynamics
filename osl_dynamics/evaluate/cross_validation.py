@@ -1539,8 +1539,8 @@ class CVSWC(CVBase):
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
         # Do nothing if n_states = 1
-        if config['n_states'] == 1:
-            return '0'
+        #if config['n_states'] == 1:
+        #    return '0'
 
         # Create a new directory "config['save_dir']/X_train/inf_params
         if not os.path.exists(f'{save_dir}inf_params/'):
@@ -1589,8 +1589,8 @@ class CVSWC(CVBase):
         shutil.copy(spatial['covs'], params_dir)
 
         # Do nothing if n_states = 1
-        if config['n_states'] == 1:
-            return '0'
+        #if config['n_states'] == 1:
+        #    return '0'
 
         prepare_config = {}
         prepare_config['load_data'] = config['load_data']
