@@ -195,6 +195,8 @@ class BatchTrain:
                           'learn_means',
                           'learn_covariances',
                           'learn_trans_prob',
+                          'window_length',
+                          'window_offset',
                           'initial_means',
                           'initial_covariances',
                           'initial_trans_prob',
