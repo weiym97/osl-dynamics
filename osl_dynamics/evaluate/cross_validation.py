@@ -1517,8 +1517,8 @@ class CVSWC(CVBase):
         prepare_config[f'train_{config["model"]}'] = {
             'config_kwargs':
                 {key: config[key] for key in self.train_keys if key in config},
-            'init_kwargs':
-                config['init_kwargs']
+            #'init_kwargs':
+            #    config['init_kwargs']
         }
         prepare_config[f'train_{config["model"]}']['config_kwargs']['n_channels'] = len(column)
         prepare_config['keep_list'] = row
@@ -1582,6 +1582,12 @@ class CVSWC(CVBase):
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
 
+        params_dir = f'{save_dir}/inf_params/'
+        if not os.path.exists(params_dir):
+            os.makedirs(params_dir)
+        shutil.copy(spatial['means'], params_dir)
+        shutil.copy(spatial['covs'], params_dir)
+
         # Do nothing if n_states = 1
         if config['n_states'] == 1:
             return '0'
@@ -1593,19 +1599,17 @@ class CVSWC(CVBase):
             prepare_config['load_data']['prepare']['select'] = {}
         prepare_config['load_data']['prepare']['select']['channels'] = column
 
-        prepare_config[f'train_{config["model"]}'] = {
+        prepare_config[f'train_{config["model"]}_temporal'] = {
             'config_kwargs':
                 {key: config[key] for key in self.train_keys if key in config},
-            'init_kwargs':
-                config['init_kwargs']
+            #'init_kwargs':
+            #    config['init_kwargs']
         }
         # Fix the means and covariances
-        prepare_config[f'train_{config["model"]}']['config_kwargs']['learn_means'] = False
-        prepare_config[f'train_{config["model"]}']['config_kwargs']['learn_covariances'] = False
-        prepare_config[f'train_{config["model"]}']['config_kwargs']['initial_means'] = spatial['means']
-        prepare_config[f'train_{config["model"]}']['config_kwargs']['initial_covariances'] = spatial['covs']
+        prepare_config[f'train_{config["model"]}_temporal']['config_kwargs']['learn_means'] = False
+        prepare_config[f'train_{config["model"]}_temporal']['config_kwargs']['learn_covariances'] = False
 
-        prepare_config[f'train_{config["model"]}']['config_kwargs']['n_channels'] = len(column)
+        prepare_config[f'train_{config["model"]}_temporal']['config_kwargs']['n_channels'] = len(column)
         prepare_config['keep_list'] = row
 
         with open(f'{save_dir}/prepared_config.yaml', 'w') as file:
@@ -1613,7 +1617,7 @@ class CVSWC(CVBase):
         run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
                                save_dir)
 
-        params_dir = f'{save_dir}/inf_params/'
+
         return f'{params_dir}/alp.pkl'
 
 

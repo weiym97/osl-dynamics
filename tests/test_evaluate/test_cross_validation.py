@@ -582,12 +582,12 @@ def test_calculate_error():
                 """
     config = yaml.safe_load(config)
 
-    means = np.zeros((3,2))
+    means = np.zeros((3, 2))
     covs = np.array([[[1.0, 0.0], [0.0, 1.0]],
                      [[1.5, 0.8], [0.8, 1.5]],
                      [[0.5, -0.25], [-0.25, 0.5]]])
-    np.save(f'{save_dir}/means.npy',means)
-    np.save(f'{save_dir}/covs.npy',covs)
+    np.save(f'{save_dir}/means.npy', means)
+    np.save(f'{save_dir}/covs.npy', covs)
     spatial = {
         'means': f'{save_dir}/means.npy',
         'covs': f'{save_dir}/covs.npy'
@@ -612,7 +612,7 @@ def test_calculate_error():
                   'learning_rate',
                   'n_epochs',
                   ]
-    cv = CVHMM(n_samples, n_channels,train_keys=train_keys)
+    cv = CVHMM(n_samples, n_channels, train_keys=train_keys)
     result = cv.calculate_error(config, row_test, column_Y, f'{data_dir}alp.pkl', spatial)
 
     ll_1 = multivariate_gaussian_log_likelihood(data_2[:1, [0, 2]], np.array([0, 0]), covs[0])
@@ -629,6 +629,7 @@ def test_calculate_error():
 
     npt.assert_almost_equal(ll, metrics['log_likelihood'], decimal=3)
 
+
 def test_split_column():
     import os
     import shutil
@@ -641,40 +642,41 @@ def test_split_column():
     n_samples = 2
     n_channels = 4
     cv = CVHMM(n_samples, n_channels)
-    config = {'save_dir':'123'}
+    config = {'save_dir': '123'}
 
-    means = np.array([[1.,2.,3.,4.],[5.,6.,7.,8.]])
+    means = np.array([[1., 2., 3., 4.], [5., 6., 7., 8.]])
     covs = np.array([
-        [[1.,2.,3.,4.],
-         [5.,6.,7.,8.],
-         [9.,10.,11.,12.],
-         [13.,14.,15.,16.]],
-        [[17.,18.,19.,20.],
-         [21.,22.,23.,24.],
-         [25.,26.,27.,28.],
-         [29.,30.,31.,32.]]
+        [[1., 2., 3., 4.],
+         [5., 6., 7., 8.],
+         [9., 10., 11., 12.],
+         [13., 14., 15., 16.]],
+        [[17., 18., 19., 20.],
+         [21., 22., 23., 24.],
+         [25., 26., 27., 28.],
+         [29., 30., 31., 32.]]
     ])
-    column_X = [0,2]
-    column_Y = [1,3]
-    np.save(f'{save_dir}means.npy',means)
-    np.save(f'{save_dir}covs.npy',covs)
-    spatial_XY_train = {'means':f'{save_dir}means.npy','covs':f'{save_dir}covs.npy'}
-    spatial_X_train, spatial_Y_train = cv.split_column(config,column_X,column_Y,spatial_XY_train,
-                                                       save_dir=[f'{save_dir}X_train/',f'{save_dir}Y_train/']
-                                                      )
+    column_X = [0, 2]
+    column_Y = [1, 3]
+    np.save(f'{save_dir}means.npy', means)
+    np.save(f'{save_dir}covs.npy', covs)
+    spatial_XY_train = {'means': f'{save_dir}means.npy', 'covs': f'{save_dir}covs.npy'}
+    spatial_X_train, spatial_Y_train = cv.split_column(config, column_X, column_Y, spatial_XY_train,
+                                                       save_dir=[f'{save_dir}X_train/', f'{save_dir}Y_train/']
+                                                       )
     spatial_X_train_means = np.load(spatial_X_train['means'])
     spatial_X_train_covs = np.load(spatial_X_train['covs'])
     spatial_Y_train_means = np.load(spatial_Y_train['means'])
     spatial_Y_train_covs = np.load(spatial_Y_train['covs'])
 
-    X_train_means = np.array([[1.,3.],[5.,7.]])
-    X_train_covs = np.array([[[1.,3.],[9.,11.]],[[17.,19.],[25.,27.]]])
-    Y_train_means = np.array([[2.,4.],[6.,8.]])
-    Y_train_covs = np.array([[[6.,8.],[14.,16.]],[[22.,24.],[30.,32.]]])
-    npt.assert_array_equal(spatial_X_train_means,X_train_means)
+    X_train_means = np.array([[1., 3.], [5., 7.]])
+    X_train_covs = np.array([[[1., 3.], [9., 11.]], [[17., 19.], [25., 27.]]])
+    Y_train_means = np.array([[2., 4.], [6., 8.]])
+    Y_train_covs = np.array([[[6., 8.], [14., 16.]], [[22., 24.], [30., 32.]]])
+    npt.assert_array_equal(spatial_X_train_means, X_train_means)
     npt.assert_array_equal(spatial_X_train_covs, X_train_covs)
     npt.assert_array_equal(spatial_Y_train_means, Y_train_means)
     npt.assert_array_equal(spatial_Y_train_covs, Y_train_covs)
+
 
 def test_split_row():
     import os
@@ -692,25 +694,295 @@ def test_split_row():
     cv = CVHMM(n_samples, n_channels)
     config = {'save_dir': '123'}
     alpha = [
-        np.array([0.,0.,0.]),
+        np.array([0., 0., 0.]),
         np.array([1., 1., 1.]),
-        np.array([2.,2.,2.]),
-        np.array([3.,3.,3.])
+        np.array([2., 2., 2.]),
+        np.array([3., 3., 3.])
     ]
-    with open(f'{save_dir}alp.pkl','wb') as file:
-        pickle.dump(alpha,file)
-    row_train = [0,2]
-    row_test = [1,3]
-    temporal_X_train, temporal_X_test = cv.split_row(config,row_train,row_test,f'{save_dir}alp.pkl',
-                                                     save_dir = [f'{save_dir}/X_train/',f'{save_dir}/X_test/'])
-    answer_1 = [np.array([0.,0.,0.]),np.array([2.,2.,2.]),]
-    answer_2 = [np.array([1., 1., 1.]),np.array([3.,3.,3.])]
+    with open(f'{save_dir}alp.pkl', 'wb') as file:
+        pickle.dump(alpha, file)
+    row_train = [0, 2]
+    row_test = [1, 3]
+    temporal_X_train, temporal_X_test = cv.split_row(config, row_train, row_test, f'{save_dir}alp.pkl',
+                                                     save_dir=[f'{save_dir}/X_train/', f'{save_dir}/X_test/'])
+    answer_1 = [np.array([0., 0., 0.]), np.array([2., 2., 2.]), ]
+    answer_2 = [np.array([1., 1., 1.]), np.array([3., 3., 3.])]
 
-    with open(temporal_X_train,'rb') as file:
+    with open(temporal_X_train, 'rb') as file:
         temp_1 = pickle.load(file)
 
-    with open(temporal_X_test,'rb') as file:
+    with open(temporal_X_test, 'rb') as file:
         temp_2 = pickle.load(file)
 
-    npt.assert_array_equal(temp_1,answer_1)
-    npt.assert_array_equal(temp_2,answer_2)
+    npt.assert_array_equal(temp_1, answer_1)
+    npt.assert_array_equal(temp_2, answer_2)
+
+
+def test_swc_full_train():
+    import os
+    import shutil
+    import yaml
+    from osl_dynamics.evaluate.cross_validation import CVSWC
+
+    save_dir = './test_swc_full_train/'
+    if os.path.exists(save_dir):
+        shutil.rmtree(save_dir)
+    os.makedirs(save_dir)
+
+    # Define a very simple test case
+    n_samples = 3
+    n_channels = 3
+    n_states = 3
+    row_train = [1, 2]
+    column_X = [1]
+    column_Y = [0, 2]
+
+    # Construct the data
+    def generate_obs(cov, mean=None, n_timepoints=100):
+        if mean is None:
+            mean = np.zeros(len(cov))
+        return np.random.multivariate_normal(mean, cov, n_timepoints)
+
+    # Define the covariance matrices of state 1,2 in both splits
+    cors_Y = [-0.5, 0.0, 0.5]
+    covs_Y = [np.array([[1.0, cor], [cor, 1.0]]) for cor in cors_Y]
+
+    means_X = [1.0, 2.0, 3.0]
+    vars_X = [0.5, 1.0, 2.0]
+
+    # save these files
+    data_dir = f'{save_dir}data/'
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+
+    for i in range(0, 2):
+        obs = []
+        for j in range(1500):
+            observations_Y = [generate_obs(covs_Y[i]), generate_obs(covs_Y[i + 1])]
+            observations_X = [generate_obs([[vars_X[i]]], [means_X[i]]),
+                              generate_obs([[vars_X[i + 1]]], [means_X[i + 1]])]
+            observations = np.concatenate(
+                [np.hstack((Y[:, :1], X, Y[:, 1:])) for X, Y in zip(observations_X, observations_Y)], axis=0)
+            obs.append(observations)
+
+        obs = np.concatenate(obs, axis=0)
+        np.save(f"{data_dir}{10002 + i}.npy", obs)
+
+    # Genetate irrelevant dataset
+    np.save(f"{data_dir}10001.npy", generate_obs(np.eye(3) * 100, n_timepoints=300000))
+
+    config = f"""
+            load_data:
+                inputs: {data_dir}
+                prepare:
+                    select:
+                        timepoints:
+                            - 0
+                            - 300000
+            n_states: {n_states}
+            learn_means: False
+            learn_covariances: True
+            window_length: 100
+            window_offset: 100
+            save_dir: {save_dir}
+            model: swc
+
+            """
+    config = yaml.safe_load(config)
+
+    cv = CVSWC(n_samples, n_channels)
+    result, _ = cv.full_train(config, row_train, column_Y)
+
+    result_means = np.load(result['means'])
+    result_covs = np.load(result['covs'])
+    npt.assert_array_equal(result_means, np.zeros((n_states, len(column_Y))))
+
+    # Assert diagonal elements are all one
+    npt.assert_allclose(np.diagonal(result_covs, axis1=-2, axis2=-1), 1.0, rtol=0.05, atol=0.05)
+
+    # Assert off-diagonal elements are equal to cors
+    off_diagonal = np.array([float(result_covs[i, 0, 1]) for i in range(n_states)])
+    npt.assert_allclose(np.sort(off_diagonal), cors_Y, atol=0.05, rtol=0.05)
+
+
+def test_swc_infer_spatial():
+    import os
+    import pickle
+    import shutil
+    import yaml
+    from osl_dynamics.evaluate.cross_validation import CVSWC
+
+    save_dir = './test_swc_infer_spatial/'
+    if os.path.exists(save_dir):
+        shutil.rmtree(save_dir)
+    os.makedirs(save_dir)
+
+    # Define a very simple test case
+    n_samples = 3
+    n_channels = 3
+    n_states = 3
+    row_train = [1, 2]
+    column_X = [1]
+    column_Y = [0, 2]
+
+    # Construct the data
+    def generate_obs(cov, mean=None, n_timepoints=100):
+        if mean is None:
+            mean = np.zeros(len(cov))
+        return np.random.multivariate_normal(mean, cov, n_timepoints)
+
+    # Define the covariance matrices of state 1,2 in both splits
+    cors_Y = [-0.5, 0.0, 0.5]
+    covs_Y = [np.array([[1.0, cor], [cor, 1.0]]) for cor in cors_Y]
+
+    means_X = [0.0, 0.0, 0.0]
+    vars_X = [0.5, 1.0, 2.0]
+
+    n_timepoints = 100
+
+    # save these files
+    data_dir = f'{save_dir}data/'
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+
+    hidden_states = []
+
+    for i in range(0, 2):
+        # Build up the hidden variable
+        hidden_states.append(np.tile([i, i + 1], 1500))
+
+        obs = []
+        for j in range(1500):
+            observations_Y = [generate_obs(covs_Y[i], n_timepoints=n_timepoints),
+                              generate_obs(covs_Y[i + 1], n_timepoints=n_timepoints)]
+            observations_X = [generate_obs([[vars_X[i]]], [means_X[i]], n_timepoints=n_timepoints),
+                              generate_obs([[vars_X[i + 1]]], [means_X[i + 1]], n_timepoints=n_timepoints)]
+            observations = np.concatenate(
+                [np.hstack((Y[:, :1], X, Y[:, 1:])) for X, Y in zip(observations_X, observations_Y)], axis=0)
+            obs.append(observations)
+
+        obs = np.concatenate(obs, axis=0)
+        np.save(f"{data_dir}{10002 + i}.npy", obs)
+
+    with open(f'{data_dir}alp.pkl', "wb") as file:
+        pickle.dump(hidden_states, file)
+    # Genetate irrelevant dataset
+    np.save(f"{data_dir}10001.npy", generate_obs(np.eye(3) * 100, n_timepoints=300000))
+
+    config = f"""
+            load_data:
+                inputs: {data_dir}
+                prepare:
+                    select:
+                        timepoints:
+                            - 0
+                            - 300000
+            n_states: {n_states}
+            learn_means: False
+            learn_covariances: True
+            window_length: 100
+            window_offset: 100
+            save_dir: {save_dir}
+            model: swc
+           """
+
+    config = yaml.safe_load(config)
+    cv = CVSWC(n_samples, n_channels)
+    result = cv.infer_spatial(config, row_train, column_X, f'{data_dir}alp.pkl')
+
+    result_means = np.load(result['means'])
+    result_covs = np.load(result['covs'])
+    npt.assert_allclose(means_X, np.squeeze(result_means), rtol=1e-2, atol=1e-2)
+    npt.assert_allclose(vars_X, np.squeeze(result_covs), rtol=1e-2, atol=1e-2)
+
+def test_swc_infer_temporal():
+    import os
+    import shutil
+    import yaml
+    import pickle
+    from osl_dynamics.evaluate.cross_validation import CVSWC
+
+    save_dir = './test_swc_infer_temporal/'
+    if os.path.exists(save_dir):
+        shutil.rmtree(save_dir)
+    os.makedirs(save_dir)
+
+    # Define a very simple test case
+    n_samples = 3
+    n_channels = 3
+    n_states = 3
+    row_test = [1, 2]
+    column_X = [0, 2]
+    column_Y = [1]
+
+    # Construct the data
+    def generate_obs(cov, mean=None, n_timepoints=100):
+        if mean is None:
+            mean = np.zeros(len(cov))
+        return np.random.multivariate_normal(mean, cov, n_timepoints)
+
+    # Define the covariance matrices of state 1,2 in both splits
+    means_X = [np.array([-10.0, -10.0]), np.array([0.0, 0.0]), np.array([10.0, 10.0])]
+    cors_X = [-0.5, 0.0, 0.5]
+    covs_X = [np.array([[1.0, cor], [cor, 1.0]]) for cor in cors_X]
+
+    means_Y = [1.0, 2.0, 3.0]
+    vars_Y = [0.5, 1.0, 2.0]
+
+    np.save(f'{save_dir}/means.npy', np.array(means_X))
+    np.save(f'{save_dir}/covs.npy', np.stack(covs_X))
+    spatial_X_train = {'means': f'{save_dir}/means.npy', 'covs': f'{save_dir}/covs.npy'}
+
+    # save these files
+    data_dir = f'{save_dir}data/'
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+
+    hidden_states = []
+    n_timepoints = 100
+
+    for i in range(0, 2):
+        hidden_states.append(np.tile([i, i + 1], 1500))
+        obs = []
+        for j in range(1500):
+            observations_X = [generate_obs(covs_X[i], means_X[i], n_timepoints),
+                              generate_obs(covs_X[i + 1], means_X[i + 1], n_timepoints)]
+            observations_Y = [generate_obs([[vars_Y[i]]], [means_Y[i]], n_timepoints),
+                              generate_obs([[vars_Y[i + 1]]], [means_Y[i + 1]]), n_timepoints]
+            observations = np.concatenate(
+                [np.hstack((X[:, :1], Y, X[:, 1:])) for X, Y in zip(observations_X, observations_Y)], axis=0)
+            obs.append(observations)
+
+        obs = np.concatenate(obs, axis=0)
+        np.save(f"{data_dir}{10002 + i}.npy", obs)
+
+    # Genetate irrelevant dataset
+    np.save(f"{data_dir}10001.npy", generate_obs(np.eye(3) * 100, n_timepoints=300000))
+
+    config = f"""
+            load_data:
+                inputs: {data_dir}
+                prepare:
+                    select:
+                        timepoints:
+                            - 0
+                            - 300000
+            n_states: {n_states}
+            learn_means: False
+            learn_covariances: True
+            window_length: 100
+            window_offset: 100
+            save_dir: {save_dir}
+            model: swc
+            """
+    config = yaml.safe_load(config)
+
+    cv = CVSWC(n_samples, n_channels)
+    result = cv.infer_temporal(config, row_test, column_X, spatial_X_train)
+
+    # Read the alpha
+    with open(result, 'rb') as file:
+        alpha = pickle.load(file)
+
+    for i in range(2):
+        npt.assert_allclose(alpha[0], hidden_states[0], atol=1e-6)
