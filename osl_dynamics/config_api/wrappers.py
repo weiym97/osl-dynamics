@@ -326,7 +326,7 @@ def train_swc_log_likelihood(
     with open(f'{inf_params_dir}/alp.pkl', 'rb') as file:
         alpha = pickle.load(file)
     # Note: the metrics should be the average log likelihood of the window
-    metrics = model.log_likelihood(data, alpha, means, covs, **fit_kwargs) * config_kwargs['window_length']
+    metrics = model.log_likelihood(data, alpha, means, covs, **fit_kwargs) * (data.n_samples/data.n_sessions)
     _logger.info(f"Saving Sliding Window Correlation log_likelihood results to: {output_dir}/metrics.json")
 
     # Save inferred parameters
