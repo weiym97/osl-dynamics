@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 from .pipeline import run_pipeline_from_file
 from ..data.base import Data
-from ..evaluate.cross_validation import CVBase, CVHMM
+from ..evaluate.cross_validation import CVBase, CVHMM, CVSWC
 from ..utils.misc import override_dict_defaults
 from ..utils.plotting import plot_box
 
@@ -269,7 +269,10 @@ class BatchTrain:
 
         elif "cv" in self.config["mode"]:
             self.config['train_keys'] = self.train_keys
-            cv = CVHMM(**self.config['cv_kwargs'])
+            if self.config['model'] == 'hmm':
+                cv = CVHMM(**self.config['cv_kwargs'])
+            elif self.config['model'] == 'swc':
+                cv = CVSWC(**self.config['cv_kwargs'])
             cv.validate(self.config, self.config['row_fold'], self.config['column_fold'])
             '''
             indice_all = self.select_indice(ratio=cv_ratio)
