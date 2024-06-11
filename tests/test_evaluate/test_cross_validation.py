@@ -986,3 +986,133 @@ def test_swc_infer_temporal():
 
     for i in range(2):
         npt.assert_allclose(alpha[0], hidden_states[0], atol=1e-6)
+
+def test_swc_calculate_error():
+    import os
+    import json
+    import shutil
+    import yaml
+    import pickle
+    from osl_dynamics.evaluate.cross_validation import CVSWC
+
+    save_dir = './test_swc_calculate_error/'
+    if os.path.exists(save_dir):
+        shutil.rmtree(save_dir)
+
+    os.makedirs(save_dir)
+
+    # Define a very simple test case
+    n_samples = 3
+    n_channels = 3
+    n_states = 3
+    row_test = [1, 2]
+    column_Y = [0, 2]
+
+    # Generate the data
+    data_dir = f'{save_dir}data/'
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+
+    data_0 = np.zeros((8, 3))
+    np.save(f'{data_dir}/10001.npy',data_0)
+
+    data_1 = np.array([[1.0, 0.0, -1.0],
+                       [0.0, 0.0, 0.0],
+                       [-1.0, 0.0, 1.0],
+                       [2.0, 0.0, -2.0],
+                       [-2.0, 0.0, 2.0],
+                       [0.0, 0.0, 0.0],
+                       [10.0, 0.0, 10.0],
+                       [-10.0, 0.0, -10.0],
+                       ])
+    np.save(f'{data_dir}/10002.npy',data_1)
+    data_2 = np.array([[2.0, 0.0, -2.0],
+                       [-2.0, 0.0, 2.0],
+                       [0.0, 0.0, 0.0],
+                       [10.0, 0.0, 10.0],
+                       [-10.0, 0.0, -10.0],
+                       [0.0, 0.0, 3.0],
+                       [-3.0, 0.0, 0.0],
+                       [3.0, 0.0, -3.0]
+                       ])
+    np.save(f'{data_dir}/10003.npy', data_2)
+
+    config = f"""
+            load_data:
+                inputs: {data_dir}
+                prepare:
+                    select:
+                        timepoints:
+                            - 0
+                            - 8
+            n_states: 3
+            learn_means: False
+            learn_covariances: True
+            window_length: 5
+            window_offset: 3
+            save_dir: {save_dir}
+            model: swc
+                """
+    config = yaml.safe_load(config)
+
+    means = np.zeros((3, 2))
+    covs = np.array([[[2.5, -2.4999995], [-2.4999995, 2.5]],
+                     [[52., 48.], [48., 52.]],
+                     [[54.5, 47.75], [47.75, 54.5]]])
+    np.save(f'{save_dir}/means.npy', means)
+    np.save(f'{save_dir}/covs.npy', covs)
+    spatial = {
+        'means': f'{save_dir}/means.npy',
+        'covs': f'{save_dir}/covs.npy'
+    }
+
+    # Set up the alpha.pkl
+    alpha =  [np.array([0, 1]), np.array([1, 2])]
+    with open(f'{save_dir}/alp.pkl', "wb") as file:
+        pickle.dump(alpha, file)
+
+    cv = CVSWC(n_samples, n_channels)
+    result = cv.calculate_error(config, row_test, column_Y, f'{save_dir}alp.pkl', spatial)
+
+    def log_likelihood_calculator(x, mean, cov):
+        inv_cov = np.linalg.inv(cov)
+        det_cov = np.linalg.det(cov)
+        n = x.shape[0]
+        d = x.shape[1]
+
+        term1, term2 = 0, 0
+        for i in range(n):
+            diff = x[i] - mean
+            term1 += -0.5 * np.log((2 * np.pi) ** d * det_cov)
+            term2 += -0.5 * np.dot(diff.T, np.dot(inv_cov, diff))
+        return (term1 + term2) / n
+
+    true_data_1 = np.array([[1.0, -1.0],
+                       [0.0, 0.0],
+                       [-1.0, 1.0],
+                       [2.0, -2.0],
+                       [-2.0, 2.0],
+                       [0.0, 0.0],
+                       [10.0, 10.0],
+                       [-10.0, -10.0],
+                       ])
+    true_data_2 = np.array([[2.0, -2.0],
+                       [-2.0, 2.0],
+                       [0.0, 0.0],
+                       [10.0, 10.0],
+                       [-10.0, -10.0],
+                       [0.0, 3.0],
+                       [-3.0, 0.0],
+                       [3.0, -3.0]
+                       ])
+
+    # Compute the log-likelihood for each data point and average
+    log_likelihood_1 = log_likelihood_calculator(true_data_1[:5], means[0], covs[0])
+    log_likelihood_2 = log_likelihood_calculator(true_data_1[3:], means[1], covs[1])
+    log_likelihood_3 = log_likelihood_calculator(true_data_2[3:], means[2], covs[2])
+    log_likelihood_answer = (log_likelihood_1 + 2 * log_likelihood_2 + log_likelihood_3) / 4 * 5
+
+    with open(f'{save_dir}/calculate_error/metrics.json', 'r') as file:
+        metrics = json.load(file)
+
+    npt.assert_almost_equal(log_likelihood_answer, metrics['log_likelihood'])

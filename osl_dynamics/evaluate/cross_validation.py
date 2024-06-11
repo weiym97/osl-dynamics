@@ -1632,17 +1632,12 @@ class CVSWC(CVBase):
         if not os.path.exists(f'{save_dir}inf_params/'):
             os.makedirs(f'{save_dir}inf_params/')
 
-        # Compress the file
         if os.path.exists(temporal):
-            from osl_dynamics.array_ops import convert_arrays_to_dtype
-            with open(temporal, 'rb') as file:
-                alpha = pickle.load(file)
-            alpha = convert_arrays_to_dtype(alpha,np.float16)
-            os.remove(temporal)
-            with open(temporal, 'wb') as file:
-                pickle.dump(alpha, file)
-
             shutil.move(temporal, f'{save_dir}inf_params/')
+        if os.path.exists(spatial['means']):
+            shutil.copy(spatial['means'],f'{save_dir}inf_params/')
+        if os.path.exists(spatial['covs']):
+            shutil.copy(spatial['covs'], f'{save_dir}inf_params/')
 
         prepare_config = {}
         prepare_config['load_data'] = config['load_data']
@@ -1651,18 +1646,14 @@ class CVSWC(CVBase):
             prepare_config['load_data']['prepare']['select'] = {}
         prepare_config['load_data']['prepare']['select']['channels'] = column
 
-        if config['n_states'] > 1:
-            prepare_config[f'build_{config["model"]}'] = {
-                'config_kwargs':
-                    {key: config[key] for key in self.train_keys if key in config},
-            }
-            prepare_config[f'build_{config["model"]}']['config_kwargs']['n_channels'] = len(column)
-            prepare_config[f'build_{config["model"]}']['config_kwargs']['initial_means'] = spatial['means']
-            prepare_config[f'build_{config["model"]}']['config_kwargs']['initial_covariances'] = spatial['covs']
+        prepare_config[f'train_{config["model"]}_log_likelihood'] = {
+            'config_kwargs':
+                {key: config[key] for key in self.train_keys if key in config},
+        }
+        prepare_config[f'train_{config["model"]}_log_likelihood']['config_kwargs']['n_channels'] = len(column)
+        #prepare_config[f'build_{config["model"]}']['config_kwargs']['initial_means'] = spatial['means']
+        #prepare_config[f'build_{config["model"]}']['config_kwargs']['initial_covariances'] = spatial['covs']
 
-            prepare_config['log_likelihood'] = {'static_FC':False}
-        else:
-            prepare_config['log_likelihood'] = {'static_FC':True,'spatial':spatial}
         # Note the 'keep_list' value is in order (from small to large number)
         prepare_config['keep_list'] = row
 
