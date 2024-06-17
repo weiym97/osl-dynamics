@@ -436,6 +436,15 @@ class BatchAnalysis:
                      inset_start_index=inset_start_index,
                      filename=os.path.join(self.analysis_path, f'{model}_{folder.split("/")[0]}_{object}.pdf')
                      )
+            plot_box(data=temp_values,
+                     labels=temp_keys,
+                     demean=demean,
+                     demean_index=demean_index,
+                     x_label=r'$N_{states}$',
+                     y_label='Demeaned log likelihood',
+                     inset_start_index=inset_start_index,
+                     filename=os.path.join(self.analysis_path, f'{model}_{folder.split("/")[0]}_{object}.svg')
+                     )
 
 
     def temporal_analysis(self,demean=False, inset_start_index=None,theme='reproducibility',normalisation=False):
