@@ -2693,7 +2693,7 @@ def plot_box(
 
     if fig_kwargs is None:
         fig_kwargs = {}
-    default_fig_kwargs = {"figsize": (5, 5)}
+    default_fig_kwargs = {"figsize": (6, 5)}
     fig_kwargs = override_dict_defaults(default_fig_kwargs, fig_kwargs)
 
     if plot_kwargs is None:
