@@ -2733,7 +2733,7 @@ def plot_box(
         ax.autoscale_view()
 
     if mark_best:
-        default_text_kwargs = {'fontsize': 'xx_large', 'ha': 'center', 'va': 'bottom'}
+        default_text_kwargs = {'fontsize': 'xx-large', 'ha': 'center', 'va': 'bottom'}
         text_kwargs = override_dict_defaults(default_text_kwargs, text_kwargs)
         # Add asterisk at maximum median value box
         data_median = [np.nanmedian(d) for d in data]
