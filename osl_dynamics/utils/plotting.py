@@ -2693,7 +2693,7 @@ def plot_box(
 
     if fig_kwargs is None:
         fig_kwargs = {}
-    default_fig_kwargs = {"figsize": (7, 7)}
+    default_fig_kwargs = {"figsize": (5, 5)}
     fig_kwargs = override_dict_defaults(default_fig_kwargs, fig_kwargs)
 
     if plot_kwargs is None:
@@ -2733,7 +2733,7 @@ def plot_box(
         ax.autoscale_view()
 
     if mark_best:
-        default_text_kwargs = {'fontsize': 'large', 'ha': 'center', 'va': 'bottom'}
+        default_text_kwargs = {'fontsize': 'very_large', 'ha': 'center', 'va': 'bottom'}
         text_kwargs = override_dict_defaults(default_text_kwargs, text_kwargs)
         # Add asterisk at maximum median value box
         data_median = [np.nanmedian(d) for d in data]
@@ -2749,9 +2749,9 @@ def plot_box(
         small_ax.set_xticklabels(labels[inset_start_index:], rotation=45)
 
     # Set title and axis labels
-    ax.set_title(title,fontsize=20)
-    ax.set_xlabel(x_label,fontsize=20)
-    ax.set_ylabel(y_label,fontsize=20)
+    ax.set_title(title,fontsize=22)
+    ax.set_xlabel(x_label,fontsize=22)
+    ax.set_ylabel(y_label,fontsize=22)
 
     # Save the figure if a filename has been pass
     if filename is not None:
