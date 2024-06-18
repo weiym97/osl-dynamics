@@ -588,8 +588,8 @@ class BatchAnalysis:
                          demean=False,
                          x_label='N_states',
                          y_label=metric,
-                         title=f'{metric} VS N_states',
-                         filename=os.path.join(self.analysis_path, f'{model}_{metric}.jpg')
+                         #title=f'{metric} VS N_states',
+                         filename=os.path.join(self.analysis_path, f'{model}_{metric}.svg')
                         )
 
     def plot_split_half_reproducibility(self):
