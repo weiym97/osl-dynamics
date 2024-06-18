@@ -2749,9 +2749,9 @@ def plot_box(
         small_ax.set_xticklabels(labels[inset_start_index:], rotation=45)
 
     # Set title and axis labels
-    ax.set_title(title,fontsize=22)
-    ax.set_xlabel(x_label,fontsize=22)
-    ax.set_ylabel(y_label,fontsize=22)
+    ax.set_title(title,fontsize=20)
+    ax.set_xlabel(x_label,fontsize=20)
+    ax.set_ylabel(y_label,fontsize=20)
 
     # Save the figure if a filename has been pass
     if filename is not None:

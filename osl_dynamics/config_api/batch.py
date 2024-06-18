@@ -432,7 +432,7 @@ class BatchAnalysis:
                      demean=demean,
                      demean_index=demean_index,
                      x_label=r'$N_{states}$',
-                     y_label='Demeaned log likelihood',
+                     y_label='Bi-cross validated log likelihood',
                      inset_start_index=inset_start_index,
                      filename=os.path.join(self.analysis_path, f'{model}_{folder.split("/")[0]}_{object}.pdf')
                      )
@@ -441,7 +441,7 @@ class BatchAnalysis:
                      demean=demean,
                      demean_index=demean_index,
                      x_label=r'$N_{states}$',
-                     y_label='Demeaned log likelihood',
+                     y_label='Bi-cross validated log likelihood',
                      inset_start_index=inset_start_index,
                      filename=os.path.join(self.analysis_path, f'{model}_{folder.split("/")[0]}_{object}.svg')
                      )
