@@ -557,7 +557,7 @@ class BatchAnalysis:
                      )
 
 
-    def plot_training_loss(self, metrics=['free_energy']):
+    def plot_training_loss(self, metrics=['free_energy'],demean=False, demean_index=-1):
         models = self.config_root['batch_variable']['model']
         n_states = self.config_root['batch_variable']['n_states']
         loss = {metric: {model: {str(int(num)): [] for num in n_states} for model in models} for metric in metrics}
@@ -585,8 +585,9 @@ class BatchAnalysis:
                 plot_box(data=temp_values,
                          labels=temp_keys,
                          mark_best=False,
-                         demean=False,
-                         x_label='N_states',
+                         demean=demean,
+                         demean_index=demean_index,
+                         x_label=r'$N_{states}$',
                          y_label=metric,
                          #title=f'{metric} VS N_states',
                          filename=os.path.join(self.analysis_path, f'{model}_{metric}.svg')
