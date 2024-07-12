@@ -572,8 +572,8 @@ if __name__ == '__main__':
     data = data.reshape(n_subjects, -1, n_channels)
     time_course = time_course.reshape(n_subjects, -1, n_states)
 
-    np.save(f'{save_dir}truth/state_covariances.npy', sim.obs_mod.covariances)
-    np.save(f'{save_dir}truth/tpm.npy', sim.hmm.trans_prob)
+    np.save(f'{save_dir}truth/state_covariances.npy', covariances)
+    #np.save(f'{save_dir}truth/tpm.npy', sim.hmm.trans_prob)
 
     for i in range(n_subjects):
         np.savetxt(f'{save_dir}{10001 + i}.txt', data[i])
