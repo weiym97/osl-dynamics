@@ -554,7 +554,7 @@ if __name__ == '__main__':
     n_channels = 25
 
     covariances_original = np.load('./data/node_timeseries/simulation_bicv/random/truth/state_covariances.npy')
-    from osl_dynamics.array_ops import cov2stdcorr, stdcorr2cov
+    from osl_dynamics.array_ops import cov2stdcorr, stdcorr2cov,get_one_hot
 
     stds, corrs = cov2stdcorr(covariances_original)
     covariances = stdcorr2cov(stds, corrs ** 3)
@@ -570,7 +570,7 @@ if __name__ == '__main__':
     data = sim.time_series
     time_course = sim.state_time_course
     data = data.reshape(n_subjects, -1, n_channels)
-    time_course = time_course.reshape(n_subjects, -1, n_states)
+    time_course = get_one_hot(time_course,n_states=n_states)
 
     np.save(f'{save_dir}truth/state_covariances.npy', covariances)
     #np.save(f'{save_dir}truth/tpm.npy', sim.hmm.trans_prob)
