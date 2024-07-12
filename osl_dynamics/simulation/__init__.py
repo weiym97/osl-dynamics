@@ -16,3 +16,4 @@ from osl_dynamics.simulation.hmm import (
 )
 from osl_dynamics.simulation.hsmm import HSMM, HSMM_MVN, MixedHSMM_MVN
 from osl_dynamics.simulation.sm import MixedSine, MixedSine_MVN, MSess_MixedSine_MVN
+from osl_dynamics.simulation.swc import SWC

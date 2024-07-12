@@ -519,7 +519,7 @@ if __name__ == '__main__':
         np.savetxt(f'{save_dir}{10001 + i}.txt', data[i])
         np.save(f'{save_dir}truth/{10001 + i}_state_time_course.npy', time_course[i])
     '''
-
+    '''
     # Case 8: MEG data.
     # The raw data are in ./data/node_timeseries/notts_MEG/raw/
     # We'd like to implement tde-pca
@@ -538,6 +538,48 @@ if __name__ == '__main__':
     }
     meg_data.prepare(methods)
     meg_data.save(preprocessed_save_dir)
+    '''
+
+    ### Update 12th July 2024
+    ### Generate sliding window correlation
+    save_dir = './data/node_timeseries/simulation_bicv/sparse_swc/'
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    if not os.path.exists(f'{save_dir}truth/'):
+        os.makedirs(f'{save_dir}truth')
+
+    n_subjects = 500
+    n_states = 8
+    n_samples = 1200
+    n_channels = 25
+
+    covariances_original = np.load('./data/node_timeseries/simulation_bicv/random/truth/state_covariances.npy')
+    from osl_dynamics.array_ops import cov2stdcorr, stdcorr2cov
+
+    stds, corrs = cov2stdcorr(covariances_original)
+    covariances = stdcorr2cov(stds, corrs ** 3)
+
+    sim = simulation.SWC(
+        n_samples=n_samples * n_subjects,
+        n_states=n_states,
+        n_channels=n_channels,
+        stay_time=100,
+        means="zero",
+        covariances=covariances
+    )
+    data = sim.time_series
+    time_course = sim.state_time_course
+    data = data.reshape(n_subjects, -1, n_channels)
+    time_course = time_course.reshape(n_subjects, -1, n_states)
+
+    np.save(f'{save_dir}truth/state_covariances.npy', sim.obs_mod.covariances)
+    np.save(f'{save_dir}truth/tpm.npy', sim.hmm.trans_prob)
+
+    for i in range(n_subjects):
+        np.savetxt(f'{save_dir}{10001 + i}.txt', data[i])
+        np.save(f'{save_dir}truth/{10001 + i}_state_time_course.npy', time_course[i])
+
+
     #############################################################
     '''
     ### Update 6th Dec 2023
