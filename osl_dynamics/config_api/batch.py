@@ -142,8 +142,15 @@ batch_variable:
 
         root_save_dir = new_config['save_dir']
 
-        new_config['save_dir'] = f'{new_config["save_dir"]}{new_config["model"]}' \
-                                 f'_ICA_{new_config["n_channels"]}_state_{new_config["n_states"]}/{new_config["mode"]}/'
+        if 'n_states' in new_config:
+            state_or_mode = new_config["n_states"]
+        else:
+            state_or_mode = new_config["n_modes"]
+
+        new_config['save_dir'] = (
+            f'{new_config["save_dir"]}{new_config["model"]}'
+            f'_ICA_{new_config["n_channels"]}_state_{state_or_mode}/{new_config["mode"]}/'
+        )
 
         # Deal with cross validation case
         if 'cv' in new_config['mode']:
