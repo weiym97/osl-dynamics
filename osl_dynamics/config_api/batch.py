@@ -192,6 +192,7 @@ class BatchTrain:
 
     train_keys_default = ['n_channels',
                           'n_states',
+                          'n_modes',
                           'learn_means',
                           'learn_covariances',
                           'learn_trans_prob',
@@ -204,6 +205,17 @@ class BatchTrain:
                           'batch_size',
                           'learning_rate',
                           'n_epochs',
+                          # The followings are for Dynemo
+                          'inference_n_units',
+                          'inference_normalization',
+                          'model_n_units',
+                          'model_normalization',
+                          'learn_alpha_temperature',
+                          'initial_alpha_temperature',
+                          'do_kl_annealing',
+                          'kl_annealing_curve',
+                          'kl_annealing_sharpness',
+                          'n_kl_annealing_epochs'
                           ]
 
     def __init__(self, config: dict, train_keys=None):
