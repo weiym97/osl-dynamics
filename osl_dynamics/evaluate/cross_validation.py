@@ -1774,3 +1774,316 @@ class CVSWC(CVBase):
                                           save_dir=os.path.join(config['save_dir'], 'Y_test/'))
         else:
             raise ValueError('Currently the cv_variant unavailable!')
+
+class CVDYNEMO(CVBase):
+    '''
+    Bi-cross validation for HMM model (inherited from CVBase)
+    '''
+
+    def __init__(self, n_samples=None, n_channels=None, row_indices=None, column_indices=None,
+                 save_dir=None, partition_rows=2, partition_columns=2, train_keys=None):
+        super().__init__(n_samples, n_channels, row_indices, column_indices,
+                         save_dir, partition_rows, partition_columns)
+        if train_keys is None:
+            self.train_keys = ['n_channels',
+                               'n_states',
+                               'learn_means',
+                               'learn_covariances',
+                               'learn_trans_prob',
+                               'initial_means',
+                               'initial_covariances',
+                               'initial_trans_prob',
+                               'sequence_length',
+                               'batch_size',
+                               'learning_rate',
+                               'n_epochs',
+                               ]
+        else:
+            self.train_keys = train_keys
+
+    def full_train(self, config, row, column, save_dir=None):
+        # Specify the save directory
+        if save_dir is None:
+            save_dir = os.path.join(config['save_dir'], 'full_train/')
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
+        prepare_config = {}
+        prepare_config['load_data'] = config['load_data']
+
+        # If select key is not specificed before
+        if 'select' not in prepare_config['load_data']['prepare'].keys():
+            prepare_config['load_data']['prepare']['select'] = {}
+        prepare_config['load_data']['prepare']['select']['channels'] = column
+
+        prepare_config[f'train_{config["model"]}'] = {
+            'config_kwargs':
+                {key: config[key] for key in self.train_keys if key in config},
+            'init_kwargs':
+                config['init_kwargs']
+        }
+        prepare_config[f'train_{config["model"]}']['config_kwargs']['n_channels'] = len(column)
+        prepare_config['keep_list'] = row
+
+        with open(f'{save_dir}/prepared_config.yaml', 'w') as file:
+            yaml.safe_dump(prepare_config, file, default_flow_style=False)
+        run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
+                               save_dir)
+        params_dir = f'{save_dir}/inf_params/'
+        return {'means': f'{params_dir}means.npy',
+                'covs': f'{params_dir}covs.npy'}, f'{params_dir}alp.pkl'
+
+    def infer_spatial(self, config, row, column, temporal, save_dir=None):
+        # Specify the save directory
+        if save_dir is None:
+            save_dir = os.path.join(config['save_dir'], 'infer_spatial/')
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+        # Do nothing if n_states = 1
+        if config['n_states'] == 1:
+            return '0'
+
+        # Create a new directory "config['save_dir']/X_train/inf_params
+        if not os.path.exists(f'{save_dir}inf_params/'):
+            os.makedirs(f'{save_dir}inf_params/')
+
+        shutil.move(temporal, f'{save_dir}inf_params/')
+
+        prepare_config = {}
+        prepare_config['load_data'] = config['load_data']
+
+        if 'select' not in prepare_config['load_data']['prepare'].keys():
+            prepare_config['load_data']['prepare']['select'] = {}
+        prepare_config['load_data']['prepare']['select']['channels'] = column
+
+        prepare_config[f'build_{config["model"]}'] = {
+            'config_kwargs':
+                {key: config[key] for key in self.train_keys if key in config},
+        }
+        prepare_config[f'build_{config["model"]}']['config_kwargs']['n_channels'] = len(column)
+        prepare_config['dual_estimation'] = {'concatenate': True}
+
+        # Note the 'keep_list' value is in order (from small to large number)
+        prepare_config['keep_list'] = row
+
+        with open(f'{save_dir}/prepared_config.yaml', 'w') as file:
+            yaml.safe_dump(prepare_config, file, default_flow_style=False, sort_keys=False)
+
+        run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
+                               save_dir)
+
+        # Compress the representation of alp.pkl file
+        if os.path.exists(f'{save_dir}inf_params/alp.pkl'):
+            from osl_dynamics.inference.modes import prob2onehot
+            with open(f'{save_dir}inf_params/alp.pkl', 'rb') as file:
+                alpha = pickle.load(file)
+            alpha = prob2onehot(alpha)
+            os.remove(f'{save_dir}inf_params/alp.pkl')
+            with open(f'{save_dir}inf_params/alp.pkl', 'wb') as file:
+                pickle.dump(alpha, file)
+
+        return {'means': f'{save_dir}/dual_estimates/means.npy',
+                'covs': f'{save_dir}/dual_estimates/covs.npy'}
+
+    def infer_temporal(self, config, row, column, spatial, save_dir=None):
+        # Specify the save directory
+        if save_dir is None:
+            save_dir = os.path.join(config['save_dir'], 'infer_temporal/')
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
+        # Do nothing if n_states = 1
+        if config['n_states'] == 1:
+            return '0'
+
+        prepare_config = {}
+        prepare_config['load_data'] = config['load_data']
+
+        if 'select' not in prepare_config['load_data']['prepare'].keys():
+            prepare_config['load_data']['prepare']['select'] = {}
+        prepare_config['load_data']['prepare']['select']['channels'] = column
+
+        prepare_config[f'train_{config["model"]}'] = {
+            'config_kwargs':
+                {key: config[key] for key in self.train_keys if key in config},
+            'init_kwargs':
+                config['init_kwargs']
+        }
+        # Fix the means and covariances
+        prepare_config[f'train_{config["model"]}']['config_kwargs']['learn_means'] = False
+        prepare_config[f'train_{config["model"]}']['config_kwargs']['learn_covariances'] = False
+        prepare_config[f'train_{config["model"]}']['config_kwargs']['initial_means'] = spatial['means']
+        prepare_config[f'train_{config["model"]}']['config_kwargs']['initial_covariances'] = spatial['covs']
+
+        prepare_config[f'train_{config["model"]}']['config_kwargs']['n_channels'] = len(column)
+        prepare_config['keep_list'] = row
+
+        with open(f'{save_dir}/prepared_config.yaml', 'w') as file:
+            yaml.safe_dump(prepare_config, file, default_flow_style=False)
+        run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
+                               save_dir)
+        params_dir = f'{save_dir}/inf_params/'
+        return f'{params_dir}/alp.pkl'
+
+    def calculate_error(self, config, row, column, temporal, spatial, save_dir=None):
+        # Specify the save directory
+        if save_dir is None:
+            save_dir = os.path.join(config['save_dir'], 'calculate_error/')
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
+        if not os.path.exists(f'{save_dir}inf_params/'):
+            os.makedirs(f'{save_dir}inf_params/')
+
+        # Compress the file
+        if os.path.exists(temporal):
+            from osl_dynamics.array_ops import convert_arrays_to_dtype
+            with open(temporal, 'rb') as file:
+                alpha = pickle.load(file)
+            alpha = convert_arrays_to_dtype(alpha,np.float16)
+            os.remove(temporal)
+            with open(temporal, 'wb') as file:
+                pickle.dump(alpha, file)
+
+            shutil.move(temporal, f'{save_dir}inf_params/')
+
+
+
+
+        prepare_config = {}
+        prepare_config['load_data'] = config['load_data']
+
+        if 'select' not in prepare_config['load_data']['prepare'].keys():
+            prepare_config['load_data']['prepare']['select'] = {}
+        prepare_config['load_data']['prepare']['select']['channels'] = column
+
+        if config['n_states'] > 1:
+            prepare_config[f'build_{config["model"]}'] = {
+                'config_kwargs':
+                    {key: config[key] for key in self.train_keys if key in config},
+            }
+            prepare_config[f'build_{config["model"]}']['config_kwargs']['n_channels'] = len(column)
+            prepare_config[f'build_{config["model"]}']['config_kwargs']['initial_means'] = spatial['means']
+            prepare_config[f'build_{config["model"]}']['config_kwargs']['initial_covariances'] = spatial['covs']
+
+            prepare_config['log_likelihood'] = {'static_FC':False}
+        else:
+            prepare_config['log_likelihood'] = {'static_FC':True,'spatial':spatial}
+        # Note the 'keep_list' value is in order (from small to large number)
+        prepare_config['keep_list'] = row
+
+        with open(f'{save_dir}/prepared_config.yaml', 'w') as file:
+            yaml.safe_dump(prepare_config, file, default_flow_style=False, sort_keys=False)
+        run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
+                               save_dir)
+        return f'{save_dir}/metrics.json'
+
+    def split_column(self, config, column_1, column_2, spatial, save_dir=None):
+        # Specify the save directory
+        if save_dir is None:
+            save_dir = [os.path.join(config['save_dir'], 'column_1_spatial/'),
+                        os.path.join(config['save_dir'], 'column_2_spatial/')]
+        for dir in save_dir:
+            if not os.path.exists(dir):
+                os.makedirs(dir)
+        means = np.load(spatial['means'])
+        covs = np.load(spatial['covs'])
+
+        means_1 = means[:, column_1]
+        means_2 = means[:, column_2]
+        covs_1 = (covs[:, :, column_1])[:, column_1, :]
+        covs_2 = (covs[:, :, column_2])[:, column_2, :]
+
+        np.save(f'{save_dir[0]}means.npy', means_1)
+        np.save(f'{save_dir[0]}covs.npy', covs_1)
+        np.save(f'{save_dir[1]}means.npy', means_2)
+        np.save(f'{save_dir[1]}covs.npy', covs_2)
+
+        return ({'means': f'{save_dir[0]}means.npy', 'covs': f'{save_dir[0]}covs.npy'},
+                {'means': f'{save_dir[1]}means.npy', 'covs': f'{save_dir[1]}covs.npy'})
+
+    def split_row(self, config, row_1, row_2, temporal, save_dir=None):
+        # Specify the save directory
+        if save_dir is None:
+            save_dir = [os.path.join(config['save_dir'], 'row_1_temporal/'),
+                        os.path.join(config['save_dir'], 'row_2_temporal/')]
+        for dir in save_dir:
+            if not os.path.exists(dir):
+                os.makedirs(dir)
+
+        # Read the whole alpha file
+        with open(temporal, 'rb') as file:
+            # Load the Python object from the pickle file
+            alpha = pickle.load(file)
+
+        # Extract alpha_1 and alpha_2
+        alpha_1 = [alpha[i] for i in row_1]
+        alpha_2 = [alpha[i] for i in row_2]
+
+        with open(f'{save_dir[0]}/alp.pkl', 'wb') as file:
+            pickle.dump(alpha_1, file)
+        with open(f'{save_dir[1]}/alp.pkl', 'wb') as file:
+            pickle.dump(alpha_2, file)
+
+        # Remove the original file to save disc space
+        os.remove(temporal)
+
+        return f'{save_dir[0]}/alp.pkl', f'{save_dir[1]}/alp.pkl'
+
+    def validate(self, config, i, j):
+        row_train, row_test, column_X, column_Y = self.fold_indices(i - 1, j - 1)
+
+        if not os.path.exists(config['save_dir']):
+            os.makedirs(config['save_dir'])
+
+        # Save the dictionary as a pickle file
+        with open(os.path.join(config['save_dir'], 'fold_indices.json'), 'w') as f:
+            json.dump({
+                'row_train': row_train,
+                'row_test': row_test,
+                'column_X': column_X,
+                'column_Y': column_Y
+            }, f)
+        if str(config['cv_variant']) == '1':
+            spatial_Y_train, temporal_Y_train = self.full_train(config, row_train, column_Y,
+                                                                save_dir=os.path.join(config['save_dir'], 'Y_train/'))
+            spatial_X_train = self.infer_spatial(config, row_train, column_X, temporal_Y_train,
+                                                 save_dir=os.path.join(config['save_dir'], 'X_train/'))
+            temporal_X_test = self.infer_temporal(config, row_test, column_X, spatial_X_train,
+                                                  save_dir=os.path.join(config['save_dir'], 'X_test/'))
+            metric = self.calculate_error(config, row_test, column_Y, temporal_X_test, spatial_Y_train,
+                                          save_dir=os.path.join(config['save_dir'], 'Y_test/'))
+
+        elif str(config['cv_variant']) == '2':
+            spatial_X_train, temporal_X_train = self.full_train(config, row_train, column_X,
+                                                                save_dir=os.path.join(config['save_dir'], 'X_train/'))
+            spatial_Y_train = self.infer_spatial(config, row_train, column_Y, temporal_X_train,
+                                                 save_dir=os.path.join(config['save_dir'], 'Y_train/'))
+            temporal_X_test = self.infer_temporal(config, row_test, column_X, spatial_X_train,
+                                                  save_dir=os.path.join(config['save_dir'], 'X_test/'))
+            metric = self.calculate_error(config, row_test, column_Y, temporal_X_test, spatial_Y_train,
+                                          save_dir=os.path.join(config['save_dir'], 'Y_test/'))
+
+        elif str(config['cv_variant']) == '3':
+            spatial_XY_train, _ = self.full_train(config, row_train, sorted(column_X + column_Y),
+                                                  save_dir=os.path.join(config['save_dir'], 'XY_train/'))
+            spatial_X_train, spatial_Y_train = self.split_column(config, column_X, column_Y, spatial_XY_train,
+                                                                 save_dir=[os.path.join(config['save_dir'], 'X_train/'),
+                                                                           os.path.join(config['save_dir'], 'Y_train/')]
+                                                                 )
+            temporal_X_test = self.infer_temporal(config, row_test, column_X, spatial_X_train,
+                                                  save_dir=os.path.join(config['save_dir'], 'X_test/'))
+            metric = self.calculate_error(config, row_test, column_Y, temporal_X_test, spatial_Y_train,
+                                          save_dir=os.path.join(config['save_dir'], 'Y_test/'))
+        elif str(config['cv_variant']) == '4':
+            _, temporal_X_traintest = self.full_train(config, sorted(row_train + row_test), column_X,
+                                                      save_dir=os.path.join(config['save_dir'], 'X_traintest/'))
+            temporal_X_train, temporal_X_test = self.split_row(config, row_train, row_test, temporal_X_traintest,
+                                                               save_dir=[os.path.join(config['save_dir'], 'X_train/'),
+                                                                         os.path.join(config['save_dir'], 'X_test/')])
+            spatial_Y_train = self.infer_spatial(config, row_train, column_Y, temporal_X_train,
+                                                 save_dir=os.path.join(config['save_dir'], 'Y_train/'))
+            metric = self.calculate_error(config, row_test, column_Y, temporal_X_test, spatial_Y_train,
+                                          save_dir=os.path.join(config['save_dir'], 'Y_test/'))
+        else:
+            raise ValueError('Currently the cv_variant unavailable!')
