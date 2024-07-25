@@ -1775,9 +1775,9 @@ class CVSWC(CVBase):
         else:
             raise ValueError('Currently the cv_variant unavailable!')
 
-class CVDYNEMO(CVBase):
+class CVDyNeMo(CVBase):
     '''
-    Bi-cross validation for HMM model (inherited from CVBase)
+    Bi-cross validation for DyNeMo model (inherited from CVBase)
     '''
 
     def __init__(self, n_samples=None, n_channels=None, row_indices=None, column_indices=None,
@@ -1786,17 +1786,31 @@ class CVDYNEMO(CVBase):
                          save_dir, partition_rows, partition_columns)
         if train_keys is None:
             self.train_keys = ['n_channels',
-                               'n_states',
-                               'learn_means',
-                               'learn_covariances',
-                               'learn_trans_prob',
-                               'initial_means',
-                               'initial_covariances',
-                               'initial_trans_prob',
-                               'sequence_length',
-                               'batch_size',
-                               'learning_rate',
-                               'n_epochs',
+                          'n_states',
+                          'n_modes',
+                          'learn_means',
+                          'learn_covariances',
+                          'learn_trans_prob',
+                          'window_length',
+                          'window_offset',
+                          'initial_means',
+                          'initial_covariances',
+                          'initial_trans_prob',
+                          'sequence_length',
+                          'batch_size',
+                          'learning_rate',
+                          'n_epochs',
+                          # The followings are for Dynemo
+                          'inference_n_units',
+                          'inference_normalization',
+                          'model_n_units',
+                          'model_normalization',
+                          'learn_alpha_temperature',
+                          'initial_alpha_temperature',
+                          'do_kl_annealing',
+                          'kl_annealing_curve',
+                          'kl_annealing_sharpness',
+                          'n_kl_annealing_epochs'
                                ]
         else:
             self.train_keys = train_keys
