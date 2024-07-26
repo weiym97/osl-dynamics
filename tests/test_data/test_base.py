@@ -157,3 +157,57 @@ def test_prepare():
     # Remove the directory after testing
     from shutil import rmtree
     rmtree(save_dir)
+
+def test_filter():
+    """
+    This function aims to test the band-pass filter of the Data Class.
+    """
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import os
+
+    save_dir = './test_filter_temp/'
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+
+    # Parameters
+    length = 1200
+    sampling_frequency = 1 / 0.7
+    cutoff_frequency = 0.25
+
+    def generate_time_series(length, sampling_frequency):
+        t = np.arange(0, length * sampling_frequency, sampling_frequency)
+        # Create a signal with low and high frequency components
+        low_freq_signal = np.sin(2 * np.pi * 0.1 * t)  # Low frequency component (0.1 Hz)
+        high_freq_signal = np.sin(2 * np.pi * 0.3 * t)  # High frequency component (1.0 Hz)
+        return low_freq_signal + high_freq_signal
+
+    time_series = generate_time_series(length,sampling_frequency)
+    time_series_save = np.column_stack((time_series, time_series))
+
+    # save the input_1 and input_2
+    np.savetxt(f'{save_dir}10001.txt', time_series_save)
+    np.savetxt(f'{save_dir}10002.txt', time_series_save)
+
+    data = Data(save_dir,sampling_frequency=sampling_frequency)
+    prepare_dict = {'select': {'timepoints': [0, 1200]},
+                    'filter':{'low_freq':cutoff_frequency},
+                    }
+    data.prepare(prepare_dict)
+
+    filtered_ts = np.squeeze(data.time_series()[0][:,0])
+    def plot_frequency(signal,sampling_frequency):
+        fft_values = np.fft.rfft(signal)
+        fft_frequencies = np.fft.rfftfreq(len(signal), d=sampling_frequency)
+
+        plt.figure(figsize=(5, 4))
+        plt.plot(fft_frequencies, np.abs(fft_values))
+        plt.xlabel('Frequency (Hz)')
+        plt.ylabel('Magnitude')
+        plt.show()
+
+    plot_frequency(time_series,sampling_frequency)
+    plot_frequency(filtered_ts,sampling_frequency)
+
+
+    #npt.assert_array_less(np.abs(np.fft.rfft(filtered_ts)), 0.2)
