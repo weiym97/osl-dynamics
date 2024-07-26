@@ -1845,16 +1845,16 @@ class CVDyNeMo(CVBase):
                                save_dir)
         params_dir = f'{save_dir}/inf_params/'
         return {'means': f'{params_dir}means.npy',
-                'covs': f'{params_dir}covs.npy'}, f'{params_dir}alp.pkl'
+                'covs': f'{params_dir}covs.npy'}, f'{params_dir}alp.pkl',f'{save_dir}/model/'
 
-    def infer_spatial(self, config, row, column, temporal, save_dir=None):
+    def infer_spatial(self, config, row, column, temporal, model=None, save_dir=None):
         # Specify the save directory
         if save_dir is None:
             save_dir = os.path.join(config['save_dir'], 'infer_spatial/')
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
         # Do nothing if n_states = 1
-        if config['n_states'] == 1:
+        if config['n_modes'] == 1:
             return '0'
 
         # Create a new directory "config['save_dir']/X_train/inf_params
@@ -1862,6 +1862,9 @@ class CVDyNeMo(CVBase):
             os.makedirs(f'{save_dir}inf_params/')
 
         shutil.move(temporal, f'{save_dir}inf_params/')
+
+        if model is not None:
+            shutil.move(model,f'{save_dir}/')
 
         prepare_config = {}
         prepare_config['load_data'] = config['load_data']
@@ -1885,7 +1888,7 @@ class CVDyNeMo(CVBase):
 
         run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
                                save_dir)
-
+        '''
         # Compress the representation of alp.pkl file
         if os.path.exists(f'{save_dir}inf_params/alp.pkl'):
             from osl_dynamics.inference.modes import prob2onehot
@@ -1895,7 +1898,7 @@ class CVDyNeMo(CVBase):
             os.remove(f'{save_dir}inf_params/alp.pkl')
             with open(f'{save_dir}inf_params/alp.pkl', 'wb') as file:
                 pickle.dump(alpha, file)
-
+        '''
         return {'means': f'{save_dir}/dual_estimates/means.npy',
                 'covs': f'{save_dir}/dual_estimates/covs.npy'}
 
@@ -1907,7 +1910,7 @@ class CVDyNeMo(CVBase):
             os.makedirs(save_dir)
 
         # Do nothing if n_states = 1
-        if config['n_states'] == 1:
+        if config['n_modes'] == 1:
             return '0'
 
         prepare_config = {}
@@ -1937,9 +1940,9 @@ class CVDyNeMo(CVBase):
         run_pipeline_from_file(f'{save_dir}/prepared_config.yaml',
                                save_dir)
         params_dir = f'{save_dir}/inf_params/'
-        return f'{params_dir}/alp.pkl'
+        return f'{params_dir}/alp.pkl',f'{save_dir}/model/'
 
-    def calculate_error(self, config, row, column, temporal, spatial, save_dir=None):
+    def calculate_error(self, config, row, column, temporal, spatial,model=None, save_dir=None):
         # Specify the save directory
         if save_dir is None:
             save_dir = os.path.join(config['save_dir'], 'calculate_error/')
@@ -1948,6 +1951,9 @@ class CVDyNeMo(CVBase):
 
         if not os.path.exists(f'{save_dir}inf_params/'):
             os.makedirs(f'{save_dir}inf_params/')
+
+        if model is not None:
+            shutil.move(model,f'{save_dir}/')
 
         # Compress the file
         if os.path.exists(temporal):
@@ -2059,15 +2065,15 @@ class CVDyNeMo(CVBase):
                 'column_Y': column_Y
             }, f)
         if str(config['cv_variant']) == '1':
-            spatial_Y_train, temporal_Y_train = self.full_train(config, row_train, column_Y,
-                                                                save_dir=os.path.join(config['save_dir'], 'Y_train/'))
-            spatial_X_train = self.infer_spatial(config, row_train, column_X, temporal_Y_train,
+            spatial_Y_train, temporal_Y_train,model_Y_train = self.full_train(config, row_train, column_Y,
+                                                                              save_dir=os.path.join(config['save_dir'], 'Y_train/'))
+            spatial_X_train = self.infer_spatial(config, row_train, column_X, temporal_Y_train,model_Y_train,
                                                  save_dir=os.path.join(config['save_dir'], 'X_train/'))
-            temporal_X_test = self.infer_temporal(config, row_test, column_X, spatial_X_train,
-                                                  save_dir=os.path.join(config['save_dir'], 'X_test/'))
-            metric = self.calculate_error(config, row_test, column_Y, temporal_X_test, spatial_Y_train,
+            temporal_X_test, model_X_test = self.infer_temporal(config, row_test, column_X, spatial_X_train,
+                                                                save_dir=os.path.join(config['save_dir'], 'X_test/'))
+            metric = self.calculate_error(config, row_test, column_Y, temporal_X_test, spatial_Y_train,model_X_test,
                                           save_dir=os.path.join(config['save_dir'], 'Y_test/'))
-
+        '''
         elif str(config['cv_variant']) == '2':
             spatial_X_train, temporal_X_train = self.full_train(config, row_train, column_X,
                                                                 save_dir=os.path.join(config['save_dir'], 'X_train/'))
@@ -2101,3 +2107,4 @@ class CVDyNeMo(CVBase):
                                           save_dir=os.path.join(config['save_dir'], 'Y_test/'))
         else:
             raise ValueError('Currently the cv_variant unavailable!')
+        '''
