@@ -1877,7 +1877,7 @@ class CVDyNeMo(CVBase):
             'config_kwargs':
                 {key: config[key] for key in self.train_keys if key in config},
         }
-        prepare_config[f'build_{config["model"]}']['config_kwargs']['n_channels'] = len(column)
+
         prepare_config['dual_estimation'] = {'concatenate': True}
 
         # Note the 'keep_list' value is in order (from small to large number)

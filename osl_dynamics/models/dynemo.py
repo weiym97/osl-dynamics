@@ -532,6 +532,7 @@ class Model(VariationalInferenceModelBase):
     def dual_estimation(
         self,
         training_data,
+        alpha=None,
         n_epochs=None,
         learning_rate=None,
         store_dir="tmp",
@@ -547,6 +548,13 @@ class Model(VariationalInferenceModelBase):
         ----------
         training_data : osl_dynamics.data.Data
             Training dataset.
+        alpha: list of np.ndarray, optional,
+            Posterior distribution of the states. Shape is
+            (n_sessions, n_samples, n_states).
+            If passed in, the dual estimation finds the maximum log-likelihood solution
+            of observation model
+        concatenate: bool,optional
+            Whether to concatenate the data before calculating estimating state stats
         n_epochs : int, optional
             Number of epochs to train for. Defaults to the value in the
             :code:`config` used to create the model.
@@ -564,49 +572,90 @@ class Model(VariationalInferenceModelBase):
             Session-specific covariances.
             Shape is (n_sessions, n_modes, n_channels, n_channels).
         """
-        # Save the group level model
-        os.makedirs(store_dir, exist_ok=True)
-        self.save_weights(f"{store_dir}/weights.h5")
+        if alpha is not None:
+            # Validation
+            if isinstance(alpha, np.ndarray):
+                alpha = [alpha]
+            # Get the session-specific data
+            data = training_data.time_series(prepared=True, concatenate=False)
 
-        # Save original training hyperparameters
-        original_n_epochs = self.config.n_epochs
-        original_learning_rate = self.config.learning_rate
-        self.config.n_epochs = n_epochs or self.config.n_epochs
-        self.config.learning_rate = learning_rate or self.config.learning_rate
+            # Note training_data.keep is in order. You need to preserve the order
+            # between data and alpha.
+            data = [data[i] for i in training_data.keep]
 
-        # Layers to fix (i.e. make non-trainable)
-        fixed_layers = [
-            "mod_rnn",
-            "mod_mu",
-            "mod_sigma",
-            "inf_rnn",
-            "inf_mu",
-            "inf_sigma",
-            "theta_norm",
-            "alpha",
-        ]
+            if len(alpha) != len(data):
+                raise ValueError(
+                    "len(alpha) and training_data.n_sessions must be the same."
+                )
 
-        # Dual estimation on sessions
-        means = []
-        covariances = []
-        with self.set_trainable(fixed_layers, False):
-            for i in trange(training_data.n_sessions, desc="Dual estimation"):
-                # Train on this session
-                with training_data.set_keep(i):
-                    self.fit(training_data, verbose=0)
+            # Make sure the data and alpha have the same number of samples
+            data = [d[: a.shape[0]] for d, a in zip(data, alpha)]
 
-                # Get inferred parameters
-                m, c = self.get_means_covariances()
-                means.append(m)
-                covariances.append(c)
+            # Create model with only the necessary layers
+            inputs = layers.Input(shape=(self.config.sequence_length, self.config.n_channels), name="data")
+            alpha_input = layers.Input(shape=(self.config.sequence_length, self.config.n_modes), name="alpha")
 
-                # Reset back to group-level model parameters
-                self.load_weights(f"{store_dir}/weights.h5")
-                self.compile()
+            mu = self.model.get_layer("means")(inputs)
+            D = self.model.get_layer("covs")(inputs)
+            m = self.model.get_layer("mix_means")([alpha_input, mu])
+            C = self.model.get_layer("mix_covs")([alpha_input, D])
+            ll_loss = self.model.get_layer("ll_loss")([inputs, m, C])
 
-        # Reset hyperparameters
-        self.config.n_epochs = original_n_epochs
-        self.config.learning_rate = original_learning_rate
+            observation_model = tf.keras.Model(inputs=[inputs, alpha_input], outputs=ll_loss,
+                                                name="ObservationModel")
+            observation_model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.config.learning_rate))
+
+            # Train the observation model
+            for epoch in range(n_epochs or self.config.n_epochs):
+                for x, a in zip(data, alpha):
+                    observation_model.train_on_batch([x, a])
+
+            # Get the means and covariances
+            means, covariances = self.get_means_covariances()
+        else:
+            # Save the group level model
+            os.makedirs(store_dir, exist_ok=True)
+            self.save_weights(f"{store_dir}/weights.h5")
+
+            # Save original training hyperparameters
+            original_n_epochs = self.config.n_epochs
+            original_learning_rate = self.config.learning_rate
+            self.config.n_epochs = n_epochs or self.config.n_epochs
+            self.config.learning_rate = learning_rate or self.config.learning_rate
+
+            # Layers to fix (i.e. make non-trainable)
+            fixed_layers = [
+                "mod_rnn",
+                "mod_mu",
+                "mod_sigma",
+                "inf_rnn",
+                "inf_mu",
+                "inf_sigma",
+                "theta_norm",
+                "alpha",
+            ]
+
+            # Dual estimation on sessions
+            means = []
+            covariances = []
+            with self.set_trainable(fixed_layers, False):
+                for i in trange(training_data.n_sessions, desc="Dual estimation"):
+                    # Train on this session
+                    with training_data.set_keep(i):
+                        self.fit(training_data, verbose=0)
+
+                    # Get inferred parameters
+                    m, c = self.get_means_covariances()
+                    means.append(m)
+                    covariances.append(c)
+
+                    # Reset back to group-level model parameters
+                    self.load_weights(f"{store_dir}/weights.h5")
+                    self.compile()
+
+            # Reset hyperparameters
+            self.config.n_epochs = original_n_epochs
+            self.config.learning_rate = original_learning_rate
 
         return np.array(means), np.array(covariances)
 
