@@ -734,7 +734,6 @@ def test_swc_full_train():
     n_channels = 3
     n_states = 3
     row_train = [1, 2]
-    column_X = [1]
     column_Y = [0, 2]
 
     # Construct the data
