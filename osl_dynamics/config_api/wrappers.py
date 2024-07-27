@@ -593,8 +593,6 @@ def train_dynemo(
     }
     config_kwargs = override_dict_defaults(default_config_kwargs, config_kwargs)
     _logger.info(f"Using config_kwargs: {config_kwargs}")
-    print(config_kwargs)
-    print('###################################')
     config = dynemo.Config(**config_kwargs)
     model = dynemo.Model(config)
     model.summary()
