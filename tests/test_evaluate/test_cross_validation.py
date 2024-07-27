@@ -1115,3 +1115,143 @@ def test_swc_calculate_error():
         metrics = json.load(file)
 
     npt.assert_almost_equal(log_likelihood_answer, metrics['log_likelihood'])
+
+def test_full_train_DyNeMo():
+    import os
+    import shutil
+    import yaml
+    from osl_dynamics.evaluate.cross_validation import CVDyNeMo
+
+    save_dir = './test_dynemo_full_train/'
+    if os.path.exists(save_dir):
+        shutil.rmtree(save_dir)
+    os.makedirs(save_dir)
+
+    # Define a very simple test case
+    n_samples = 3
+    n_channels = 3
+    n_states = 2
+    row_train = [1, 2]
+    column_X = [1]
+    column_Y = [0, 2]
+
+    # Construct the data
+    def generate_obs(cov, mean=None, n_timepoints=100):
+        if mean is None:
+            mean = np.zeros(len(cov))
+        return np.random.multivariate_normal(mean, cov, n_timepoints)
+
+    # Define the covariance matrices of state 1,2 in both splits
+    cors_Y = [-0.5, 0.5]
+    covs_Y = [np.array([[1.0, cor], [cor, 1.0]]) for cor in cors_Y]
+    mean_Y = [[1.0, -1.0], [-1.0, 1.0]]
+
+    means_X = [1.0, 2.0]
+    vars_X = [0.5, 2.0]
+
+    # save these files
+    data_dir = f'{save_dir}data/'
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+
+    timepoints = 100  # Number of timepoints per segment
+
+    for i in range(0, 2):
+        obs = []
+        for j in range(1500):
+
+            t = np.linspace(0,timepoints-1,timepoints)/timepoints
+
+            # Alpha coefficients
+            alpha_t1 = np.sin(2 * np.pi * t) ** 2
+            alpha_t2 = np.cos(2 * np.pi * t) ** 2
+
+            Y_mean_t = np.outer(alpha_t1, mean_Y[0]) + np.outer(alpha_t2, mean_Y[1])
+            Y_cov_t = np.einsum('t,ij->tij', alpha_t1, covs_Y[0]) + np.einsum('t,ij->tij', alpha_t2, covs_Y[1])
+
+            Y_obs = np.array(
+                [np.random.multivariate_normal(Y_mean_t[t_idx], Y_cov_t[t_idx]) for t_idx in range(timepoints)])
+
+            # Generate X observations
+            X_mean_t = alpha_t1 * means_X[0] + alpha_t2 * means_X[1]
+            X_var_t = alpha_t1 * vars_X[0] + alpha_t2 * vars_X[1]
+
+            print(X_mean_t.shape)
+            print(X_var_t.shape)
+
+            X_obs = np.reshape(np.random.normal(X_mean_t, np.sqrt(X_var_t)),(-1,1))
+
+            # Combine X and Y observations
+            observations = np.hstack((Y_obs[:, :1], X_obs, Y_obs[:, 1:]))
+            obs.append(observations)
+
+        obs = np.concatenate(obs, axis=0)
+        np.save(f"{data_dir}{10002 + i}.npy", obs)
+
+    # Generate irrelevant dataset
+    np.save(f"{data_dir}10001.npy", generate_obs(np.eye(3) * 100, n_timepoints=300000))
+
+    config = f"""
+            load_data:
+                inputs: {data_dir}
+                prepare:
+                    select:
+                        timepoints:
+                            - 0
+                            - 300000
+                            
+            batch_size: 64
+            do_kl_annealing: true
+            inference_n_units: 64
+            inference_normalization: layer
+            initial_alpha_temperature: 1.0
+            kl_annealing_curve: tanh
+            kl_annealing_sharpness: 5
+            learn_alpha_temperature: true
+            learn_covariances: true
+            learn_means: true
+            learning_rate: 0.01
+            model_n_units: 64
+            model_normalization: layer
+            n_channels: 3
+            n_epochs: 30
+            n_kl_annealing_epochs: 10
+            n_modes: 2
+            sequence_length: 100
+            init_kwargs:
+                n_init: 10
+                n_epochs: 2
+            save_dir: {save_dir}
+            model: dynemo
+
+            """
+    config = yaml.safe_load(config)
+
+    train_keys = ['n_channels',
+                  'n_states',
+                  'learn_means',
+                  'learn_covariances',
+                  'learn_trans_prob',
+                  'initial_means',
+                  'initial_covariances',
+                  'initial_trans_prob',
+                  'sequence_length',
+                  'batch_size',
+                  'learning_rate',
+                  'n_epochs',
+                  ]
+    cv = CVDyNeMo(n_samples, n_channels, train_keys=train_keys)
+    result, _ = cv.full_train(config, row_train, column_Y)
+
+    result_means = np.load(result['means'])
+    result_covs = np.load(result['covs'])
+    print('means:',result_means)
+    print('covs:',result_covs)
+    #npt.assert_array_equal(result_means, np.zeros((n_states, len(column_Y))))
+
+    # Assert diagonal elements are all one
+    #npt.assert_allclose(np.diagonal(result_covs, axis1=-2, axis2=-1), 1.0, rtol=0.05, atol=0.05)
+
+    # Assert off-diagonal elements are equal to cors
+    #off_diagonal = np.array([float(result_covs[i, 0, 1]) for i in range(n_states)])
+    #npt.assert_allclose(np.sort(off_diagonal), cors_Y, atol=0.05, rtol=0.05)
