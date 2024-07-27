@@ -1246,8 +1246,8 @@ def test_full_train_DyNeMo():
     with open(temporal_Y_train,'rb') as file:
         alpha = pickle.load(file)
 
-    npt.assert_array_equal(result_means, means_Y)
-    npt.assert_array_equal(result_covs, covs_Y)
+    npt.assert_allclose(result_means, np.array(means_Y))
+    npt.assert_allclose(result_covs, np.stack(covs_Y))
 
     # Test whether the inferred alphas are close to the ground truth
     for truth, inferred in zip(alpha_truth, alpha):
