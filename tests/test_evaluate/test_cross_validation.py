@@ -1144,7 +1144,7 @@ def test_full_train_DyNeMo():
     # Define the covariance matrices of state 1,2 in both splits
     cors_Y = [-0.5, 0.5]
     covs_Y = [np.array([[1.0, cor], [cor, 1.0]]) for cor in cors_Y]
-    mean_Y = [[1.0, -1.0], [-1.0, 1.0]]
+    means_Y = [[1.0, -1.0], [-1.0, 1.0]]
 
     means_X = [1.0, 2.0]
     vars_X = [0.5, 2.0]
@@ -1187,6 +1187,9 @@ def test_full_train_DyNeMo():
 
     # Generate irrelevant dataset
     np.save(f"{data_dir}10001.npy", generate_obs(np.eye(3) * 100, n_timepoints=300000))
+
+    np.save(f'{save_dir}/fixed_means.npy', np.array(means_Y))
+    np.save(f'{save_dir}/fixed_covs.npy', np.stack(covs_Y))
 
     config = f"""
             load_data:
@@ -1257,6 +1260,7 @@ def test_full_train_DyNeMo():
 
 def test_infer_temporal_DyNeMo():
     import os
+    import pickle
     import shutil
     import yaml
     from osl_dynamics.evaluate.cross_validation import CVDyNeMo
@@ -1294,15 +1298,19 @@ def test_infer_temporal_DyNeMo():
         os.makedirs(data_dir)
 
     timepoints = 100  # Number of timepoints per segment
+    alpha_truth = []
 
     for i in range(0, 2):
         obs = []
+        alphas = []
         for j in range(3000):
             t = np.linspace(0, timepoints - 1, timepoints) / timepoints
 
             # Alpha coefficients
             alpha_t1 = np.sin(2 * np.pi * t) ** 2
             alpha_t2 = np.cos(2 * np.pi * t) ** 2
+
+            alphas.append(np.stack((alpha_t1, alpha_t2), axis=1))
 
             X_mean_t = np.outer(alpha_t1, means_X[0]) + np.outer(alpha_t2, means_X[1])
             X_cov_t = np.einsum('t,ij->tij', alpha_t1, covs_X[0]) + np.einsum('t,ij->tij', alpha_t2, covs_X[1])
@@ -1322,6 +1330,7 @@ def test_infer_temporal_DyNeMo():
 
         obs = np.concatenate(obs, axis=0)
         np.save(f"{data_dir}{10002 + i}.npy", obs)
+        alpha_truth.append(np.concatenate(alphas, axis=0))
 
     # Generate irrelevant dataset
     np.save(f"{data_dir}10001.npy", generate_obs(np.eye(3) * 100, n_timepoints=300000))
@@ -1381,9 +1390,13 @@ def test_infer_temporal_DyNeMo():
                   'n_epochs',
                   ]
     cv = CVDyNeMo(n_samples, n_channels, train_keys=train_keys)
-    result, _ = cv.infer_temporal(config, row_train, column_Y,spatial_X_train)
+    result = cv.infer_temporal(config, row_train, column_X,spatial_X_train)
 
-    result_means = np.load(result['means'])
-    result_covs = np.load(result['covs'])
-    print('means:', result_means)
-    print('covs:', result_covs)
+    # Load inferred alpha values
+    with open(result, 'rb') as f:
+        inferred_alpha = pickle.load(f)
+
+    # Test whether the inferred alphas are close to the ground truth
+    for truth, inferred in zip(alpha_truth, inferred_alpha):
+        np.testing.assert_allclose(truth, inferred, rtol=1e-2, atol=1e-2)
+
