@@ -117,6 +117,84 @@ def build_hmm(
     _logger.info(f"Saving model to: {model_dir}")
     model.save(model_dir)
 
+def build_dynemo(
+        data,
+        output_dir,
+        config_kwargs,
+):
+    """Train `DyNeMo <https://osl-dynamics.readthedocs.io/en/latest/autoapi\
+    /osl_dynamics/models/dynemo/index.html>`_.
+
+    This function will:
+
+    1. Build a :code:`dynemo.Model` object.
+    2. Save the model in :code:`<output_dir>/model`
+
+    This function will create two directories:
+
+    - :code:`<output_dir>/model`, which contains the trained model.
+
+    Parameters
+    ----------
+    data : osl_dynamics.data.Data
+        Data object for training the model.
+    output_dir : str
+        Path to output directory.
+    config_kwargs : dict
+        Keyword arguments to pass to `dynemo.Config <https://osl-dynamics\
+        .readthedocs.io/en/latest/autoapi/osl_dynamics/models/dynemo\
+        /index.html#osl_dynamics.models.dynemo.Config>`_. Defaults to::
+
+            {'n_channels': data.n_channels.
+             'sequence_length': 200,
+             'inference_n_units': 64,
+             'inference_normalization': 'layer',
+             'model_n_units': 64,
+             'model_normalization': 'layer',
+             'learn_alpha_temperature': True,
+             'initial_alpha_temperature': 1.0,
+             'do_kl_annealing': True,
+             'kl_annealing_curve': 'tanh',
+             'kl_annealing_sharpness': 10,
+             'n_kl_annealing_epochs': 20,
+             'batch_size': 128,
+             'learning_rate': 0.01,
+             'lr_decay': 0.1,
+             'n_epochs': 40}
+    """
+
+    from osl_dynamics.models import dynemo
+    # Directories
+    model_dir = output_dir + "/model"
+
+    # Create the model object
+    _logger.info("Building model")
+    default_config_kwargs = {
+        "n_channels": data.n_channels,
+        "sequence_length": 200,
+        "inference_n_units": 64,
+        "inference_normalization": "layer",
+        "model_n_units": 64,
+        "model_normalization": "layer",
+        "learn_alpha_temperature": True,
+        "initial_alpha_temperature": 1.0,
+        "do_kl_annealing": True,
+        "kl_annealing_curve": "tanh",
+        "kl_annealing_sharpness": 10,
+        "n_kl_annealing_epochs": 20,
+        "batch_size": 128,
+        "learning_rate": 0.01,
+        "lr_decay": 0.1,
+        "n_epochs": 40,
+    }
+    config_kwargs = override_dict_defaults(default_config_kwargs, config_kwargs)
+    _logger.info(f"Using config_kwargs: {config_kwargs}")
+    config = dynemo.Config(**config_kwargs)
+    model = dynemo.Model(config)
+    # Save trained model
+    _logger.info(f"Saving model to: {model_dir}")
+    model.save(model_dir)
+
 
 def train_swc(
         data,

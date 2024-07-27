@@ -1875,7 +1875,7 @@ class CVDyNeMo(CVBase):
                 {key: config[key] for key in self.train_keys if key in config},
         }
 
-        prepare_config['dual_estimation'] = {'concatenate': True}
+        prepare_config['dual_estimation'] = {'n_epochs': 100,'learning_rate':0.01}
 
         # Note the 'keep_list' value is in order (from small to large number)
         prepare_config['keep_list'] = row

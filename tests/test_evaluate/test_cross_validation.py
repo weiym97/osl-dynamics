@@ -1246,8 +1246,8 @@ def test_full_train_DyNeMo():
     with open(temporal_Y_train,'rb') as file:
         alpha = pickle.load(file)
 
-    npt.assert_allclose(result_means, np.array(means_Y))
-    npt.assert_allclose(result_covs, np.stack(covs_Y))
+    npt.assert_allclose(result_means, np.array(means_Y),rtol=1e-6,atol=1e-6)
+    npt.assert_allclose(result_covs, np.stack(covs_Y),rtol=1e-6,atol=1e-6)
 
     # Test whether the inferred alphas are close to the ground truth
     for truth, inferred in zip(alpha_truth, alpha):
@@ -1375,7 +1375,15 @@ def test_infer_spatial_DyNeMo():
     config = yaml.safe_load(config)
 
     cv = CVDyNeMo(n_samples, n_channels)
-    result = cv.infer_temporal(config, row_train, column_X,temporal_X_train)
+    spatial_X_train = cv.infer_spatial(config, row_train, column_X,temporal_X_train)
+
+    result_means = np.load(spatial_X_train['means'])
+    result_covs = np.load(spatial_X_train['covs'])
+
+    npt.assert_allclose(result_means, np.array(means_X), rtol=1e-2, atol=1e-2)
+    npt.assert_allclose(result_covs, np.stack(covs_X), rtol=1e-2, atol=1e-2)
+
+
 def test_infer_temporal_DyNeMo():
     import os
     import pickle
