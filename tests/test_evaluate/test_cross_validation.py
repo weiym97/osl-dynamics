@@ -1158,7 +1158,7 @@ def test_full_train_DyNeMo():
 
     for i in range(0, 2):
         obs = []
-        for j in range(1500):
+        for j in range(3000):
 
             t = np.linspace(0,timepoints-1,timepoints)/timepoints
 
@@ -1175,9 +1175,6 @@ def test_full_train_DyNeMo():
             # Generate X observations
             X_mean_t = alpha_t1 * means_X[0] + alpha_t2 * means_X[1]
             X_var_t = alpha_t1 * vars_X[0] + alpha_t2 * vars_X[1]
-
-            print(X_mean_t.shape)
-            print(X_var_t.shape)
 
             X_obs = np.reshape(np.random.normal(X_mean_t, np.sqrt(X_var_t)),(-1,1))
 
