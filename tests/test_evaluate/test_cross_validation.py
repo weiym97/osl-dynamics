@@ -1197,6 +1197,9 @@ def test_full_train_DyNeMo():
     np.save(f'{save_dir}/means_truth.npy', np.array(means_Y))
     np.save(f'{save_dir}/covs_truth.npy', np.stack(covs_Y))
 
+    means_truth_dir = f'{save_dir}/means_truth.npy'
+    covs_truth_dir = f'{save_dir}/covs_truth.npy'
+
     config = f"""
             load_data:
                 inputs: {data_dir}
@@ -1214,10 +1217,10 @@ def test_full_train_DyNeMo():
             kl_annealing_curve: tanh
             kl_annealing_sharpness: 5
             learn_alpha_temperature: true
-            learn_covariances: true
-            learn_means: true
-            initial_means: f'{save_dir}/means_truth.npy'
-            initial_covariances: f'{save_dir}/covs_truth.npy'
+            learn_covariances: false
+            learn_means: false
+            initial_means: {means_truth_dir}
+            initial_covariances: {covs_truth_dir}
             learning_rate: 0.01
             model_n_units: 64
             model_normalization: layer
@@ -1236,20 +1239,21 @@ def test_full_train_DyNeMo():
     config = yaml.safe_load(config)
 
     cv = CVDyNeMo(n_samples, n_channels)
-    result, _ = cv.full_train(config, row_train, column_Y)
+    spatial_Y_train, temporal_Y_train = cv.full_train(config, row_train, column_Y)
 
-    result_means = np.load(result['means'])
-    result_covs = np.load(result['covs'])
-    print('means:',result_means)
-    print('covs:',result_covs)
-    #npt.assert_array_equal(result_means, np.zeros((n_states, len(column_Y))))
+    result_means = np.load(spatial_Y_train['means'])
+    result_covs = np.load(spatial_Y_train['covs'])
+    with open(temporal_Y_train,'rb') as file:
+        alpha = pickle.load(file)
 
-    # Assert diagonal elements are all one
-    #npt.assert_allclose(np.diagonal(result_covs, axis1=-2, axis2=-1), 1.0, rtol=0.05, atol=0.05)
+    npt.assert_array_equal(result_means, means_Y)
+    npt.assert_array_equal(result_covs, covs_Y)
 
-    # Assert off-diagonal elements are equal to cors
-    #off_diagonal = np.array([float(result_covs[i, 0, 1]) for i in range(n_states)])
-    #npt.assert_allclose(np.sort(off_diagonal), cors_Y, atol=0.05, rtol=0.05)
+    # Test whether the inferred alphas are close to the ground truth
+    for truth, inferred in zip(alpha_truth, alpha):
+        mean_difference = np.mean(np.abs(truth - inferred))
+        npt.assert_array_less(mean_difference, 5e-2, err_msg=f"Mean difference {mean_difference} exceeds 5e-2")
+
 
 def test_infer_spatial_DyNeMo():
     import os
