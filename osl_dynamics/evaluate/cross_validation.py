@@ -1949,8 +1949,8 @@ class CVDyNeMo(CVBase):
         if not os.path.exists(f'{save_dir}inf_params/'):
             os.makedirs(f'{save_dir}inf_params/')
 
-
-        shutil.move(temporal, f'{save_dir}inf_params/')
+        if os.path.exists(temporal):
+            shutil.move(temporal, f'{save_dir}inf_params/')
 
 
 
