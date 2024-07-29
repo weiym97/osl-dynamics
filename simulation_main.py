@@ -587,7 +587,7 @@ if __name__ == '__main__':
     if not os.path.exists(f'{save_dir}truth/'):
         os.makedirs(f'{save_dir}truth')
 
-    n_subjects = 500
+    n_subjects = 1
     n_modes = 8
     n_samples = 1200
     n_channels = 25
