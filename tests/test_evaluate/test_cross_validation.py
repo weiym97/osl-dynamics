@@ -1529,3 +1529,136 @@ def test_infer_temporal_DyNeMo():
         mean_difference = np.mean(np.abs(truth - inferred))
         npt.assert_array_less(mean_difference, 5e-2, err_msg=f"Mean difference {mean_difference} exceeds 5e-2")
 
+def test_calculate_error_dynemo():
+    import os
+    import json
+    import shutil
+    import yaml
+    import pickle
+    from osl_dynamics.evaluate.cross_validation import CVDyNeMo
+
+    save_dir = './test_calculate_error_dynemo/'
+    if os.path.exists(save_dir):
+        shutil.rmtree(save_dir)
+
+    os.makedirs(save_dir)
+
+    # Define a very simple test case
+    n_samples = 3
+    n_channels = 3
+    n_states = 3
+    row_test = [1, 2]
+    column_Y = [0, 2]
+
+    # Generate the data
+    data_dir = f'{save_dir}data/'
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+
+    # Build up subject data
+    data_1 = np.zeros((2, 3))
+    np.save(f'{data_dir}10001.npy', data_1)
+    data_2 = np.array([[1., 0., 1., ], [-1., 0., 0.]])
+    np.save(f'{data_dir}10002.npy', data_2)
+    data_3 = np.array([[-1., 0., -1.], [1., 0., 0.]])
+    np.save(f'{data_dir}10003.npy', data_3)
+
+    def multivariate_gaussian_log_likelihood(x, mu, cov):
+        """
+        Calculate the log-likelihood for a multivariate Gaussian distribution.
+
+        Parameters:
+            x (ndarray): Observations (N, d), where N is the number of samples and d is the dimensionality.
+            mu (ndarray): Mean vector of the distribution (d,).
+            cov (ndarray): Covariance matrix of the distribution (d, d).
+
+        Returns:
+            float: Log-likelihood value.
+        """
+        # Dimensionality of the data
+        d = len(mu)
+
+        # Calculate the log determinant of the covariance matrix
+        log_det_cov = np.log(np.linalg.det(cov))
+
+        # Calculate the quadratic term in the exponent
+        quad_term = np.sum((x - mu) @ np.linalg.inv(cov) * (x - mu), axis=1)
+
+        # Calculate the log-likelihood
+        log_likelihood = -0.5 * (d * np.log(2 * np.pi) + log_det_cov + quad_term)
+
+        return log_likelihood
+
+    config = f"""
+                load_data:
+                    inputs: {data_dir}
+                    prepare:
+                        select:
+                            timepoints:
+                                - 0
+                                - 2
+                batch_size: 64
+                do_kl_annealing: true
+                inference_n_units: 64
+                inference_normalization: layer
+                initial_alpha_temperature: 1.0
+                kl_annealing_curve: tanh
+                kl_annealing_sharpness: 5
+                learn_alpha_temperature: true
+                learn_covariances: true
+                learn_means: true
+                learning_rate: 0.01
+                model_n_units: 64
+                model_normalization: layer
+                n_channels: 3
+                n_epochs: 30
+                n_kl_annealing_epochs: 10
+                n_modes: 2
+                sequence_length: 100
+                init_kwargs:
+                    n_init: 10
+                    n_epochs: 2
+                save_dir: {save_dir}
+                model: dynemo
+                """
+    config = yaml.safe_load(config)
+
+    means = np.zeros((2, 2))
+    covs = np.array([[[1.0, 0.0], [0.0, 1.0]],
+                     [[2.0, 0.8], [0.8, 2.0]]])
+    np.save(f'{save_dir}/means.npy', means)
+    np.save(f'{save_dir}/covs.npy', covs)
+    spatial = {
+        'means': f'{save_dir}/means.npy',
+        'covs': f'{save_dir}/covs.npy'
+    }
+
+    # We use the linear combination of means and covs to generate 3 "states"
+    # Coefficient state 1: [1.0,0.0]
+    # Coefficient state 2: [0.5,0.5]
+    # Coefficient state 3: [0.8,0.2]
+    means_states = np.zeros((3, 2))
+    covs_states = np.array([[[1.0, 0.0], [0.0, 1.0]],
+                            [[1.5, 0.4], [0.4, 1.5]],
+                            [[1.2, 0.16], [-0.16, 1.2]]])
+
+    # Set up the alpha.pkl. The data occupy state 1,2,3,1
+    alpha = [np.array([[1., 0.], [0.5, 0.5]]),
+             np.array([[0.8, 0.2], [1.0, 0.0]])]
+    with open(f'{data_dir}alp.pkl', "wb") as file:
+        pickle.dump(alpha, file)
+    cv = CVDyNeMo(n_samples, n_channels)
+    result = cv.calculate_error(config, row_test, column_Y, f'{data_dir}alp.pkl', spatial)
+
+    ll_1 = multivariate_gaussian_log_likelihood(data_2[:1, [0, 2]], np.array([0, 0]), covs_states[0])
+    ll_2 = multivariate_gaussian_log_likelihood(data_2[1:2, [0, 2]], np.array([0, 0]), covs_states[1])
+    ll_3 = multivariate_gaussian_log_likelihood(data_3[:1, [0, 2]], np.array([0, 0]), covs[2])
+    ll_4 = multivariate_gaussian_log_likelihood(data_3[1:2, [0, 2]], np.array([0, 0]), covs[0])
+
+    ll = (ll_1 + ll_2 + ll_3 + ll_4) / 2
+    with open(result, 'r') as file:
+        # Load the JSON data
+        metrics = json.load(file)
+
+    npt.assert_almost_equal(ll, metrics['log_likelihood'], decimal=3)
+
