@@ -1874,8 +1874,8 @@ class CVDyNeMo(CVBase):
             'config_kwargs':
                 {key: config[key] for key in self.train_keys if key in config},
         }
-
-        prepare_config['dual_estimation'] = {'n_epochs': 100,'learning_rate':0.01}
+        prepare_config[f'build_{config["model"]}']['config_kwargs']['n_channels'] = len(column)
+        prepare_config['dual_estimation'] = {'concatenate': True}
 
         # Note the 'keep_list' value is in order (from small to large number)
         prepare_config['keep_list'] = row
@@ -1949,17 +1949,8 @@ class CVDyNeMo(CVBase):
         if not os.path.exists(f'{save_dir}inf_params/'):
             os.makedirs(f'{save_dir}inf_params/')
 
-        # Compress the file
-        if os.path.exists(temporal):
-            from osl_dynamics.array_ops import convert_arrays_to_dtype
-            with open(temporal, 'rb') as file:
-                alpha = pickle.load(file)
-            alpha = convert_arrays_to_dtype(alpha,np.float16)
-            os.remove(temporal)
-            with open(temporal, 'wb') as file:
-                pickle.dump(alpha, file)
 
-            shutil.move(temporal, f'{save_dir}inf_params/')
+        shutil.move(temporal, f'{save_dir}inf_params/')
 
 
 
@@ -1971,7 +1962,7 @@ class CVDyNeMo(CVBase):
             prepare_config['load_data']['prepare']['select'] = {}
         prepare_config['load_data']['prepare']['select']['channels'] = column
 
-        if config['n_states'] > 1:
+        if config['n_modes'] > 1:
             prepare_config[f'build_{config["model"]}'] = {
                 'config_kwargs':
                     {key: config[key] for key in self.train_keys if key in config},

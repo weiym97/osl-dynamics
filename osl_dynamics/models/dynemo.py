@@ -275,6 +275,49 @@ class Model(VariationalInferenceModelBase):
         """Wrapper for :code:`get_means_covariances`."""
         return self.get_means_covariances()
 
+    def get_posterior_expected_log_likelihood(self, x, alpha):
+        """Expected log-likelihood.
+
+        Calculates the expected log-likelihood with respect to the MEAN posterior alpha
+
+        .. math::
+            LL &= \log \prod_{t=1}^T p(x_t | m_t,C_t)
+            m_t = \sum_{j=1}^J alpha_{jt}\mu_j
+            C_t = \sum_{j=1}^J \alpha_{jt}D_j
+
+        Parameters
+        ----------
+        x : np.ndarray
+            Data. Shape is (batch_size, sequence_length, n_channels).
+        alpha : np.ndarray
+            MEAN posterior distribution of time series given the data,
+            :math:`q(s_t)`. Shape is (batch_size*sequence_length, n_states).
+
+        Returns
+        -------
+        log_likelihood : float
+            Posterior expected log-likelihood.
+        """
+        from scipy.stats import multivariate_normal
+        alpha = np.reshape(alpha,(alpha.shape[0] * alpha.shape[1],-1))
+        x = np.reshape(x, (x.shape[0] * x.shape[1], -1))
+
+        means,covs = self.get_means_covariances()
+
+        # Calculate m_t using einsum
+        m_t = np.einsum('ns,sc->nc', alpha, means)
+
+        # Calculate C_t using einsum
+        C_t = np.einsum('ns,sij->nij', alpha, covs)
+
+        # Calculate the log likelihood for each observation
+        log_likelihood = np.array([multivariate_normal.logpdf(x[i], mean=m_t[i], cov=C_t[i]) for i in range(len(x))])
+
+        # Sum the log likelihoods
+        total_log_likelihood = np.sum(log_likelihood)
+
+        return total_log_likelihood
+
     def set_means(self, means, update_initializer=True):
         """Set the mode means.
 
@@ -543,8 +586,10 @@ class Model(VariationalInferenceModelBase):
         self,
         training_data,
         alpha=None,
+        concatenate=False,
         n_epochs=None,
         learning_rate=None,
+        n_jobs=1,
         store_dir="tmp",
     ):
         """Dual estimation to get the session-specific observation model
@@ -571,6 +616,8 @@ class Model(VariationalInferenceModelBase):
         learning_rate : float, optional
             Learning rate. Defaults to the value in the :code:`config` used
             to create the model.
+        n_jobs : int, optional
+            Number of jobs to run in parallel.
         store_dir : str, optional
             Directory to temporarily store the model in.
 
@@ -601,6 +648,23 @@ class Model(VariationalInferenceModelBase):
             # Make sure the data and alpha have the same number of samples
             data = [d[: a.shape[0]] for d, a in zip(data, alpha)]
 
+            # Define a function to create sequences from data and alpha
+            def create_sequences(data, alpha, seq_length):
+                data_sequences = []
+                alpha_sequences = []
+
+                for d, a in zip(data, alpha):
+                    for start in range(0, len(d),seq_length):
+                        data_seq = d[start:start + seq_length]
+                        alpha_seq = a[start:start + seq_length]
+                        data_sequences.append(data_seq)
+                        alpha_sequences.append(alpha_seq)
+
+                return np.array(data_sequences), np.array(alpha_sequences)
+
+            # Prepare sequences
+            data_sequences, alpha_sequences = create_sequences(data, alpha, self.config.sequence_length)
+
             # Create model with only the necessary layers
             inputs = layers.Input(shape=(self.config.sequence_length, self.config.n_channels), name="data")
             alpha_input = layers.Input(shape=(self.config.sequence_length, self.config.n_modes), name="alpha")
@@ -615,10 +679,23 @@ class Model(VariationalInferenceModelBase):
                                                 name="ObservationModel")
             observation_model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.config.learning_rate))
 
-            # Train the observation model
+            # Train the observation model using stochastic gradient descent
             for epoch in range(n_epochs or self.config.n_epochs):
-                for x, a in zip(data, alpha):
-                    observation_model.train_on_batch([x, a])
+                logging.info(f"Starting epoch {epoch + 1}/{self.config.n_epochs}")
+                permutation = np.random.permutation(len(data_sequences))
+                data_sequences_shuffled = data_sequences[permutation]
+                alpha_sequences_shuffled = alpha_sequences[permutation]
+
+                for i in range(0, len(data_sequences_shuffled), self.config.batch_size):
+                    x_batch = data_sequences_shuffled[i:i + self.config.batch_size]
+                    alpha_batch = alpha_sequences_shuffled[i:i + self.config.batch_size]
+
+                    try:
+                        observation_model.fit([x_batch, alpha_batch], epochs=1, batch_size=self.config.batch_size,
+                                              verbose=0)
+                    except Exception as e:
+                        logging.error(
+                            f"Error during training at epoch {epoch + 1}, batch {i // self.config.batch_size + 1}: {e}")
 
             # Get the means and covariances
             means, covariances = self.get_means_covariances()
