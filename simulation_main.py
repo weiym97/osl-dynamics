@@ -596,7 +596,7 @@ if __name__ == '__main__':
 
     relative_activation = np.ones(n_modes) / n_modes
     amplitudes = np.random.uniform(0.5, 5, n_modes)
-    frequencies = np.random.uniform(0.005, 0.1, n_modes)
+    frequencies = np.random.uniform(0.05, 0.1, n_modes)
     sampling_frequency = 1.0
     sim = simulation.MixedSine_MVN(
         n_samples=n_samples * n_subjects,
