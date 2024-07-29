@@ -581,7 +581,7 @@ if __name__ == '__main__':
     '''
     # Update 29th July 2024
     # Generate DyNeMo style simulation
-    save_dir = './data/node_timeseries/simulation_bicv/dynemo/'
+    save_dir = './data/node_timeseries/simulation_bicv/real_dynemo/'
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
     if not os.path.exists(f'{save_dir}truth/'):
