@@ -427,12 +427,22 @@ class BatchAnalysis:
         the folder Y_train/metrics, X_test/metrics.
         '''
         models = self.config_root['batch_variable']['model']
-        n_states = self.config_root['batch_variable']['n_states']
+
+        if 'n_states' in self.config_root['batch_variable']:
+            n_states = self.config_root['batch_variable']['n_states']
+        else:
+            n_states = self.config_root['batch_variable']['n_modes']
+
         metrics = {model: {str(int(num)): [] for num in n_states} for model in models}
         for i in range(len(self.config_list)):
             config = self.indexparser.parse(i)
             model = config['model']
-            n_states = config['n_states']
+
+            if 'n_states' in config:
+                n_states = config['n_states']
+            else:
+                n_states = config['n_modes']
+
             save_dir = config['save_dir']
             mode = config['mode']
             if 'cv' in mode:
