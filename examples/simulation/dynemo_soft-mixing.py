@@ -4,6 +4,7 @@
 
 print("Setting up")
 import os
+import pickle
 
 import numpy as np
 from tqdm.auto import trange
@@ -80,6 +81,11 @@ print(f"Free energy: {free_energy}")
 # Inferred alpha and mode time course
 inf_alp = model.get_alpha(training_data)
 sim_alp, inf_alp = modes.match_modes(sim_alp, inf_alp)
+
+with open('figures/sim_alp.pkl', 'wb') as f:
+    pickle.dump(sim_alp, f)
+with open('figures/inf_alp.pkl', 'wb') as f:
+    pickle.dump(inf_alp, f)
 
 # Compare the inferred mode time course to the ground truth
 plotting.plot_alpha(
