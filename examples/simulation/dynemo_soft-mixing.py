@@ -105,6 +105,9 @@ print("Correlation (DyNeMo vs Simulation):", corr)
 sim_cov = sim.covariances
 inf_cov = model.get_covariances()
 
+np.save("figures/sim_cov.npy",sim_cov)
+np.save("figures/inf_cov.npy",inf_cov)
+
 sim_tvcov = np.sum(
     sim_alp[:, :, np.newaxis, np.newaxis] * sim_cov[np.newaxis, :, :, :], axis=1
 )
