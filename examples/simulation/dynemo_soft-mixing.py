@@ -15,38 +15,20 @@ from osl_dynamics.models.dynemo import Config, Model
 from osl_dynamics.utils import plotting
 
 # Create directory to hold plots
-os.makedirs("figures", exist_ok=True)
+os.makedirs("figures_init", exist_ok=True)
 
 # GPU settings
 tf_ops.gpu_growth()
 
-# Settings
-config = Config(
-    n_modes=6,
-    n_channels=80,
-    sequence_length=200,
-    inference_n_units=64,
-    inference_normalization="layer",
-    model_n_units=64,
-    model_normalization="layer",
-    learn_alpha_temperature=True,
-    initial_alpha_temperature=1.0,
-    learn_means=False,
-    learn_covariances=True,
-    do_kl_annealing=True,
-    kl_annealing_curve="tanh",
-    kl_annealing_sharpness=10,
-    n_kl_annealing_epochs=100,
-    batch_size=16,
-    learning_rate=0.01,
-    n_epochs=200,
-)
+
+n_modes = 6
+n_channels = 80
 
 print("Simulating data")
 sim = simulation.MixedSine_MVN(
     n_samples=25600,
-    n_modes=config.n_modes,
-    n_channels=config.n_channels,
+    n_modes=n_modes,
+    n_channels=n_channels,
     relative_activation=[1, 0.5, 0.5, 0.25, 0.25, 0.1],
     amplitudes=[6, 5, 4, 3, 2, 1],
     frequencies=[1, 2, 3, 4, 6, 8],
@@ -56,11 +38,36 @@ sim = simulation.MixedSine_MVN(
     random_seed=123,
 )
 sim_alp = sim.mode_time_course
+sim_cov = sim.covariances
 training_data = data.Data(sim.time_series)
 
 # Plot ground truth logits
 plotting.plot_separate_time_series(
-    sim.logits, n_samples=2000, filename="figures/sim_logits.png"
+    sim.logits, n_samples=2000, filename="figures_init/sim_logits.png"
+)
+
+# Settings
+config = Config(
+    n_modes=n_modes,
+    n_channels=n_channels,
+    sequence_length=200,
+    inference_n_units=64,
+    inference_normalization="layer",
+    model_n_units=64,
+    model_normalization="layer",
+    learn_alpha_temperature=True,
+    initial_alpha_temperature=1.0,
+    learn_means=False,
+    learn_covariances=True,
+    initial_means='zero',
+    initial_covariances=sim_cov,
+    do_kl_annealing=True,
+    kl_annealing_curve="tanh",
+    kl_annealing_sharpness=10,
+    n_kl_annealing_epochs=100,
+    batch_size=16,
+    learning_rate=0.01,
+    n_epochs=200,
 )
 
 # Build model
@@ -82,9 +89,9 @@ print(f"Free energy: {free_energy}")
 inf_alp = model.get_alpha(training_data)
 sim_alp, inf_alp = modes.match_modes(sim_alp, inf_alp)
 
-with open('figures/sim_alp.pkl', 'wb') as f:
+with open('figures_init/sim_alp.pkl', 'wb') as f:
     pickle.dump(sim_alp, f)
-with open('figures/inf_alp.pkl', 'wb') as f:
+with open('figures_init/inf_alp.pkl', 'wb') as f:
     pickle.dump(inf_alp, f)
 
 # Compare the inferred mode time course to the ground truth
@@ -93,14 +100,14 @@ plotting.plot_alpha(
     n_samples=2000,
     title="Ground Truth",
     y_labels=r"$\alpha_{jt}$",
-    filename="figures/sim_alp.png",
+    filename="figures_init/sim_alp.png",
 )
 plotting.plot_alpha(
     inf_alp,
     n_samples=2000,
     title="DyNeMo",
     y_labels=r"$\alpha_{jt}$",
-    filename="figures/inf_alp.png",
+    filename="figures_init/inf_alp.png",
 )
 
 # Correlation between mode time courses
@@ -108,11 +115,10 @@ corr = metrics.alpha_correlation(inf_alp, sim_alp)
 print("Correlation (DyNeMo vs Simulation):", corr)
 
 # Reconstruction of the time-varying covariance
-sim_cov = sim.covariances
 inf_cov = model.get_covariances()
 
-np.save("figures/sim_cov.npy",sim_cov)
-np.save("figures/inf_cov.npy",inf_cov)
+np.save("figures_init/sim_cov.npy",sim_cov)
+np.save("figures_init/inf_cov.npy",inf_cov)
 
 sim_tvcov = np.sum(
     sim_alp[:, :, np.newaxis, np.newaxis] * sim_cov[np.newaxis, :, :, :], axis=1
@@ -134,7 +140,7 @@ plotting.plot_line(
     x_label="Sample",
     y_label="$d$",
     fig_kwargs={"figsize": (15, 1.5)},
-    filename="figures/rd.png",
+    filename="figures_init/rd.png",
 )
 
 # Delete temporary directory
