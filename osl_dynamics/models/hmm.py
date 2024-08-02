@@ -149,11 +149,13 @@ class Config(BaseModelConfig):
 
     def __post_init__(self):
         if isinstance(self.initial_means,str):
-            self.initial_means = np.load(self.initial_means)
+            if self.initial_means.endswith('.npy'):
+                self.initial_means = np.load(self.initial_means)
         if isinstance(self.initial_covariances,str):
-            self.initial_covariances = np.load(self.initial_covariances)
+            if self.initial_covariances.endswith('.npy'):
+                self.initial_covariances = np.load(self.initial_covariances)
         if isinstance(self.initial_trans_prob,str):
-            if '.npy' in self.initial_trans_prob:
+            if self.initial_trans_prob.endswith('.npy'):
                 self.initial_trans_prob = np.load(self.initial_trans_prob)
         self.validate_observation_model_parameters()
         self.validate_trans_prob_parameters()

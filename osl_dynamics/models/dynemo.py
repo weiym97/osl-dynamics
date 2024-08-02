@@ -195,9 +195,11 @@ class Config(BaseModelConfig, VariationalInferenceModelConfig):
         # Check whether initial_means and initial_covarainces are file directories,
         # Read the file if so.
         if isinstance(self.initial_means,str):
-            self.initial_means = np.load(self.initial_means)
+            if self.initial_means.endswith('.npy'):
+                self.initial_means = np.load(self.initial_means)
         if isinstance(self.initial_covariances,str):
-            self.initial_covariances = np.load(self.initial_covariances)
+            if self.initial_covariances.endswith('.npy'):
+                self.initial_covariances = np.load(self.initial_covariances)
         self.validate_rnn_parameters()
         self.validate_observation_model_parameters()
         self.validate_alpha_parameters()
