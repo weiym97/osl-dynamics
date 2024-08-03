@@ -21,8 +21,8 @@ os.makedirs("figures_init", exist_ok=True)
 tf_ops.gpu_growth()
 
 
-n_modes = 2
-n_channels = 10
+n_modes =6
+n_channels = 80
 
 print("Simulating data")
 sim = simulation.MixedSine_MVN(
