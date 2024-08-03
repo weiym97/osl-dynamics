@@ -21,8 +21,8 @@ os.makedirs("figures_init", exist_ok=True)
 tf_ops.gpu_growth()
 
 
-n_modes = 6
-n_channels = 80
+n_modes = 2
+n_channels = 10
 
 print("Simulating data")
 sim = simulation.MixedSine_MVN(
@@ -66,8 +66,8 @@ config = Config(
     kl_annealing_sharpness=10,
     n_kl_annealing_epochs=100,
     batch_size=16,
-    learning_rate=0.01,
-    n_epochs=200,
+    learning_rate=0.001,
+    n_epochs=2000,
 )
 
 # Build model
