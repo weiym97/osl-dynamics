@@ -143,5 +143,11 @@ plotting.plot_line(
     filename="figures_init/rd.png",
 )
 
+# Save trained model
+from osl_dynamics.utils.misc import save
+model_dir = 'figures_init/model/'
+model.save(model_dir)
+save(f"{model_dir}/history.pkl", history)
+
 # Delete temporary directory
 training_data.delete_dir()
