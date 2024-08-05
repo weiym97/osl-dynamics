@@ -675,7 +675,7 @@ if __name__ == '__main__':
     cov = np.load('./results_HCP_bicv_202404/var_1/ICA_50_check/hmm_ICA_50_state_1/repeat_1/inf_params/covs.npy')
 
     # Generate static FC data (Gaussian distribution with zero mean)
-    data = np.random.multivariate_normal(mean=np.zeros(n_channels), cov=cov, size=(n_subjects, n_samples))
+    data = np.random.multivariate_normal(mean=np.zeros(n_channels), cov=np.squeeze(cov), size=(n_subjects, n_samples))
 
 
     # Function to add a slow drift component
