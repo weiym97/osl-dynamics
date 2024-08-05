@@ -623,7 +623,7 @@ if __name__ == '__main__':
     '''
 
 
-
+    '''
     # Generate DyNeMo simulation using Chet and Rukuang's code.
     save_dir = './data/node_timeseries/simulation_bicv/random_dynemo/'
     if not os.path.exists(save_dir):
@@ -658,7 +658,49 @@ if __name__ == '__main__':
     for i in range(n_subjects):
         np.savetxt(f'{save_dir}{10001 + i}.txt', data[i])
         np.save(f'{save_dir}truth/{10001 + i}_mode_time_course.npy', time_course[i])
+    '''
 
+    # Generate Static FC data, add very low frequency components (0.01-0.03Hz) to each channel
+    save_dir = './data/node_timeseries/simulation_bicv/static_drift/'
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    if not os.path.exists(f'{save_dir}truth/'):
+        os.makedirs(f'{save_dir}truth')
+
+    n_subjects = 500
+    n_samples = 1200
+    n_channels = 50
+    TR = 0.72
+
+    cov = np.load('./results_simulation_bicv_202404/var_1/ICA_50_check/hmm_ICA_50_state_1/repeat_1/inf_params/covs.npy')
+
+    # Generate static FC data (Gaussian distribution with zero mean)
+    data = np.random.multivariate_normal(mean=np.zeros(n_channels), cov=cov, size=(n_subjects, n_samples))
+
+
+    # Function to add a slow drift component
+    def add_slow_drift(data, TR=TR,low_freq=0.01, high_freq=0.03, amplitude=1):
+        n_samples, n_channels = data.shape
+        drift = np.zeros_like(data)
+
+        for channel in range(n_channels):
+            freq = np.random.uniform(low_freq, high_freq)
+            phase = np.random.uniform(0, 2 * np.pi)
+            t = np.arange(n_samples) * TR
+            drift[:, channel] = amplitude * np.sin(2 * np.pi * freq * t + phase)
+
+        return data + drift
+
+
+    # Add slow drift to each channel
+    data_with_drift = np.zeros_like(data)
+    for subject in range(n_subjects):
+        data_with_drift[subject] = add_slow_drift(data[subject],TR=TR)
+
+    np.save(f'{save_dir}truth/state_covariances.npy', cov)
+
+    for i in range(n_subjects):
+        np.savetxt(f'{save_dir}{10001 + i}.txt', data_with_drift[i])
     #############################################################
     '''
     ### Update 6th Dec 2023
