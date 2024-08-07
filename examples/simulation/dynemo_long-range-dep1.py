@@ -12,7 +12,7 @@ from osl_dynamics.models.dynemo import Config, Model
 from osl_dynamics.utils import plotting
 
 # Make directory to hold plots
-os.makedirs("figures", exist_ok=True)
+os.makedirs("figures_long-range", exist_ok=True)
 
 # GPU settings
 tf_ops.gpu_growth()
@@ -57,7 +57,7 @@ training_data = data.Data(sim.time_series)
 
 # Plot the transition probability matrix for mode switching in the HSMM
 plotting.plot_matrices(
-    sim.off_diagonal_trans_prob, filename="figures/sim_trans_prob.png"
+    sim.off_diagonal_trans_prob, filename="figures_long-range/sim_trans_prob.png"
 )
 
 # Create tensorflow datasets for training and model evaluation
@@ -82,7 +82,7 @@ history = model.fit(
     training_dataset,
     epochs=config.n_epochs,
     save_best_after=config.n_kl_annealing_epochs,
-    save_filepath="model/weights",
+    save_filepath="figures_long-range/model/weights",
     callbacks=[dice_callback],
 )
 
@@ -106,22 +106,32 @@ plotting.plot_alpha(
     sim_stc,
     inf_stc,
     y_labels=["Ground Truth", "DyNeMo"],
-    filename="figures/compare.png",
+    filename="figures_long-range/compare.png",
 )
 
 plotting.plot_state_lifetimes(
-    sim_stc, x_label="Lifetime", y_label="Occurrence", filename="figures/sim_lt.png"
+    sim_stc, x_label="Lifetime", y_label="Occurrence", filename="figures_long-range/sim_lt.png"
 )
 plotting.plot_state_lifetimes(
-    inf_stc, x_label="Lifetime", y_label="Occurrence", filename="figures/inf_lt.png"
+    inf_stc, x_label="Lifetime", y_label="Occurrence", filename="figures_long-range/inf_lt.png"
 )
 
 # Ground truth vs inferred covariances
 sim_cov = sim.covariances
 inf_cov = model.get_covariances()[orders[1]]
 
-plotting.plot_matrices(sim_cov, filename="figures/sim_cov.png")
-plotting.plot_matrices(inf_cov, filename="figures/inf_cov.png")
+import numpy as np
+import pickle
+# Save the covariance matrices
+np.save('figures_long-range/sim_cov.npy',sim_cov)
+np.save('figures_long-range/inf_cov.npy',inf_cov)
+with open('figures_long-range/sim_alp.pkl', 'wb') as f:
+    pickle.dump(sim_stc, f)
+with open('figures_long-range/inf_alp.pkl', 'wb') as f:
+    pickle.dump(inf_alp, f)
+
+plotting.plot_matrices(sim_cov, filename="figures_long-range/sim_cov.png")
+plotting.plot_matrices(inf_cov, filename="figures_long-range/inf_cov.png")
 
 # Sample from model RNN
 sam_alp = model.sample_alpha(25600)
@@ -132,5 +142,5 @@ plotting.plot_state_lifetimes(
     x_label="Lifetime",
     x_range=[0, 150],
     y_label="Occurrence",
-    filename="figures/sam_lt.png",
+    filename="figures_long-range/sam_lt.png",
 )
