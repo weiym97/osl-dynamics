@@ -2,6 +2,7 @@ import os
 import numpy as np
 from rotation.simulation import HMM_single_subject_simulation, perturb_covariances
 
+
 def create_covariance_matrix(n_channels, rho):
     # Create a matrix with all elements equal to rho
     cov = np.eye(n_channels)
@@ -9,6 +10,7 @@ def create_covariance_matrix(n_channels, rho):
     cov[np.arange(n_channels - 1), np.arange(1, n_channels)] = rho
 
     return cov
+
 
 if __name__ == '__main__':
     '''
@@ -622,7 +624,6 @@ if __name__ == '__main__':
         np.save(f'{save_dir}truth/{10001 + i}_mode_time_course.npy', time_course[i])
     '''
 
-
     '''
     # Generate DyNeMo simulation using Chet and Rukuang's code.
     save_dir = './data/node_timeseries/simulation_bicv/random_dynemo/'
@@ -660,6 +661,43 @@ if __name__ == '__main__':
         np.save(f'{save_dir}truth/{10001 + i}_mode_time_course.npy', time_course[i])
     '''
 
+    # Generate DyNeMo simulation using Chet and Rukuang's code
+    # All components have equal amplitude and relative activation
+    save_dir = './data/node_timeseries/simulation_bicv/random_dynemo_equal/'
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    if not os.path.exists(f'{save_dir}truth/'):
+        os.makedirs(f'{save_dir}truth')
+
+    n_subjects = 500
+    n_modes = 6
+    n_samples = 1200
+    n_channels = 50
+
+    sim = simulation.MixedSine_MVN(
+        n_samples=n_subjects * n_samples,
+        n_modes=n_modes,
+        n_channels=n_channels,
+        relative_activation=[1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        amplitudes=[1, 1, 1, 1, 1, 1],
+        frequencies=[1, 2, 3, 4, 6, 8],
+        sampling_frequency=250,
+        means="zero",
+        covariances="random",
+    )
+
+    data = sim.time_series
+    time_course = sim.mode_time_course
+    data = data.reshape(n_subjects, -1, n_channels)
+    time_course = time_course.reshape(n_subjects, -1, n_modes)
+
+    np.save(f'{save_dir}truth/state_covariances.npy', sim.obs_mod.covariances)
+
+    for i in range(n_subjects):
+        np.savetxt(f'{save_dir}{10001 + i}.txt', data[i])
+        np.save(f'{save_dir}truth/{10001 + i}_mode_time_course.npy', time_course[i])
+
+    '''
     # Generate Static FC data, add very low frequency components (0.01-0.03Hz) to each channel
     save_dir = './data/node_timeseries/simulation_bicv/static_drift/'
     if not os.path.exists(save_dir):
@@ -701,6 +739,7 @@ if __name__ == '__main__':
 
     for i in range(n_subjects):
         np.savetxt(f'{save_dir}{10001 + i}.txt', data_with_drift[i])
+    '''
     #############################################################
     '''
     ### Update 6th Dec 2023
@@ -742,6 +781,3 @@ if __name__ == '__main__':
         np.savetxt(f'{save_dir}{10001+i}.txt', data[i])
         np.save(f'{save_dir}truth/{10001+i}_state_time_course.npy', time_course[i])
     '''
-
-
-
