@@ -11,8 +11,32 @@ from osl_dynamics.inference import tf_ops, modes, metrics, callbacks
 from osl_dynamics.models.dynemo import Config, Model
 from osl_dynamics.utils import plotting
 
+
+def find_phi_range(D1, D2):
+    # Compute eigenvalues of D1 and D2
+    eigenvalues_D1 = np.linalg.eigvals(D1)
+    eigenvalues_D2 = np.linalg.eigvals(D2)
+
+    # Avoid division by zero for identical eigenvalues
+    phi_values = [
+        -eigenvalues_D1[i] / (eigenvalues_D1[i] - eigenvalues_D2[i])
+        for i in range(len(eigenvalues_D1))
+        if eigenvalues_D1[i] != eigenvalues_D2[i]
+    ]
+
+    # We need phi to be positive, so we filter out negative values
+    phi_values = [phi for phi in phi_values if phi > 0]
+
+    if phi_values:
+        phi_min = max(phi_values)
+        return phi_min
+    else:
+        return 0.0  # If no phi satisfies the condition, the best is phi=0 (D(\phi) = D1)
+
+
+
 # Make directory to hold plots
-os.makedirs("figures_play_1", exist_ok=True)
+os.makedirs("figures_play_2", exist_ok=True)
 
 # GPU settings
 tf_ops.gpu_growth()
@@ -57,7 +81,7 @@ training_data = data.Data(sim.time_series)
 
 # Plot the transition probability matrix for mode switching in the HSMM
 plotting.plot_matrices(
-    sim.off_diagonal_trans_prob, filename="figures_play_1/sim_trans_prob.png"
+    sim.off_diagonal_trans_prob, filename="figures_play_2/sim_trans_prob.png"
 )
 
 # Create tensorflow datasets for training and model evaluation
@@ -82,7 +106,7 @@ history = model.fit(
     training_dataset,
     epochs=config.n_epochs,
     save_best_after=config.n_kl_annealing_epochs,
-    save_filepath="figures_play_1/model/weights",
+    save_filepath="figures_play_2/model/weights",
     callbacks=[dice_callback],
 )
 
@@ -106,14 +130,14 @@ plotting.plot_alpha(
     sim_stc,
     inf_stc,
     y_labels=["Ground Truth", "DyNeMo"],
-    filename="figures_play_1/compare.png",
+    filename="figures_play_2/compare.png",
 )
 
 plotting.plot_state_lifetimes(
-    sim_stc, x_label="Lifetime", y_label="Occurrence", filename="figures_play_1/sim_lt.png"
+    sim_stc, x_label="Lifetime", y_label="Occurrence", filename="figures_play_2/sim_lt.png"
 )
 plotting.plot_state_lifetimes(
-    inf_stc, x_label="Lifetime", y_label="Occurrence", filename="figures_play_1/inf_lt.png"
+    inf_stc, x_label="Lifetime", y_label="Occurrence", filename="figures_play_2/inf_lt.png"
 )
 
 # Ground truth vs inferred covariances
@@ -123,16 +147,16 @@ inf_cov = model.get_covariances()[orders[1]]
 import numpy as np
 import pickle
 # Save the covariance matrices
-np.save('figures_play_1/sim_cov.npy',sim_cov)
-np.save('figures_play_1/inf_cov.npy',inf_cov)
-with open('figures_play_1/sim_alp.pkl', 'wb') as f:
+np.save('figures_play_2/sim_cov.npy',sim_cov)
+np.save('figures_play_2/inf_cov.npy',inf_cov)
+with open('figures_play_2/sim_alp.pkl', 'wb') as f:
     pickle.dump(sim_stc, f)
-with open('figures_play_1/inf_alp.pkl', 'wb') as f:
+with open('figures_play_2/inf_alp.pkl', 'wb') as f:
     pickle.dump(inf_alp, f)
 
-plotting.plot_matrices(sim_cov, filename="figures_play_1/sim_cov.png")
-plotting.plot_matrices(inf_cov, filename="figures_play_1/inf_cov.png")
-
+plotting.plot_matrices(sim_cov, filename="figures_play_2/sim_cov.png")
+plotting.plot_matrices(inf_cov, filename="figures_play_2/inf_cov.png")
+'''
 # Sample from model RNN
 sam_alp = model.sample_alpha(25600)
 sam_stc = modes.argmax_time_courses(sam_alp)
@@ -142,5 +166,6 @@ plotting.plot_state_lifetimes(
     x_label="Lifetime",
     x_range=[0, 150],
     y_label="Occurrence",
-    filename="figures_play_1/sam_lt.png",
+    filename="figures_play_2/sam_lt.png",
 )
+'''
