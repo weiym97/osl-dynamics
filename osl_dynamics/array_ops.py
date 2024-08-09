@@ -606,3 +606,24 @@ def estimate_gaussian_log_likelihood(data, means, covs, average=True):
         return np.mean(log_likelihoods)
     else:
         return np.sum(log_likelihoods)
+
+def find_phi_range(D1, D2):
+    # Compute eigenvalues of D1 and D2
+    eigenvalues_D1 = np.linalg.eigvals(D1)
+    eigenvalues_D2 = np.linalg.eigvals(D2)
+
+    # Avoid division by zero for identical eigenvalues
+    phi_values = [
+        -eigenvalues_D1[i] / (eigenvalues_D1[i] - eigenvalues_D2[i])
+        for i in range(len(eigenvalues_D1))
+        if eigenvalues_D1[i] != eigenvalues_D2[i]
+    ]
+
+    # We need phi to be positive, so we filter out negative values
+    phi_values = [phi for phi in phi_values if phi > 0]
+
+    if phi_values:
+        phi_min = max(phi_values)
+        return phi_min
+    else:
+        return 0.0  # If no phi satisfies the condition, the best is phi=0 (D(\phi) = D1)
