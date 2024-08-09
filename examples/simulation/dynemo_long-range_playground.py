@@ -6,32 +6,12 @@
 
 print("Setting up")
 import os
+import numpy as np
 from osl_dynamics import data, simulation
 from osl_dynamics.inference import tf_ops, modes, metrics, callbacks
 from osl_dynamics.models.dynemo import Config, Model
 from osl_dynamics.utils import plotting
 
-
-def find_phi_range(D1, D2):
-    # Compute eigenvalues of D1 and D2
-    eigenvalues_D1 = np.linalg.eigvals(D1)
-    eigenvalues_D2 = np.linalg.eigvals(D2)
-
-    # Avoid division by zero for identical eigenvalues
-    phi_values = [
-        -eigenvalues_D1[i] / (eigenvalues_D1[i] - eigenvalues_D2[i])
-        for i in range(len(eigenvalues_D1))
-        if eigenvalues_D1[i] != eigenvalues_D2[i]
-    ]
-
-    # We need phi to be positive, so we filter out negative values
-    phi_values = [phi for phi in phi_values if phi > 0]
-
-    if phi_values:
-        phi_min = max(phi_values)
-        return phi_min
-    else:
-        return 0.0  # If no phi satisfies the condition, the best is phi=0 (D(\phi) = D1)
 
 
 
@@ -41,6 +21,10 @@ os.makedirs("figures_play_2", exist_ok=True)
 # GPU settings
 tf_ops.gpu_growth()
 
+cov_candidate = np.load('figures_play_1/sim_cov.npy')
+small_value = 0.5
+for i in range(cov_candidate.shape[0]):
+    np.fill_diagonal(cov_candidate[i], cov_candidate[i].diagonal() + small_value)
 # Settings
 config = Config(
     n_modes=2,
@@ -70,7 +54,7 @@ sim = simulation.HSMM_MVN(
     n_channels=config.n_channels,
     n_modes=config.n_modes,
     means="zero",
-    covariances="random",
+    covariances=cov_candidate,
     observation_error=0.0,
     gamma_shape=10,
     gamma_scale=5,
