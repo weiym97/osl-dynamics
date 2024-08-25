@@ -90,7 +90,7 @@ history = model.fit(
     training_dataset,
     epochs=config.n_epochs,
     save_best_after=config.n_kl_annealing_epochs,
-    save_filepath="figures_play_3/model/weights",
+    save_filepath="figures_play_4/model/weights",
     callbacks=[dice_callback],
 )
 
