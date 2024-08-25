@@ -29,12 +29,12 @@ model.summary()
 
 model.random_state_time_course_initialization(data, n_init=3, n_epochs=1)
 model.fit(data)
-model.save("models/hmm")
+model.save("models_2/hmm")
 
 alp = model.get_alpha(data)
 covs = model.get_covariances()
 
-np.save("models/hmm/alp.npy", alp)
-np.save("models/hmm/covs.npy", covs)
+np.save("models_2/hmm/alp.npy", alp)
+np.save("models_2/hmm/covs.npy", covs)
 
 data.delete_dir()

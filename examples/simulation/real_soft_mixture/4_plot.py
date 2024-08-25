@@ -27,5 +27,5 @@ plotting.plot_alpha(
     n_samples=1000,
     sampling_frequency=250,
     cmap="tab10",
-    filename="plots/alpha.png",
+    filename="plots_2/alpha.png",
 )

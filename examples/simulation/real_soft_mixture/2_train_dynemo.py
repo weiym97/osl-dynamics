@@ -38,10 +38,10 @@ model = Model(config)
 
 model.multistart_initialization(data, n_init=5, n_epochs=10)
 model.fit(data)
-model.save("models/dynemo")
+model.save("models_2/dynemo")
 
 alp = model.get_alpha(data)
 covs = model.get_covariances()
 
-np.save("models/dynemo/alp.npy", alp)
-np.save("models/dynemo/covs.npy", covs)
+np.save("models_2/dynemo/alp.npy", alp)
+np.save("models_2/dynemo/covs.npy", covs)
