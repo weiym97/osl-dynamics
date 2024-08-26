@@ -22,9 +22,9 @@ os.makedirs("figures_play_5", exist_ok=True)
 tf_ops.gpu_growth()
 
 cov_candidate = np.load('figures_play_1/sim_cov.npy')
-small_value = 1.5
-for i in range(cov_candidate.shape[0]):
-    np.fill_diagonal(cov_candidate[i], cov_candidate[i].diagonal() + small_value)
+#small_value = 1.5
+#for i in range(cov_candidate.shape[0]):
+#    np.fill_diagonal(cov_candidate[i], cov_candidate[i].diagonal() + small_value)
 # Settings
 config = Config(
     n_modes=2,
