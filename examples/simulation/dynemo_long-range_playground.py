@@ -16,15 +16,15 @@ from osl_dynamics.utils import plotting
 
 
 # Make directory to hold plots
-os.makedirs("figures_play_5", exist_ok=True)
+os.makedirs("figures_play_6", exist_ok=True)
 
 # GPU settings
 tf_ops.gpu_growth()
 
 cov_candidate = np.load('figures_play_1/sim_cov.npy')
-#small_value = 1.5
-#for i in range(cov_candidate.shape[0]):
-#    np.fill_diagonal(cov_candidate[i], cov_candidate[i].diagonal() + small_value)
+small_value = 0.5
+for i in range(cov_candidate.shape[0]):
+    np.fill_diagonal(cov_candidate[i], cov_candidate[i].diagonal() + small_value)
 # Settings
 config = Config(
     n_modes=2,
@@ -62,11 +62,11 @@ sim = simulation.HSMM_MVN(
 )
 #sim.standardize()
 training_data = data.Data(sim.time_series)
-np.save("figures_play_5/data.npy",sim.time_series)
+np.save("figures_play_6/data.npy",sim.time_series)
 
 # Plot the transition probability matrix for mode switching in the HSMM
 plotting.plot_matrices(
-    sim.off_diagonal_trans_prob, filename="figures_play_5/sim_trans_prob.png"
+    sim.off_diagonal_trans_prob, filename="figures_play_6/sim_trans_prob.png"
 )
 
 # Create tensorflow datasets for training and model evaluation
@@ -91,7 +91,7 @@ history = model.fit(
     training_dataset,
     epochs=config.n_epochs,
     save_best_after=config.n_kl_annealing_epochs,
-    save_filepath="figures_play_5/model/weights",
+    save_filepath="figures_play_6/model/weights",
     callbacks=[dice_callback],
 )
 
@@ -115,14 +115,14 @@ plotting.plot_alpha(
     sim_stc,
     inf_stc,
     y_labels=["Ground Truth", "DyNeMo"],
-    filename="figures_play_5/compare.png",
+    filename="figures_play_6/compare.png",
 )
 
 plotting.plot_state_lifetimes(
-    sim_stc, x_label="Lifetime", y_label="Occurrence", filename="figures_play_5/sim_lt.png"
+    sim_stc, x_label="Lifetime", y_label="Occurrence", filename="figures_play_6/sim_lt.png"
 )
 plotting.plot_state_lifetimes(
-    inf_stc, x_label="Lifetime", y_label="Occurrence", filename="figures_play_5/inf_lt.png"
+    inf_stc, x_label="Lifetime", y_label="Occurrence", filename="figures_play_6/inf_lt.png"
 )
 
 # Ground truth vs inferred covariances
@@ -132,15 +132,15 @@ inf_cov = model.get_covariances()[orders[1]]
 import numpy as np
 import pickle
 # Save the covariance matrices
-np.save('figures_play_5/sim_cov.npy',sim_cov)
-np.save('figures_play_5/inf_cov.npy',inf_cov)
-with open('figures_play_5/sim_alp.pkl', 'wb') as f:
+np.save('figures_play_6/sim_cov.npy',sim_cov)
+np.save('figures_play_6/inf_cov.npy',inf_cov)
+with open('figures_play_6/sim_alp.pkl', 'wb') as f:
     pickle.dump(sim_stc, f)
-with open('figures_play_5/inf_alp.pkl', 'wb') as f:
+with open('figures_play_6/inf_alp.pkl', 'wb') as f:
     pickle.dump(inf_alp, f)
 
-plotting.plot_matrices(sim_cov, filename="figures_play_5/sim_cov.png")
-plotting.plot_matrices(inf_cov, filename="figures_play_5/inf_cov.png")
+plotting.plot_matrices(sim_cov, filename="figures_play_6/sim_cov.png")
+plotting.plot_matrices(inf_cov, filename="figures_play_6/inf_cov.png")
 '''
 # Sample from model RNN
 sam_alp = model.sample_alpha(25600)
@@ -151,6 +151,6 @@ plotting.plot_state_lifetimes(
     x_label="Lifetime",
     x_range=[0, 150],
     y_label="Occurrence",
-    filename="figures_play_5/sam_lt.png",
+    filename="figures_play_6/sam_lt.png",
 )
 '''
