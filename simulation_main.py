@@ -581,6 +581,86 @@ if __name__ == '__main__':
         np.savetxt(f'{save_dir}{10001 + i}.txt', data[i])
         np.save(f'{save_dir}truth/{10001 + i}_state_time_course.npy', time_course[i])
     '''
+
+
+    ### Update 3rd Sept 2024
+    ### Generate sliding window correlation, use real covariances trained from HMM.
+    save_dir = './data/node_timeseries/simulation_bicv/real_swc/'
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    if not os.path.exists(f'{save_dir}truth/'):
+        os.makedirs(f'{save_dir}truth')
+
+    n_subjects = 500
+    n_states = 8
+    n_samples = 1200
+    n_channels = 25
+
+    covariances = np.load('./data/node_timeseries/simulation_bicv/real/truth/state_covariances.npy')
+
+    from osl_dynamics.array_ops import get_one_hot
+
+    sim = simulation.SWC(
+        n_samples=n_samples * n_subjects,
+        n_states=n_states,
+        n_channels=n_channels,
+        stay_time=100,
+        means="zero",
+        covariances=covariances
+    )
+    data = sim.time_series
+    time_course = sim.state_time_course
+    data = data.reshape(n_subjects, -1, n_channels)
+    time_course = get_one_hot(time_course,n_states=n_states).reshape(n_subjects, -1, n_states)
+
+    np.save(f'{save_dir}truth/state_covariances.npy', covariances)
+    #np.save(f'{save_dir}truth/tpm.npy', sim.hmm.trans_prob)
+
+    for i in range(n_subjects):
+        np.savetxt(f'{save_dir}{10001 + i}.txt', data[i])
+        np.save(f'{save_dir}truth/{10001 + i}_state_time_course.npy', time_course[i])
+
+
+    '''
+       ### Update 12th July 2024
+       ### Generate sliding window correlation
+       save_dir = './data/node_timeseries/simulation_bicv/sparse_swc/'
+       if not os.path.exists(save_dir):
+           os.makedirs(save_dir)
+       if not os.path.exists(f'{save_dir}truth/'):
+           os.makedirs(f'{save_dir}truth')
+
+       n_subjects = 500
+       n_states = 8
+       n_samples = 1200
+       n_channels = 25
+
+       covariances_original = np.load('./data/node_timeseries/simulation_bicv/random/truth/state_covariances.npy')
+       from osl_dynamics.array_ops import cov2stdcorr, stdcorr2cov,get_one_hot
+
+       stds, corrs = cov2stdcorr(covariances_original)
+       covariances = stdcorr2cov(stds, corrs ** 3)
+
+       sim = simulation.SWC(
+           n_samples=n_samples * n_subjects,
+           n_states=n_states,
+           n_channels=n_channels,
+           stay_time=100,
+           means="zero",
+           covariances=covariances
+       )
+       data = sim.time_series
+       time_course = sim.state_time_course
+       data = data.reshape(n_subjects, -1, n_channels)
+       time_course = get_one_hot(time_course,n_states=n_states).reshape(n_subjects, -1, n_states)
+
+       np.save(f'{save_dir}truth/state_covariances.npy', covariances)
+       #np.save(f'{save_dir}truth/tpm.npy', sim.hmm.trans_prob)
+
+       for i in range(n_subjects):
+           np.savetxt(f'{save_dir}{10001 + i}.txt', data[i])
+           np.save(f'{save_dir}truth/{10001 + i}_state_time_course.npy', time_course[i])
+       '''
     '''
     # Update 29th July 2024
     # Generate DyNeMo style simulation
@@ -660,7 +740,7 @@ if __name__ == '__main__':
         np.savetxt(f'{save_dir}{10001 + i}.txt', data[i])
         np.save(f'{save_dir}truth/{10001 + i}_mode_time_course.npy', time_course[i])
     '''
-
+    '''
     # Generate DyNeMo simulation using Chet and Rukuang's code
     # All components have equal amplitude and relative activation
     save_dir = './data/node_timeseries/simulation_bicv/random_dynemo_equal/'
@@ -696,7 +776,7 @@ if __name__ == '__main__':
     for i in range(n_subjects):
         np.savetxt(f'{save_dir}{10001 + i}.txt', data[i])
         np.save(f'{save_dir}truth/{10001 + i}_mode_time_course.npy', time_course[i])
-
+    '''
     '''
     # Generate Static FC data, add very low frequency components (0.01-0.03Hz) to each channel
     save_dir = './data/node_timeseries/simulation_bicv/static_drift/'
