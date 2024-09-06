@@ -420,7 +420,7 @@ class BatchAnalysis:
         if not os.path.exists(self.analysis_path):
             os.makedirs(self.analysis_path)
 
-    def compare(self, demean=False, demean_index=-1,inset_start_index=None,folder='Y_test/',object='log_likelihood'):
+    def compare(self, demean=False, demean_index=-1,inset_start_index=None,plot_end_index=None,fig_kwargs=None,folder='Y_test/',object='log_likelihood'):
         '''
         By default of bi-cross validation, we should compare the final log_likelihood on the Y_test.
         But for sanity check, and potentiall understand how the method work, we are also interested in
@@ -457,6 +457,8 @@ class BatchAnalysis:
         # Plot
         for model in models:
             temp_keys = list(metrics[model].keys())
+            if plot_end_index is not None:
+                temp_keys = temp_keys[:plot_end_index]
             temp_values = [metrics[model][key] for key in temp_keys]
             plot_box(data=temp_values,
                      labels=temp_keys,
@@ -465,6 +467,7 @@ class BatchAnalysis:
                      x_label=r'$N_{states}$',
                      y_label='Bi-cross validated log likelihood',
                      inset_start_index=inset_start_index,
+                     fig_kwargs=fig_kwargs,
                      filename=os.path.join(self.analysis_path, f'{model}_{folder.split("/")[0]}_{object}.pdf')
                      )
             plot_box(data=temp_values,
@@ -474,6 +477,7 @@ class BatchAnalysis:
                      x_label=r'$N_{states}$',
                      y_label='Bi-cross validated log likelihood',
                      inset_start_index=inset_start_index,
+                     fig_kwargs=fig_kwargs,
                      filename=os.path.join(self.analysis_path, f'{model}_{folder.split("/")[0]}_{object}.svg')
                      )
 
