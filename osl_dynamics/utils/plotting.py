@@ -2612,6 +2612,7 @@ def plot_box(
         fig_kwargs=None,
         ax=None,
         filename=None,
+        xtick_step=2,
 ):
     """Basic box plot.
 
@@ -2750,6 +2751,8 @@ def plot_box(
 
     # Set title and axis labels
     ax.set_title(title,fontsize=20)
+    x_ticks = list(range(1, len(data) + 1, xtick_step))
+    ax.set_xticks(x_ticks)
     ax.xaxis.set_tick_params(labelsize=15)
     ax.yaxis.set_tick_params(labelsize=15)
     ax.set_xlabel(x_label,fontsize=20)
