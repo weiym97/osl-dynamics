@@ -2747,7 +2747,12 @@ def plot_box(
     if inset_start_index is not None:
         small_ax = fig.add_axes([0.65, 0.3, 0.3, 0.3])  # Adjust these values as needed for positioning
         small_bp = small_ax.boxplot(data[inset_start_index:], labels=labels[inset_start_index:], **plot_kwargs)
-        small_ax.set_xticklabels(labels[inset_start_index:], rotation=45)
+
+        # Apply xtick_step to the inset plot
+        max_inset_position = len(data) - inset_start_index
+        inset_xtick_positions = list(range(xtick_step, max_inset_position + 1, xtick_step))
+        small_ax.set_xticks(inset_xtick_positions)
+        small_ax.set_xticklabels([str(pos + inset_start_index) for pos in inset_xtick_positions], rotation=45)
 
 
     # set x-ticks
