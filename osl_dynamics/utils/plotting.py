@@ -2749,10 +2749,15 @@ def plot_box(
         small_bp = small_ax.boxplot(data[inset_start_index:], labels=labels[inset_start_index:], **plot_kwargs)
         small_ax.set_xticklabels(labels[inset_start_index:], rotation=45)
 
+
+    # set x-ticks
+    max_position = len(data)  # Maximum number of positions available for x-ticks
+    xtick_positions = list(range(xtick_step, max_position + 1, xtick_step))
+    ax.set_xticks(xtick_positions)
+    ax.set_xticklabels([str(pos) for pos in xtick_positions])
+
     # Set title and axis labels
     ax.set_title(title,fontsize=20)
-    x_ticks = list(range(1, len(data) + 1, xtick_step))
-    ax.set_xticks(x_ticks)
     ax.xaxis.set_tick_params(labelsize=15)
     ax.yaxis.set_tick_params(labelsize=15)
     ax.set_xlabel(x_label,fontsize=20)
