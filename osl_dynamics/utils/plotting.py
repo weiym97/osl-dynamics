@@ -2750,7 +2750,7 @@ def plot_box(
 
         # Apply xtick_step to the inset plot
         max_inset_position = len(data) - inset_start_index
-        inset_xtick_positions = list(range(xtick_step, max_inset_position + 1, xtick_step))
+        inset_xtick_positions = list(range(1, max_inset_position + 1, xtick_step))
         small_ax.set_xticks(inset_xtick_positions)
         small_ax.set_xticklabels([str(pos + inset_start_index) for pos in inset_xtick_positions], rotation=45)
 
