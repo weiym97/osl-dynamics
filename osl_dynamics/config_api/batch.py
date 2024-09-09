@@ -673,6 +673,35 @@ class BatchAnalysis:
                          #title=f'{metric} VS N_states',
                          filename=os.path.join(self.analysis_path, f'{model}_{metric}.svg')
                         )
+    def plot_naive_cv(self):
+        models = self.config_root['batch_variable']['model']
+        n_states = self.config_root['batch_variable'].get('n_states', self.config_root['batch_variable'].get('n_modes'))
+        free_energy = {model: {str(int(num)): [] for num in n_states} for model in models}
+        for i in range(len(self.config_list)):
+            config = self.indexparser.parse(i)
+            model = config['model']
+            n_states = config.get('n_states',config.get('n_modes'))
+            save_dir = config['save_dir']
+            mode = config['mode']
+            if 'naive_validation' in mode:
+                try:
+                    with open(f'{save_dir}/naive_cv_free_energy.json','r') as file:
+                        free_energy[model][str(int(n_states))] = json.load(file)
+                except Exception:
+                    print(f'save_dir {save_dir} fails!')
+
+        for model in models:
+            temp_keys = list(free_energy[model].keys())
+            temp_values = [free_energy[model][key] for key in temp_keys]
+            plot_box(data=temp_values,
+                     labels=temp_keys,
+                     mark_best=False,
+                     demean=False,
+                     x_label='N_states',
+                     y_label='Free energy',
+                     title= 'Naive cross validation Analysis',
+                     filename=os.path.join(self.analysis_path, f'{model}_naive_free_energy.svg')
+                     )
 
     def plot_split_half_reproducibility(self):
         models = self.config_root['batch_variable']['model']
