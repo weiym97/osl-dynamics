@@ -322,7 +322,7 @@ class BatchTrain:
                     free_energy_list.append(free_energy)
 
                 with open(f'{temp_save_dir}naive_cv_free_energy.json', 'w') as f:
-                    json.dump([free_energy], f)
+                    json.dump([np.array(free_energy)], f)
             with open(f'{self.config["save_dir"]}naive_cv_free_energy.json', 'w') as f:
                 json.dump(free_energy_list, f)
 
