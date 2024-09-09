@@ -247,7 +247,7 @@ class BatchTrain:
                 yaml.safe_dump(config, file, default_flow_style=False)
         self.config = config
 
-    def model_train(self, cv_ratio=0.25):
+    def model_train(self, cv_ratio=0.25,k_fold=5):
         '''
         Batch model train method
         cv_ration: float,optional
@@ -284,6 +284,45 @@ class BatchTrain:
                     yaml.safe_dump(prepare_config, file, default_flow_style=False)
                 run_pipeline_from_file(f'{temp_save_dir}prepared_config.yaml',
                                        temp_save_dir)
+        if "naive_validation" in self.config["mode"]:
+            from osl_dynamics.models import load
+            from osl_dynamics.config_api.wrappers import load_data
+            free_energy_list = []
+            indices = self.select_indice(fold_number=k_fold)
+            for i in range(k_fold):
+                with open(f'{self.config["save_dir"]}indices_{i+1}.json', 'w') as json_file:
+                    json.dump(indices[i], json_file)
+            for i in range(k_fold):
+                temp_save_dir = f'{self.config["save_dir"]}fold_{i + 1}/'
+                if not os.path.exists(temp_save_dir):
+                    os.makedirs(temp_save_dir)
+                # Exclude the indices of the current fold
+                train_indices = []
+                for j in range(k_fold):
+                    if j != i:  # Don't include the current fold's indices
+                        train_indices.extend(indices[j])
+
+                # Save the keep_indices to a JSON file
+                train_list_path = f'{temp_save_dir}train_indices.json'
+                test_list_path = f'{temp_save_dir}test_indices.json'
+                with open(train_list_path, 'w') as f:
+                    json.dump(train_indices, f)
+                with open(test_list_path,'w') as f:
+                    json.dump(indices[i],f)
+                prepare_config['keep_list'] = train_list_path
+                with open(f'{temp_save_dir}prepared_config.yaml', 'w') as file:
+                    yaml.safe_dump(prepare_config, file, default_flow_style=False)
+                run_pipeline_from_file(f'{temp_save_dir}prepared_config.yaml',
+                                       temp_save_dir)
+                model = load(f'{temp_save_dir}/model')
+                load_data_kwargs = prepare_config.pop("load_data", None)
+                data = load_data(**load_data_kwargs)
+                with data.set_keep(indices[i]):
+                    free_energy_list.append(model.free_energy(data))
+
+            with open(f'{self.config["save_dir"]}naive_cv_free_energy.json', 'w') as f:
+                json.dump(free_energy_list, f)
+
 
 
         elif "cv" in self.config["mode"]:
@@ -327,7 +366,7 @@ class BatchTrain:
             run_pipeline_from_file(f'{self.config["save_dir"]}prepared_config.yaml',
                                    self.config["save_dir"])
 
-    def select_indice(self, ratio=0.5):
+    def select_indice(self, ratio=0.5,fold_number=2):
         if "n_sessions" not in self.config:
             data = Data(self.config["load_data"]["inputs"])
             n_sessions = len(data.arrays)
@@ -337,19 +376,24 @@ class BatchTrain:
         all_indices = list(range(n_sessions))
 
         # Check if the ratio is 0.5
-        if ratio == 0.5:
-            # Randomly select indices without replacement
-            selected_indices = random.sample(all_indices, int(n_sessions * ratio))
-            # Calculate the remaining indices
-            remaining_indices = list(set(all_indices) - set(selected_indices))
-            return selected_indices, remaining_indices
-        elif ratio == 0.25:
-            # Randomly split indices into four chunks
+        if fold_number == 2:
+            if ratio == 0.5:
+                # Randomly select indices without replacement
+                selected_indices = random.sample(all_indices, int(n_sessions * ratio))
+                # Calculate the remaining indices
+                remaining_indices = list(set(all_indices) - set(selected_indices))
+                return selected_indices, remaining_indices
+            elif ratio == 0.25:
+                # Randomly split indices into four chunks
+                random.shuffle(all_indices)
+                chunk_size = int(n_sessions * ratio)
+                chunks = [all_indices[i:i + chunk_size] for i in range(0, n_sessions, chunk_size)]
+                return chunks
+        else:
+            # Split the whole session into "fold_number" folds
             random.shuffle(all_indices)
-            chunk_size = int(n_sessions * ratio)
-            chunks = [all_indices[i:i + chunk_size] for i in range(0, n_sessions, chunk_size)]
-            return chunks
-
+            folds = np.array_split(all_indices, fold_number)
+            return [fold.tolist() for fold in folds]
 
 def batch_check(config: dict):
     '''
@@ -650,6 +694,19 @@ class BatchAnalysis:
                 except Exception:
                     print(f'save_dir {save_dir} fails!')
                     rep[model][str(int(n_states))].append(np.nan)
+
+        for model in models:
+            temp_keys = list(rep[model].keys())
+            temp_values = [rep[model][key] for key in temp_keys]
+            plot_box(data=temp_values,
+                     labels=temp_keys,
+                     mark_best=False,
+                     demean=False,
+                     x_label='N_states',
+                     y_label='Average Riemannian distance',
+                     title= 'Reproducibility Analysis',
+                     filename=os.path.join(self.analysis_path, f'{model}_reproducibility.svg')
+                     )
 
         for model in models:
             temp_keys = list(rep[model].keys())
