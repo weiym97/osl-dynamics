@@ -315,14 +315,16 @@ class BatchTrain:
                 run_pipeline_from_file(f'{temp_save_dir}prepared_config.yaml',
                                        temp_save_dir)
                 model = load(f'{temp_save_dir}/model')
-                load_data_kwargs = prepare_config.pop("load_data", None)
+                load_data_kwargs = prepare_config["load_data"]
                 data = load_data(**load_data_kwargs)
                 with data.set_keep(indices[i]):
-                    free_energy_list.append(model.free_energy(data))
+                    free_energy = model.free_energy(data)
+                    free_energy_list.append(free_energy)
 
+                with open(f'{temp_save_dir}naive_cv_free_energy.json', 'w') as f:
+                    json.dump([free_energy], f)
             with open(f'{self.config["save_dir"]}naive_cv_free_energy.json', 'w') as f:
                 json.dump(free_energy_list, f)
-
 
 
         elif "cv" in self.config["mode"]:
