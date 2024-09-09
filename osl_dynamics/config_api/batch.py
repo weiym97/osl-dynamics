@@ -638,7 +638,7 @@ class BatchAnalysis:
         for i in range(len(self.config_list)):
             config = self.indexparser.parse(i)
             model = config['model']
-            n_states = config['n_states']
+            n_states = config.get('n_states',config.get('n_modes'))
             save_dir = config['save_dir']
             mode = config['mode']
             if 'split' in mode:
