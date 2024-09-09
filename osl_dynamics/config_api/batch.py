@@ -646,7 +646,7 @@ class BatchAnalysis:
                     cov_1 = np.load(f'{save_dir}/half_1/inf_params/covs.npy')
                     cov_2 = np.load(f'{save_dir}/half_2/inf_params/covs.npy')
                     rep[model][str(int(n_states))].append(self._reproducibility_analysis(cov_1,cov_2,
-                                                          filename=os.path.join(rep_path,f'state_{n_states}_{mode}.jpg')))
+                                                          filename=os.path.join(rep_path,f'state_{n_states}_{mode}.svg')))
                 except Exception:
                     print(f'save_dir {save_dir} fails!')
                     rep[model][str(int(n_states))].append(np.nan)
@@ -659,8 +659,8 @@ class BatchAnalysis:
                      mark_best=False,
                      demean=False,
                      x_label='N_states',
-                     y_label='reproducibility',
-                     title=f'Average Riemannian distance VS N_states',
+                     y_label='Average Riemannian distance',
+                     title= 'Reproducibility Analysis',
                      filename=os.path.join(self.analysis_path, f'{model}_reproducibility.svg')
                      )
 
@@ -699,7 +699,7 @@ class BatchAnalysis:
         from osl_dynamics.utils.plotting import plot_mode_pairing
         riem = twopair_riemannian_distance(cov_1,cov_2)
         indice,riem_reorder = hungarian_pair(riem,distance=True)
-        plot_mode_pairing(riem_reorder,indice,x_label='2nd half',y_label='1st half',
+        plot_mode_pairing(riem_reorder,indice,x_label='2nd half states',y_label='1st half states',
                           filename=filename)
         return np.mean(np.diagonal(riem_reorder))
 
