@@ -630,7 +630,7 @@ class BatchAnalysis:
 
     def plot_split_half_reproducibility(self):
         models = self.config_root['batch_variable']['model']
-        n_states = self.config_root['batch_variable']['n_states']
+        n_states = self.config_root['batch_variable'].get('n_states', self.config_root['batch_variable'].get('n_modes'))
         rep = {model: {str(int(num)): [] for num in n_states} for model in models}
         rep_path = os.path.join(self.analysis_path,'rep')
         if not os.path.exists(rep_path):
@@ -661,7 +661,7 @@ class BatchAnalysis:
                      x_label='N_states',
                      y_label='reproducibility',
                      title=f'Average Riemannian distance VS N_states',
-                     filename=os.path.join(self.analysis_path, f'{model}_reproducibility.jpg')
+                     filename=os.path.join(self.analysis_path, f'{model}_reproducibility.svg')
                      )
 
     def plot_fo(self, plot_mode='repeat_1'):
