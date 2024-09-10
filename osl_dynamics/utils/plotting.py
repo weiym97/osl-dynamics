@@ -2442,13 +2442,16 @@ def plot_mode_pairing(
     ax = sns.heatmap(data=metrics, ax=ax, **sns_kwargs)
     # Set xticks and yticks
     if indices is not None:
-        ax.set_xticks(np.arange(len(indices["col"])) + 0.5, indices["col"], fontsize=15)
-        ax.set_yticks(np.arange(len(indices["row"])) + 0.5, indices["row"], fontsize=15)
+        ax.set_xticks(np.arange(len(indices["col"])) + 0.5, indices["col"], fontsize=18)
+        ax.set_yticks(np.arange(len(indices["row"])) + 0.5, indices["row"], fontsize=18)
 
     # Set title and axis labels
     ax.set_title(title, fontsize=20)
-    ax.set_xlabel(x_label, fontsize=15)
-    ax.set_ylabel(y_label, fontsize=15)
+    ax.set_xlabel(x_label, fontsize=20)
+    ax.set_ylabel(y_label, fontsize=20)
+    
+    cbar = ax.collections[0].colorbar
+    cbar.ax.tick_params(labelsize=18)  # Set colorbar tick label font size
 
     # Save the figure if a filename has been pass
     if filename is not None:
