@@ -693,11 +693,12 @@ class BatchAnalysis:
         for model in models:
             temp_keys = list(free_energy[model].keys())
             temp_values = [free_energy[model][key] for key in temp_keys]
+            x_label = {'hmm':'N_states','swc':'N_states','dynemo':'N_modes'}
             plot_box(data=temp_values,
                      labels=temp_keys,
                      mark_best=False,
                      demean=False,
-                     x_label='N_states',
+                     x_label=x_label['model'],
                      y_label='Free energy',
                      title= 'Naive cross validation Analysis',
                      filename=os.path.join(self.analysis_path, f'{model}_naive_free_energy.svg')
