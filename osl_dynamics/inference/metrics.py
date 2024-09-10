@@ -32,16 +32,19 @@ def alpha_correlation(alpha_1, alpha_2, return_diagonal=True):
         alpha_1 = np.concatenate(alpha_1, axis=0)
     if isinstance(alpha_2, list):
         alpha_2 = np.concatenate(alpha_2, axis=0)
-    if alpha_1.shape[1] != alpha_2.shape[1]:
-        raise ValueError(
-            "alpha_1 and alpha_2 shapes are incomptible. "
-            + f"alpha_1.shape={alpha_1.shape}, alpha_2.shape={alpha_2.shape}."
-        )
-    n_modes = alpha_1.shape[1]
+    n_modes_1 = alpha_1.shape[1]
+    n_modes_2 = alpha_2.shape[1]
+
+    # Calculate the full correlation matrix between columns of alpha_1 and alpha_2
     corr = np.corrcoef(alpha_1, alpha_2, rowvar=False)
-    corr = corr[:n_modes, n_modes:]
+
+    # Extract the cross-correlations between alpha_1 and alpha_2
+    corr = corr[:n_modes_1, n_modes_1:n_modes_1 + n_modes_2]
+
     if return_diagonal:
+        # Return only the diagonal elements (correlation of corresponding modes)
         corr = np.diagonal(corr)
+
     return corr
 
 
