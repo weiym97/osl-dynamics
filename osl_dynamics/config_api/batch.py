@@ -698,7 +698,7 @@ class BatchAnalysis:
                      labels=temp_keys,
                      mark_best=False,
                      demean=False,
-                     x_label=x_label['model'],
+                     x_label=x_label[model],
                      y_label='Free energy',
                      title= 'Naive cross validation Analysis',
                      filename=os.path.join(self.analysis_path, f'{model}_naive_free_energy.svg')
