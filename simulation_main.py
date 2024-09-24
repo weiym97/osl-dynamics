@@ -757,7 +757,7 @@ if __name__ == '__main__':
         n_channels=n_channels,
         relative_activation=[1, 0.5, 0.5, 0.25, 0.25, 0.1],
         amplitudes=[1,2,3,4,5,6],
-        frequencies=[1, 2, 3, 4, 6, 8],
+        frequencies=[1.2, 2.2, 3.2, 4.2, 6.2, 8.2],
         sampling_frequency=250,
         means="zero",
         covariances="random",
