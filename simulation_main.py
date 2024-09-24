@@ -582,7 +582,7 @@ if __name__ == '__main__':
         np.save(f'{save_dir}truth/{10001 + i}_state_time_course.npy', time_course[i])
     '''
 
-
+    '''
     ### Update 3rd Sept 2024
     ### Generate sliding window correlation, use real covariances trained from HMM.
     save_dir = './data/node_timeseries/simulation_bicv/real_swc/'
@@ -619,7 +619,7 @@ if __name__ == '__main__':
     for i in range(n_subjects):
         np.savetxt(f'{save_dir}{10001 + i}.txt', data[i])
         np.save(f'{save_dir}truth/{10001 + i}_state_time_course.npy', time_course[i])
-
+    '''
 
     '''
        ### Update 12th July 2024
@@ -740,6 +740,39 @@ if __name__ == '__main__':
         np.savetxt(f'{save_dir}{10001 + i}.txt', data[i])
         np.save(f'{save_dir}truth/{10001 + i}_mode_time_course.npy', time_course[i])
     '''
+    save_dir = './data/node_timeseries/simulation_bicv/random_dynemo_fair/'
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    if not os.path.exists(f'{save_dir}truth/'):
+        os.makedirs(f'{save_dir}truth')
+
+    n_subjects = 500
+    n_modes = 6
+    n_samples = 1200
+    n_channels = 50
+
+    sim = simulation.MixedSine_MVN(
+        n_samples=n_subjects*n_samples,
+        n_modes=n_modes,
+        n_channels=n_channels,
+        relative_activation=[1, 0.5, 0.5, 0.25, 0.25, 0.1],
+        amplitudes=[1,2,3,4,5,6],
+        frequencies=[1, 2, 3, 4, 6, 8],
+        sampling_frequency=250,
+        means="zero",
+        covariances="random",
+    )
+
+    data = sim.time_series
+    time_course = sim.mode_time_course
+    data = data.reshape(n_subjects, -1, n_channels)
+    time_course = time_course.reshape(n_subjects, -1, n_modes)
+
+    np.save(f'{save_dir}truth/state_covariances.npy', sim.obs_mod.covariances)
+
+    for i in range(n_subjects):
+        np.savetxt(f'{save_dir}{10001 + i}.txt', data[i])
+        np.save(f'{save_dir}truth/{10001 + i}_mode_time_course.npy', time_course[i])
     '''
     # Generate DyNeMo simulation using Chet and Rukuang's code
     # All components have equal amplitude and relative activation
