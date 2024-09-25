@@ -471,6 +471,23 @@ def test_plot_mode_pairing():
     plot_mode_pairing(metrics,indices,x_label='split_2',y_label='split_1',title='Pairing test',
                       filename=f'{plot_dir}/toy_example.png')
 
+def test_plot_mode_no_pairing():
+    from osl_dynamics.utils.plotting import plot_mode_no_pairing
+
+    # Create directory for test plots if it doesn't exist
+    plot_dir = "test_plot/plot_mode_no_pairing/"
+    if not os.path.exists(plot_dir):
+        os.makedirs(plot_dir)
+    else:
+        # Delete existing files in the directory
+        for file_name in os.listdir(plot_dir):
+            file_path = os.path.join(plot_dir, file_name)
+            os.remove(file_path)
+
+    metrics = np.random.randn(8,8)
+    plot_mode_no_pairing(metrics,x_label='split_2',y_label='split_1',title='Pairing test',
+                      filename=f'{plot_dir}/toy_example.png')
+
 def test_plot_IC_distribution():
     from osl_dynamics.utils.plotting import plot_IC_distribution
 

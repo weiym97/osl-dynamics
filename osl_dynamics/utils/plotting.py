@@ -2449,7 +2449,7 @@ def plot_mode_pairing(
     ax.set_title(title, fontsize=20)
     ax.set_xlabel(x_label, fontsize=20)
     ax.set_ylabel(y_label, fontsize=20)
-    
+
     cbar = ax.collections[0].colorbar
     cbar.ax.tick_params(labelsize=18)  # Set colorbar tick label font size
 
@@ -2459,6 +2459,102 @@ def plot_mode_pairing(
     elif create_fig:
         return fig, ax
 
+def plot_mode_no_pairing(
+        metrics,
+        x_label=None,
+        y_label=None,
+        title=None,
+        fig_kwargs=None,
+        sns_kwargs=None,
+        ax=None,
+        filename=None,
+
+):
+    """
+    Plot the states/modes pairing using the metrics
+    Parameters
+    ----------
+    metrics: np.ndarray
+        measure the similarity/distance between states/modes.
+    x_label : str, optional
+        Label for x-axis.
+    y_label : str, optional
+        Label for y-axis.
+    title : str, optional
+        Figure title.
+    fig_kwargs : dict, optional
+        Arguments to pass to :code:`plt.subplots()`.
+    sns_kwargs : dict, optional
+        Arguments to pass to :code:`sns.heatmap()`.
+    ax : matplotlib.axes.axes, optional
+        Axis object to plot on.
+    filename : str, optional
+        Output filename.
+
+    Returns
+    -------
+    fig : plt.figure
+        Matplotlib figure object. Only returned if :code:`ax=None` and
+        :code:`filename=None`.
+    ax : plt.axes
+        Matplotlib axis object(s). Only returned if :code:`ax=None` and
+        :code:`filename=None`.
+    """
+
+    # Validation
+    if ax is not None:
+        if filename is not None:
+            raise ValueError(
+                "Please use plotting.save() to save the figure instead of the "
+                + "filename argument."
+            )
+        if isinstance(ax, np.ndarray):
+            raise ValueError("Only pass one axis.")
+
+    if fig_kwargs is None:
+        fig_kwargs = {}
+    default_fig_kwargs = {"figsize": (8, 6),
+                          # "xtick.labelsize": 13,
+                          # "ytick.labelsize": 13,
+                          }
+    fig_kwargs = override_dict_defaults(default_fig_kwargs, fig_kwargs)
+
+    if sns_kwargs is None:
+        sns_kwargs = {}
+    default_sns_kwargs = {  # "font_scale": 1.2,
+        "cmap": "coolwarm",
+        "square": True,
+        "linewidths": 0.5,
+        # "cbar_kws": {"shrink": 0.75,},
+        "fmt": ".2f"
+    }
+    sns_kwargs = override_dict_defaults(default_sns_kwargs, sns_kwargs)
+    # Set up the figure and axis
+
+    # Create figure
+    create_fig = ax is None
+    if create_fig:
+        fig, ax = create_figure(**fig_kwargs)
+
+    # Create a heatmap of the correlation matrix
+    ax = sns.heatmap(data=metrics, ax=ax, **sns_kwargs)
+    # Set xticks and yticks
+    ax.set_xticks(np.arange(metrics.shape[1]) + 0.5, np.arange(metrics.shape[1]), fontsize=18)
+    ax.set_yticks(np.arange(metrics.shape[0]) + 0.5, np.arange(metrics.shape[0]), fontsize=18)
+
+    # Set title and axis labels
+    ax.set_title(title, fontsize=20)
+    ax.set_xlabel(x_label, fontsize=20)
+    ax.set_ylabel(y_label, fontsize=20)
+
+    cbar = ax.collections[0].colorbar
+    cbar.ax.tick_params(labelsize=18)  # Set colorbar tick label font size
+
+    # Save the figure if a filename has been pass
+    if filename is not None:
+        save(fig, filename, tight_layout=True)
+    elif create_fig:
+        return fig, ax
 
 def plot_IC_distribution(
         spatial_map,
