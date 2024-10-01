@@ -8,8 +8,8 @@ from osl_dynamics.config_api.wrappers import load_data
 
 
 def fit_ar1_model(time_series):
-    # Fit an AR(1) model to the time series
-    model = sm.tsa.ARMA(time_series, order=(1, 0)).fit(disp=False)
+    # Fit an AR(1) model to the time series using ARIMA with order (1,0,0)
+    model = sm.tsa.ARIMA(time_series, order=(1, 0, 0)).fit()
     print(model.params)
     return model.params
 
@@ -34,7 +34,7 @@ if __name__ == '__main__':
     for subject in range(n_subjects):
         for channel in range(n_channels):
             time_series = np.squeeze(data_time_series[0][:,channel])
-            ar1_coefficients[subject, channel] = fit_ar1_model(time_series)[0]  # AR(1) coefficient
+            ar1_coefficients[subject, channel] = fit_ar1_model(time_series)[1]  # AR(1) coefficient
     np.save(save_path,ar1_coefficients)
 
 
