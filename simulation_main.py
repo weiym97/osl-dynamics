@@ -865,6 +865,7 @@ if __name__ == '__main__':
         np.savetxt(f'{save_dir}{10001 + i}.txt', data[i])
         np.save(f'{save_dir}truth/{10001 + i}_mode_time_course.npy', time_course[i])
     '''
+    '''
     save_dir = './data/node_timeseries/simulation_bicv/random_dynemo_fair/'
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
@@ -898,6 +899,7 @@ if __name__ == '__main__':
     for i in range(n_subjects):
         np.savetxt(f'{save_dir}{10001 + i}.txt', data[i])
         np.save(f'{save_dir}truth/{10001 + i}_mode_time_course.npy', time_course[i])
+    '''
     '''
     # Generate DyNeMo simulation using Chet and Rukuang's code
     # All components have equal amplitude and relative activation
