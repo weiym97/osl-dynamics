@@ -1539,8 +1539,8 @@ class CVSWC(CVBase):
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
         # Do nothing if n_states = 1
-        #if config['n_states'] == 1:
-        #    return '0'
+        if config['n_states'] == 1:
+            return '0'
 
         # Create a new directory "config['save_dir']/X_train/inf_params
         if not os.path.exists(f'{save_dir}inf_params/'):
@@ -1581,6 +1581,10 @@ class CVSWC(CVBase):
             save_dir = os.path.join(config['save_dir'], 'infer_temporal/')
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
+
+        # Do nothing if n_states = 1
+        if config['n_states'] == 1:
+            return '0'
 
         params_dir = f'{save_dir}/inf_params/'
         if not os.path.exists(params_dir):
@@ -1646,11 +1650,15 @@ class CVSWC(CVBase):
             prepare_config['load_data']['prepare']['select'] = {}
         prepare_config['load_data']['prepare']['select']['channels'] = column
 
-        prepare_config[f'train_{config["model"]}_log_likelihood'] = {
-            'config_kwargs':
-                {key: config[key] for key in self.train_keys if key in config},
-        }
-        prepare_config[f'train_{config["model"]}_log_likelihood']['config_kwargs']['n_channels'] = len(column)
+        if config['n_states'] > 1:
+            prepare_config[f'train_{config["model"]}_log_likelihood'] = {
+                'config_kwargs':
+                    {key: config[key] for key in self.train_keys if key in config},
+            }
+            prepare_config[f'train_{config["model"]}_log_likelihood']['config_kwargs']['n_channels'] = len(column)
+
+        else:
+            prepare_config['log_likelihood'] = {'static_FC':True,'spatial':spatial}
         #prepare_config[f'build_{config["model"]}']['config_kwargs']['initial_means'] = spatial['means']
         #prepare_config[f'build_{config["model"]}']['config_kwargs']['initial_covariances'] = spatial['covs']
 
