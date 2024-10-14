@@ -1022,7 +1022,7 @@ if __name__ == '__main__':
         np.savetxt(f'{save_dir}{10001+i}.txt', data[i])
         np.save(f'{save_dir}truth/{10001+i}_state_time_course.npy', time_course[i])
     '''
-
+    '''
     ### Update 14th October 2024
     ### Adding haemodynamic response
     from osl_dynamics.array_ops import apply_hrf
@@ -1043,6 +1043,63 @@ if __name__ == '__main__':
     for i in range(n_subjects):
         x = np.loadtxt(f'{source_dir}/{10001+i}.txt')
         y = apply_hrf(x,tr)
+        np.savetxt(f'{save_dir}{10001 + i}.txt', y)
+        shutil.copy(f'{source_dir}truth/{10001 + i}_state_time_course.npy',
+                    f'{save_dir}truth/{10001 + i}_state_time_course.npy'
+                    )
+    '''
+
+    ### Update 14th October 2024
+    ### Adding ar(1)
+    from osl_dynamics.array_ops import apply_ar1
+    import shutil
+
+    save_dir = './data/node_timeseries/simulation_bicv/ar1_random/'
+    source_dir = './data/node_timeseries/simulation_bicv/real/'
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    if not os.path.exists(f'{save_dir}truth/'):
+        os.makedirs(f'{save_dir}truth')
+
+    n_subjects = 500
+    ar_1_coefficient= 0.5
+    sigma = 0.5
+
+    shutil.copy(f'{source_dir}/truth/state_covariances.npy', f'{save_dir}/truth/state_covariances.npy')
+    shutil.copy(f'{source_dir}/truth/tpm.npy', f'{save_dir}/truth/tpm.npy')
+
+    for i in range(n_subjects):
+        x = np.loadtxt(f'{source_dir}/{10001 + i}.txt')
+        y = apply_ar1(x, ar_1_coefficient,sigma)
+        np.savetxt(f'{save_dir}{10001 + i}.txt', y)
+        shutil.copy(f'{source_dir}truth/{10001 + i}_state_time_course.npy',
+                    f'{save_dir}truth/{10001 + i}_state_time_course.npy'
+                    )
+
+    ### Update 14th October 2024
+    ### Adding hrf and ar(1)
+    from osl_dynamics.array_ops import apply_ar1,apply_hrf
+    import shutil
+
+    save_dir = './data/node_timeseries/simulation_bicv/hrf_ar1_random/'
+    source_dir = './data/node_timeseries/simulation_bicv/real/'
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    if not os.path.exists(f'{save_dir}truth/'):
+        os.makedirs(f'{save_dir}truth')
+
+    n_subjects = 500
+    tr = 0.72
+    ar_1_coefficient = 0.5
+    sigma = 0.5
+
+    shutil.copy(f'{source_dir}/truth/state_covariances.npy', f'{save_dir}/truth/state_covariances.npy')
+    shutil.copy(f'{source_dir}/truth/tpm.npy', f'{save_dir}/truth/tpm.npy')
+
+    for i in range(n_subjects):
+        x = np.loadtxt(f'{source_dir}/{10001 + i}.txt')
+        y = apply_hrf(x,tr=tr)
+        y = apply_ar1(y, ar_1_coefficient, sigma)
         np.savetxt(f'{save_dir}{10001 + i}.txt', y)
         shutil.copy(f'{source_dir}truth/{10001 + i}_state_time_course.npy',
                     f'{save_dir}truth/{10001 + i}_state_time_course.npy'
