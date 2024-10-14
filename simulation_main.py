@@ -1041,7 +1041,7 @@ if __name__ == '__main__':
     shutil.copy(f'{source_dir}/truth/tpm.npy', f'{save_dir}/truth/tpm.npy')
 
     for i in range(n_subjects):
-        x = np.load(f'{source_dir}/{10001+i}.txt')
+        x = np.loadtxt(f'{source_dir}/{10001+i}.txt')
         y = apply_hrf(x,tr)
         np.savetxt(f'{save_dir}{10001 + i}.txt', y)
         shutil.copy(f'{source_dir}truth/{10001 + i}_state_time_course.npy',
