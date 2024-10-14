@@ -6,6 +6,7 @@
 import numpy as np
 
 
+
 def get_one_hot(values, n_states=None):
     """Expand a categorical variable to a series of boolean columns
     (one-hot encoding).
@@ -627,3 +628,87 @@ def find_phi_range(D1, D2):
         return phi_min
     else:
         return 0.0  # If no phi satisfies the condition, the best is phi=0 (D(\phi) = D1)
+
+def hrf_function(t, alpha1=6, alpha2=16, beta1=1, beta2=1, c=1 / 6):
+    """
+    Generates a hemodynamic response function (HRF) using a two-gamma function model.
+
+    Parameters
+    ----------
+    t : array-like
+        The time vector in seconds over which to evaluate the HRF.
+    alpha1 : float, optional
+        Shape parameter for the first gamma function (default is 6).
+    alpha2 : float, optional
+        Shape parameter for the second (undershoot) gamma function (default is 16).
+    beta1 : float, optional
+        Rate parameter for the first gamma function (default is 1).
+    beta2 : float, optional
+        Rate parameter for the second (undershoot) gamma function (default is 1).
+    c : float, optional
+        Scaling factor for the second gamma function (default is 1/6).
+
+    Returns
+    -------
+    hrf : array
+        The HRF values corresponding to the time points in `t`.
+
+    Notes
+    -----
+    The function models the BOLD response with two gamma functions: a positive peak followed by
+    a delayed undershoot.
+    """
+    from scipy.special import gamma
+    # First gamma function (positive peak)
+    gamma1 = (t ** (alpha1 - 1)) * (beta1 ** alpha1) * np.exp(-beta1 * t) / gamma(alpha1)
+
+    # Second gamma function (undershoot)
+    gamma2 = (t ** (alpha2 - 1)) * (beta2 ** alpha2) * np.exp(-beta2 * t) / gamma(alpha2)
+
+    # HRF as the combination of both gamma functions
+    hrf = gamma1 - c * gamma2
+
+    return hrf
+
+
+def apply_hrf(x, tr, hrf_length=30):
+    """
+    Convolves an input neuronal time series with a hemodynamic response function (HRF).
+
+    Parameters
+    ----------
+    x : np.ndarray, shape (N_timepoints, N_channels)
+        The neuronal time series to which the HRF will be applied. Each column corresponds
+        to the time series of a different channel.
+    tr : float
+        The time resolution (repetition time, TR) of the input data in seconds (default is 2.0 seconds).
+    hrf_length : int, optional
+        The duration of the HRF in seconds (default is 30 seconds).
+
+    Returns
+    -------
+    y : np.ndarray, shape (N_timepoints, N_channels)
+        The time series after convolution with the HRF, with the same shape as the input `x`.
+
+    Notes
+    -----
+    The function convolves the neuronal time series with the HRF for each channel. The HRF is
+    modeled by the two-gamma function as implemented in `hrf_function`. The resulting signal is
+    a smoother and delayed version of the original signal, reflecting how fMRI BOLD signal is
+    generated in response to neuronal activity.
+    """
+    from scipy.signal import convolve
+    # Create time vector for HRF
+    t = np.arange(0, hrf_length, tr)
+    hrf = hrf_function(t)
+
+    print(hrf)
+
+    # Convolve the signal for each channel
+    N_timepoints, N_channels = x.shape
+    y = np.zeros_like(x)
+
+    for ch in range(N_channels):
+        y[:, ch] = convolve(x[:, ch], hrf, mode='full')[:N_timepoints]
+
+    return y

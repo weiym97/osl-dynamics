@@ -382,3 +382,14 @@ def test_estimate_gaussian_log_likelihood():
     ll = estimate_gaussian_log_likelihood(data,means,covs)
     answer = np.mean(multivariate_gaussian_log_likelihood(data,np.squeeze(means),np.squeeze(covs))),
     npt.assert_almost_equal(answer,ll)
+
+def test_apply_hrf():
+    from osl_dynamics.array_ops import apply_hrf
+    import matplotlib.pyplot as plt
+
+    x = np.zeros((180,1))
+    x[::90] = 1
+    y = apply_hrf(x,tr=0.72)
+    plt.plot(np.squeeze(y))
+    print(y)
+    plt.show()
