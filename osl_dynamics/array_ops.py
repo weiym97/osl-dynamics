@@ -702,8 +702,6 @@ def apply_hrf(x, tr, hrf_length=30):
     t = np.arange(0, hrf_length, tr)
     hrf = hrf_function(t)
 
-    print(hrf)
-
     # Convolve the signal for each channel
     N_timepoints, N_channels = x.shape
     y = np.zeros_like(x)
@@ -712,3 +710,41 @@ def apply_hrf(x, tr, hrf_length=30):
         y[:, ch] = convolve(x[:, ch], hrf, mode='full')[:N_timepoints]
 
     return y
+
+
+def apply_ar1(x_t, A, sigma, random_seed=None):
+    """
+    Apply an AR(1) process to the input time series data.
+
+    Parameters:
+    x_t : numpy.ndarray
+        The input time series data of shape (N_timepoints, N_channels).
+    A : float
+        The AR(1) coefficient, indicating how much of the previous time point influences the current one.
+    sigma : float
+        The standard deviation of the i.i.d. Gaussian noise e_t.
+    random_seed : int, optional
+        Seed for the random number generator to ensure reproducibility.
+
+    Returns:
+    y_t : numpy.ndarray
+        The output time series data with the AR(1) structure applied.
+    """
+    if random_seed is not None:
+        np.random.seed(random_seed)
+
+    N_timepoints, N_channels = x_t.shape
+    # Initialize the noise n_t array
+    n_t = np.zeros_like(x_t)
+
+    # Generate white noise for e_t
+    e_t = np.random.normal(0, sigma, size=(N_timepoints, N_channels))
+
+    # Apply AR(1) process to the noise
+    for t in range(1, N_timepoints):
+        n_t[t] = A * n_t[t - 1] + e_t[t]
+
+    # Combine x_t with the AR(1) noise to form y_t
+    y_t = x_t + n_t
+
+    return y_t
