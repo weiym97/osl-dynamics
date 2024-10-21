@@ -1105,7 +1105,7 @@ if __name__ == '__main__':
                     f'{save_dir}truth/{10001 + i}_state_time_course.npy'
                     )
     '''
-    ### Update 21s October 2024
+    ### Update 21st October 2024
     ### Generate sliding window correlation with drift
     save_dir = './data/node_timeseries/simulation_bicv/swc_drift/'
     if not os.path.exists(save_dir):
@@ -1164,9 +1164,6 @@ if __name__ == '__main__':
 
         for subject in range(n_subjects):
             for channel in range(n_channels):
-                # Amplitude is constant across all channels and subjects
-                amplitude = amp
-
                 # Frequency: same for all channels/subjects or random for each channel/subject
                 if freq_type == 'same_f':
                     frequency = fixed_frequency
@@ -1180,8 +1177,8 @@ if __name__ == '__main__':
                     phase = np.random.uniform(0, 2 * np.pi)
 
                 # Generate the drift for this channel
-                drift = amplitude * np.sin(2 * np.pi * frequency * time + phase)
-                data[subject, :, channel] = drift
+                drift = amp * np.sin(2 * np.pi * frequency * time + phase)
+                data[subject, :, channel]+= drift
 
         return data
 
