@@ -1147,8 +1147,8 @@ if __name__ == '__main__':
 
     # Frequency: same (0.015 Hz) or random (from Gamma distribution)
     fixed_frequency = 0.015
-    alpha = 1.0
-    beta = 1 / 0.015  # For random frequency (gamma distribution)
+    min_freq = 0.0
+    max_freq = 0.05
 
     # Phase: same (0) or random (uniform between 0 and 2pi)
     fixed_phase = 0
@@ -1161,6 +1161,10 @@ if __name__ == '__main__':
 
     # Function to generate the drift data
     def generate_drift_data(data, amp, freq_type, phase_type):
+        def sample_random_frequency(alpha=2, beta=5, size=1):
+            # Sample from Beta distribution and rescale to [min_freq, max_freq]
+            freq = np.random.beta(alpha, beta, size) * (max_freq - min_freq) + min_freq
+            return freq
 
         for subject in range(n_subjects):
             for channel in range(n_channels):
@@ -1168,7 +1172,7 @@ if __name__ == '__main__':
                 if freq_type == 'same_f':
                     frequency = fixed_frequency
                 else:  # 'random_f'
-                    frequency = np.random.gamma(alpha, beta)
+                    frequency = sample_random_frequency(size=1)
 
                 # Phase: same for all channels/subjects or random for each channel/subject
                 if phase_type == 'same_p':
@@ -1196,4 +1200,4 @@ if __name__ == '__main__':
 
                 # Save each subject's data
                 for i in range(n_subjects):
-                    np.savetxt(f'{subdirectory}/10001_{i + 1}.txt', drift_data[i])
+                    np.savetxt(f'{subdirectory}/{i + 10001}.txt', drift_data[i])
