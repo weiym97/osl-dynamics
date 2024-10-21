@@ -1048,7 +1048,7 @@ if __name__ == '__main__':
                     f'{save_dir}truth/{10001 + i}_state_time_course.npy'
                     )
     '''
-
+    '''
     ### Update 14th October 2024
     ### Adding ar(1)
     from osl_dynamics.array_ops import apply_ar1
@@ -1075,7 +1075,7 @@ if __name__ == '__main__':
         shutil.copy(f'{source_dir}truth/{10001 + i}_state_time_course.npy',
                     f'{save_dir}truth/{10001 + i}_state_time_course.npy'
                     )
-
+    
     ### Update 14th October 2024
     ### Adding hrf and ar(1)
     from osl_dynamics.array_ops import apply_ar1,apply_hrf
@@ -1104,3 +1104,99 @@ if __name__ == '__main__':
         shutil.copy(f'{source_dir}truth/{10001 + i}_state_time_course.npy',
                     f'{save_dir}truth/{10001 + i}_state_time_course.npy'
                     )
+    '''
+    ### Update 21s October 2024
+    ### Generate sliding window correlation with drift
+    save_dir = './data/node_timeseries/simulation_bicv/swc_drift/'
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    if not os.path.exists(f'{save_dir}truth/'):
+        os.makedirs(f'{save_dir}truth')
+
+    n_subjects = 500
+    n_states = 8
+    n_samples = 1200
+    n_channels = 25
+
+    covariances = np.load('./data/node_timeseries/simulation_bicv/random/truth/state_covariances.npy')
+    from osl_dynamics.array_ops import get_one_hot
+
+    sim = simulation.SWC(
+        n_samples=n_samples * n_subjects,
+        n_states=n_states,
+        n_channels=n_channels,
+        stay_time=15,
+        means="zero",
+        covariances=covariances
+    )
+    data = sim.time_series
+    time_course = sim.state_time_course
+    data = data.reshape(n_subjects, -1, n_channels)
+    time_course = get_one_hot(time_course, n_states=n_states).reshape(n_subjects, -1, n_states)
+
+    np.save(f'{save_dir}truth/state_covariances.npy', covariances)
+    # np.save(f'{save_dir}truth/tpm.npy', sim.hmm.trans_prob)
+
+    for i in range(n_subjects):
+        np.save(f'{save_dir}truth/{10001 + i}_state_time_course.npy', time_course[i])
+
+    # Time resolution of simulated data
+    time_resolution = 0.72  # seconds
+    sampling_rate = 1 / time_resolution
+    time = np.arange(n_samples) * time_resolution
+
+    # Frequency: same (0.015 Hz) or random (from Gamma distribution)
+    fixed_frequency = 0.015
+    alpha = 1.0
+    beta = 1 / 0.015  # For random frequency (gamma distribution)
+
+    # Phase: same (0) or random (uniform between 0 and 2pi)
+    fixed_phase = 0
+
+    # Amplitude, frequency, and phase options
+    amplitude_choices = {'low_a': 0.05, 'high_a': 0.25}
+    frequency_choices = ['same_f', 'random_f']
+    phase_choices = ['same_p', 'random_p']
+
+
+    # Function to generate the drift data
+    def generate_drift_data(data, amp, freq_type, phase_type):
+
+        for subject in range(n_subjects):
+            for channel in range(n_channels):
+                # Amplitude is constant across all channels and subjects
+                amplitude = amp
+
+                # Frequency: same for all channels/subjects or random for each channel/subject
+                if freq_type == 'same_f':
+                    frequency = fixed_frequency
+                else:  # 'random_f'
+                    frequency = np.random.gamma(alpha, beta)
+
+                # Phase: same for all channels/subjects or random for each channel/subject
+                if phase_type == 'same_p':
+                    phase = fixed_phase
+                else:  # 'random_p'
+                    phase = np.random.uniform(0, 2 * np.pi)
+
+                # Generate the drift for this channel
+                drift = amplitude * np.sin(2 * np.pi * frequency * time + phase)
+                data[subject, :, channel] = drift
+
+        return data
+
+
+    # Generate and save the datasets
+    for amp in amplitude_choices.keys():
+        for freq_type in frequency_choices:
+            for phase_type in phase_choices:
+                # Generate the drift data
+                drift_data = generate_drift_data(data, amplitude_choices[amp], freq_type, phase_type)
+
+                # Create subdirectory for this combination of parameters
+                subdirectory = f'{save_dir}/{amp}_{freq_type}_{phase_type}'
+                os.makedirs(subdirectory, exist_ok=True)
+
+                # Save each subject's data
+                for i in range(n_subjects):
+                    np.savetxt(f'{subdirectory}/10001_{i + 1}.txt', drift_data[i])
