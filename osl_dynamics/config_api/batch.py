@@ -466,7 +466,7 @@ class BatchAnalysis:
         if not os.path.exists(self.analysis_path):
             os.makedirs(self.analysis_path)
 
-    def compare(self, demean_index=-1,inset_start_index=None,plot_end_index=None,fig_kwargs=None,folder='Y_test/',object='log_likelihood'):
+    def compare(self, demean_index=-1,inset_start_index=None,plot_end_index=None,fig_kwargs=None,folder='Y_test/',object='log_likelihood',column_fold=None):
         '''
         By default of bi-cross validation, we should compare the final log_likelihood on the Y_test.
         But for sanity check, and potentiall understand how the method work, we are also interested in
@@ -481,6 +481,11 @@ class BatchAnalysis:
 
         metrics = {model: {str(int(num)): [] for num in n_states} for model in models}
         for i in range(len(self.config_list)):
+            # Check if the current row matches the column_fold argument
+            if column_fold is not None:
+                if self.config_list.loc[i, 'column_fold'] != column_fold:
+                    continue  # Skip this row if the column_fold doesn't match
+                    
             config = self.indexparser.parse(i)
             model = config['model']
 
