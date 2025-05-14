@@ -437,7 +437,7 @@ def test_tica():
     data = Data([input_1, input_2])
     data.prepare({'tica': {'n_tica_components': 2}})
 
-    ts = np.concatenate(data.arrays,axis=0)
+    ts = np.concatenate(data.arrays, axis=0)
 
     plt.scatter(X[0, :], X[1, :], s=5, alpha=0.5)
     plt.xlabel('Component 1')
@@ -458,6 +458,9 @@ def test_tica():
     A_true = A / np.linalg.norm(A, axis=1, keepdims=True)
 
     A_est = data.tica_A
+
+    npt.assert_allclose(data.tica_A @ data.tica_W, np.eye(A.shape[0]),atol=1e-4)
+    print(f'A@W: {data.tica_A @ data.tica_W}')
 
     n_components = A_true.shape[1]
     used_cols = set()
@@ -484,5 +487,5 @@ def test_tica():
             npt.assert_allclose(corrected, A_true[:, i], atol=1e-3)
         except AssertionError as e:
             raise AssertionError(f"Component {i} does not match after alignment. " +
-                                 f"output: {corrected}, answer: {A_true[:,i]}") from e
+                                 f"output: {corrected}, answer: {A_true[:, i]}") from e
         used_cols.add(best_match)

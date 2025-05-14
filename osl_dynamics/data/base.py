@@ -671,18 +671,18 @@ class Data:
         _logger.info("Running temporal ICA on concatenated data")
         S = ica.fit_transform(arrays_concat)  # shape: (sum T_i, n_components)
         self.tica_A = ica.mixing_
-        self.tICA_W = ica.components_
+        self.tica_W = ica.components_
 
-        subject_tICA_data = []
+        subject_tica_data = []
         for (start, end), prepared_file in zip(indices, self.prepared_data_filenames):
             subject_data = S[start:end, :]
 
             if self.load_memmaps:
                 subject_data = misc.array_to_memmap(prepared_file, subject_data)
 
-            subject_tICA_data.append(subject_data)
+            subject_tica_data.append(subject_data)
 
-        self.arrays = subject_tICA_data
+        self.arrays = subject_tica_data
 
         return self
 
