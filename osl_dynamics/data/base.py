@@ -617,6 +617,76 @@ class Data:
 
         return self
 
+    def tica(
+        self,
+        n_tica_components,
+        use_raw=False,
+    ):
+        """Temporal independent component analysis (tICA).
+
+        This function will first standardize the data then perform tICA.
+        This is an in-place operation.
+
+        Parameters
+        ----------
+        n_tICA_components : int
+            Number of tICA components to keep.
+        use_raw : bool, optional
+            Should we prepare the original 'raw' data that we loaded?
+
+        Returns
+        -------
+        data : osl_dynamics.data.Data
+            The modified Data object.
+        """
+        from sklearn.decomposition import FastICA
+
+        self.n_tica_components = n_tica_components
+
+        # What data should we apply PCA to?
+        arrays = self.raw_data_arrays if use_raw else self.arrays
+
+        #Track start and end indices (in case time lengths differ)
+        std_data = []
+        indices = []
+        start = 0
+        for array in tqdm(arrays, desc="Dealing with tICA components"):
+            std_data.append(processing.standardize(array))
+            end = start + array.shape[0]
+            indices.append((start, end))
+            start = end
+
+        # Calculate tICA
+        arrays_concat = np.concatenate(std_data,axis=0)
+
+        ica = FastICA(
+            n_components=n_tica_components,
+            algorithm='parallel',  # equivalent to MATLAB 'symm'
+            fun='logcosh',  # nonlinearity
+            whiten='unit-variance',  # match MATLAB whitening
+            max_iter=3000,
+            tol=1e-13,
+        )
+
+        _logger.info("Running temporal ICA on concatenated data")
+        S = ica.fit_transform(arrays_concat)  # shape: (sum T_i, n_components)
+        self.tica_A = ica.mixing_
+        self.tICA_W = ica.components_
+
+        subject_tICA_data = []
+        for (start, end), prepared_file in zip(indices, self.prepared_data_filenames):
+            subject_data = S[start:end, :]
+
+            if self.load_memmaps:
+                subject_data = misc.array_to_memmap(prepared_file, subject_data)
+
+            subject_tICA_data.append(subject_data)
+
+        self.arrays = subject_tICA_data
+
+        return self
+
+
     def tde(self, n_embeddings, use_raw=False):
         """Time-delay embedding (TDE).
 

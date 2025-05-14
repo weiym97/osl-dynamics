@@ -281,13 +281,13 @@ def test_filter_session():
     prepare_no_session = {'select': {'timepoints': [0, 2400]},
                           'filter': {'low_freq': cutoff_frequency}}
     data.prepare(prepare_no_session)
-    filtered_ts_no_session = np.squeeze(data.time_series()[0][:,0])
+    filtered_ts_no_session = np.squeeze(data.time_series()[0][:, 0])
 
     # Prepare with session input
     prepare_with_session = {'select': {'timepoints': [0, 2400]},
                             'filter': {'low_freq': cutoff_frequency, 'session_length': 1200}}
     data.prepare(prepare_with_session)
-    filtered_ts_with_session = np.squeeze(data.time_series()[0][:,0])
+    filtered_ts_with_session = np.squeeze(data.time_series()[0][:, 0])
 
     # Plot frequency spectrum
     def plot_frequency(signal, sampling_frequency, title):
@@ -309,7 +309,7 @@ def test_filter_session():
     plt.show()
 
     # Plot original, filtered without session, and filtered with session
-    #plot_frequency(time_series_combined, sampling_frequency, "Original Signal")
+    # plot_frequency(time_series_combined, sampling_frequency, "Original Signal")
     plot_frequency(filtered_ts_no_session, sampling_frequency, "Filtered Signal Without Session")
     plot_frequency(filtered_ts_with_session, sampling_frequency, "Filtered Signal With Session")
 
@@ -317,6 +317,7 @@ def test_filter_session():
     for file in os.listdir(save_dir):
         os.remove(os.path.join(save_dir, file))
     os.rmdir(save_dir)
+
 
 def test_filter_gaussian_weighted_least_squares_straight_line_fitting():
     """
@@ -332,7 +333,7 @@ def test_filter_gaussian_weighted_least_squares_straight_line_fitting():
 
     sampling_frequency = 0.1
 
-    time_series = np.array([1.0,2.0,3.0,4.0,5.0,1.0,2.0,3.0,4.0,5.0])
+    time_series = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 1.0, 2.0, 3.0, 4.0, 5.0])
     time_series_save = np.column_stack((time_series, time_series))
 
     # Save the combined time series for testing
@@ -342,15 +343,14 @@ def test_filter_gaussian_weighted_least_squares_straight_line_fitting():
     data = Data(save_dir, sampling_frequency=sampling_frequency)
 
     # Prepare with session input
-    prepare_with_session = {'filter': {'sigma': 40, 'session_length':5}}
+    prepare_with_session = {'filter': {'sigma': 40, 'session_length': 5}}
     data.prepare(prepare_with_session)
     filtered_ts_with_session = np.squeeze(data.time_series()[0][:, 0])
 
-    answer = time_series - np.array([2.91948343,  2.95023502,  3.        ,  3.04976498,  3.08051657,
-                                     2.91948343,  2.95023502,  3.        ,  3.04976498,  3.08051657])
+    answer = time_series - np.array([2.91948343, 2.95023502, 3., 3.04976498, 3.08051657,
+                                     2.91948343, 2.95023502, 3., 3.04976498, 3.08051657])
 
-    npt.assert_almost_equal(filtered_ts_with_session,answer)
-
+    npt.assert_almost_equal(filtered_ts_with_session, answer)
 
     # Clean up temporary files
     for file in os.listdir(save_dir):
@@ -387,7 +387,7 @@ def test_filter_gaussian_weighted_least_squares_straight_line_fitting():
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
-    sampling_frequency = 1/0.72
+    sampling_frequency = 1 / 0.72
 
     # Generate the fMRI-like signal
     time, signal = generate_fmri_like_signal(sampling_frequency=sampling_frequency)
@@ -406,12 +406,10 @@ def test_filter_gaussian_weighted_least_squares_straight_line_fitting():
 
     filtered_ts_with_session = np.squeeze(data.time_series()[0][:, 0])
 
-
-
     # Plot the signal
     plt.figure(figsize=(10, 4))
     plt.plot(time, signal, label='Simulated fMRI Signal', linewidth=1)
-    plt.plot(time,filtered_ts_with_session,label='After filtering',linewidth=1)
+    plt.plot(time, filtered_ts_with_session, label='After filtering', linewidth=1)
     plt.xlabel('Time (s)')
     plt.ylabel('Amplitude')
     plt.title('Synthetic fMRI-like Time Series')
@@ -419,3 +417,72 @@ def test_filter_gaussian_weighted_least_squares_straight_line_fitting():
     plt.show()
 
 
+def test_tica():
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    T = 100000
+    s1 = np.random.uniform(low=-np.sqrt(3), high=np.sqrt(3), size=T)
+    s2 = np.random.uniform(low=-np.sqrt(3), high=np.sqrt(3), size=T)
+    S = np.vstack([s1, s2])
+
+    # Mixing matrix
+    A = np.array([[2, 3],
+                  [2, 1]])
+    # Apply mixing
+    X = A @ S
+    input_1 = X[:, :int(T / 2)].T
+    input_2 = X[:, int(T / 2):].T
+
+    data = Data([input_1, input_2])
+    data.prepare({'tica': {'n_tica_components': 2}})
+
+    ts = np.concatenate(data.arrays,axis=0)
+
+    plt.scatter(X[0, :], X[1, :], s=5, alpha=0.5)
+    plt.xlabel('Component 1')
+    plt.ylabel('Component 2')
+    plt.title('Scatter plot of original data')
+    plt.grid(True)
+    plt.axis('equal')
+    plt.show()
+
+    plt.scatter(ts[:, 0], ts[:, 1], s=5, alpha=0.5)
+    plt.xlabel('Component 1')
+    plt.ylabel('Component 2')
+    plt.title('Scatter plot of temporal ICA components')
+    plt.grid(True)
+    plt.axis('equal')
+    plt.show()
+
+    A_true = A / np.linalg.norm(A, axis=1, keepdims=True)
+
+    A_est = data.tica_A
+
+    n_components = A_true.shape[1]
+    used_cols = set()
+
+    # Try to match each column of A_true with a column in A_est (up to sign)
+    for i in range(n_components):
+        best_match = None
+        best_score = -np.inf
+
+        for j in range(n_components):
+            if j in used_cols:
+                continue
+            sim = np.abs(np.dot(A_true[:, i], A_est[:, j]))  # cosine similarity
+            if sim > best_score:
+                best_score = sim
+                best_match = j
+
+        # Sign-correct the match
+        sign = np.sign(np.dot(A_true[:, i], A_est[:, best_match]))
+        corrected = sign * A_est[:, best_match]
+
+        # Assert closeness
+        try:
+            npt.assert_allclose(corrected, A_true[:, i], atol=1e-3)
+        except AssertionError as e:
+            raise AssertionError(f"Component {i} does not match after alignment. " +
+                                 f"output: {corrected}, answer: {A_true[:,i]}") from e
+        used_cols.add(best_match)
