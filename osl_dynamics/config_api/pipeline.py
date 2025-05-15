@@ -132,11 +132,11 @@ def run_pipeline(config, output_dir, data=None, extra_funcs=None):
         for name, kwargs in config.items():
             func = find_function(name, extra_funcs)
             if func is not None:
-                #try:
+                try:
                     _logger.info(f"{name}: {kwargs}")
                     func(data=data, output_dir=output_dir, **kwargs)
-                #except Exception as e:
-                #    _logger.exception(e)
+                except Exception as e:
+                    _logger.exception(e)
 
     # Delete the temporary directory created by the Data class
     if data is not None:
