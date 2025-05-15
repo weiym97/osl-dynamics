@@ -570,10 +570,7 @@ def train_hmm(
         from osl_dynamics.array_ops import estimate_gaussian_distribution
         _, covs = estimate_gaussian_distribution(ts, nonzero_means=config_kwargs.get("learn_means", True))
 
-        print(f'covs shape after estimation: {covs.shape}')
-
-        covs = np.stack([covs] * config_kwargs["n_states"], axis=0)
-        print(f'covs shape after stacking: {covs.shape}')
+        covs = np.stack([np.squeeze(covs)] * config_kwargs["n_states"], axis=0)
         config_kwargs["initial_covariances"] = covs
 
     config = hmm.Config(**config_kwargs)
