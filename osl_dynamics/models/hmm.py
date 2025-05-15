@@ -1564,19 +1564,7 @@ class Model(ModelBase):
                         self.config.n_channels
                     )
             else:
-                # Update 15th May 2025: The behaviour changes. We now estimate a static FC
-                # as the state covariances and broadcast that to all states
-                #session_covariances = self.get_covariances()
-
-                mean = np.mean(x, axis=0)
-                diff = x - mean
-                cov = np.dot(diff.T, diff) / x.shape[0]  # unweighted empirical covariance
-
-                # Add small epsilon for numerical stability
-                cov += self.config.covariances_epsilon * np.eye(self.config.n_channels)
-
-                # Broadcast the same cov to all states
-                session_covariances = np.stack([cov] * n_states, axis=0)
+                session_covariances = self.get_covariances()
 
             return session_means, session_covariances
 

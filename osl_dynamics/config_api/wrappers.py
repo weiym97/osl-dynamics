@@ -112,6 +112,19 @@ def build_hmm(
     }
     config_kwargs = override_dict_defaults(default_config_kwargs, config_kwargs)
     _logger.info(f"Using config_kwargs: {config_kwargs}")
+
+    # Deal with the special case of fixing the covariances to be static FC.
+    if not config_kwargs.get("learn_covariances", True) and config_kwargs.get("initial_covariances") == "sfc":
+        ts = data.time_series(prepared=True, concatenate=False)
+        ts = [ts[i] for i in data.keep]
+        ts = np.concatenate(ts, axis=0)
+
+        from osl_dynamics.array_ops import estimate_gaussian_distribution
+        _, covs = estimate_gaussian_distribution(ts, nonzero_means=config_kwargs.get("learn_means", True))
+
+        covs = np.stack([np.squeeze(covs)] * config_kwargs["n_states"], axis=0)
+        config_kwargs["initial_covariances"] = covs
+
     config = hmm.Config(**config_kwargs)
     model = hmm.Model(config)
     # Save trained model
