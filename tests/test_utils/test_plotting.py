@@ -353,6 +353,25 @@ def test_plot_matrices():
                   log_norm=True,
                   filename=os.path.join(plot_dir, 'test_matrices_log_normalization.png'))
 
+    # Test case 4: Six correlation-like matrices (50x50), shared color scale
+    rng = np.random.default_rng(0)
+    matrices6 = []
+    for _ in range(6):
+        X = rng.normal(size=(50, 200))  # variables x samples
+        C = np.corrcoef(X)  # symmetric, values in [-1, 1]
+        matrices6.append(C)
+
+    import matplotlib.pyplot as plt
+    plot_matrices(
+        matrices6,
+        main_title="Six correlation matrices (50x50)",
+        titles=[f"Matrix {i + 1}" for i in range(6)],
+        group_color_scale=True,
+        v_min=-1.0, v_max=1.0,
+        cmap="RdBu_r",
+        filename=os.path.join(plot_dir, "test_six_matrices.png"),
+    )
+
 def test_plot_connections():
     from osl_dynamics.utils.plotting import plot_connections
 

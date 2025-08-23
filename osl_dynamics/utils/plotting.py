@@ -1279,23 +1279,32 @@ def plot_matrices(
     if matrix.ndim != 3:
         raise ValueError("Must be a 3D array.")
     short, long, empty = rough_square_axes(len(matrix))
-    fig, axes = plt.subplots(ncols=short, nrows=long, squeeze=False)
+    fig, axes = plt.subplots(ncols=short, nrows=long, squeeze=False, constrained_layout=True)
 
+    # Titles default
     if titles is None:
         titles = [""] * len(matrix)
 
+    # Colormap
     cmap = matplotlib.cm.get_cmap(cmap).copy()
     cmap.set_bad(color=nan_color)
 
+    # If sharing color scale, compute once
+    if group_color_scale:
+        if v_min is None:
+            v_min = np.nanmin(matrix)
+        if v_max is None:
+            v_max = np.nanmax(matrix)
+        if log_norm and (v_min <= 0):
+            raise ValueError("log_norm=True requires all data > 0; got v_min <= 0.")
+
+    # Plot each grid
     for grid, axis, title in zip_longest(matrix, axes.ravel(), titles):
         if grid is None:
             axis.remove()
             continue
+
         if group_color_scale:
-            if v_min is None:
-                v_min = np.nanmin(matrix)
-            if v_max is None:
-                v_max = np.nanmax(matrix)
             if log_norm:
                 im = axis.matshow(
                     grid,
@@ -1306,32 +1315,31 @@ def plot_matrices(
                 im = axis.matshow(grid, vmin=v_min, vmax=v_max, cmap=cmap)
         else:
             if log_norm:
-                im = axis.matshow(
-                    grid,
-                    cmap=cmap,
-                    norm=matplotlib.colors.LogNorm(),
-                )
+                im = axis.matshow(grid, cmap=cmap, norm=matplotlib.colors.LogNorm())
             else:
                 im = axis.matshow(grid, cmap=cmap)
+
         axis.set_title(title)
         if grid.shape[0] > 30:
-            # Don't label the ticks if there's too many
-            axis.set_xticklabels([])
-            axis.set_yticklabels([])
+            axis.set_xticks([])
+            axis.set_yticks([])
 
+    # Shared vs per-axis colorbars
     if group_color_scale:
-        fig.subplots_adjust(right=0.8)
-        color_bar_axis = fig.add_axes([0.85, 0.15, 0.05, 0.7])
-        fig.colorbar(im, cax=color_bar_axis)
+        # Remove the old manual add_axes/subplots_adjust — not needed
+        fig.colorbar(im, ax=axes.ravel(), location="right", shrink=0.9, pad=0.02)
     else:
-        for axis in fig.axes:
-            pl = axis.get_images()[0]
+        for axis in axes.ravel():
+            images = axis.get_images()
+            if not images:
+                continue
+            pl = images[0]
             divider = make_axes_locatable(axis)
             cax = divider.append_axes("right", size="5%", pad=0.05)
             plt.colorbar(pl, cax=cax)
-        plt.tight_layout()
 
-    fig.suptitle(main_title)
+    if main_title:
+        fig.suptitle(main_title)
 
     if filename is not None:
         save(fig, filename)
