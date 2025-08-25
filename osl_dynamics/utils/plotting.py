@@ -1273,6 +1273,16 @@ def plot_matrices(
         Matplotlib axis object(s). Only returned if :code:`ax=None` and
         :code:`filename=None`.
     """
+
+    plt.rcParams.update({
+        "axes.titlesize": 17,
+        "axes.labelsize": 17,
+        "xtick.labelsize": 15,
+        "ytick.labelsize": 15,
+        "figure.titlesize": 25,
+        "legend.fontsize": 18,
+    })
+
     matrix = np.array(matrix)
     if matrix.ndim == 2:
         matrix = matrix[None, :]
