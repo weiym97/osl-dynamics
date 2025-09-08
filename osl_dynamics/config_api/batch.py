@@ -1067,7 +1067,8 @@ class BatchAnalysis:
                 plot_mode_pairing(cor_reorder,
                                   order,
                                   #title=f'Alpha correlation',
-                                  filename=f'{plot_dir}/alpha_ground_truth.svg'
+                                  filename=f'{plot_dir}/alpha_ground_truth.svg',
+                                  sns_kwargs = {"vmin": -1, "vmax": 1, "center": 0}
                                   )
             else:
                 plot_mode_no_pairing(riem,
@@ -1076,7 +1077,8 @@ class BatchAnalysis:
                                      )
                 plot_mode_no_pairing(cor,
                                      #title='Alpha correlation',
-                                     filename=f'{plot_dir}/alpha_ground_truth.svg'
+                                     filename=f'{plot_dir}/alpha_ground_truth.svg',
+                                     sns_kwargs = {"vmin": -1, "vmax": 1, "center": 0}
                                      )
 
             
