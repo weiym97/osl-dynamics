@@ -2951,7 +2951,7 @@ def plot_box(
             med_str = f"{med:.6f}" if np.isfinite(med) else "nan"
             lines.append(f"{lbl_str}\t{n}\t{m_str}\t{s_str}\t{med_str}{flag}")
         txt_summary = "\n".join(lines)
-
+        '''
         # JSON payload
         per_label = []
         for i, (lbl, n, m, s, med) in enumerate(zip(labels, ns, means, stds, medians)):
@@ -2979,7 +2979,7 @@ def plot_box(
             },
             "groups": per_label,
         }
-
+        '''
         # Save alongside the figure: strip trailing .pdf (case-insensitive)
         if filename is not None:
             base = re.sub(r"\.pdf$", "", filename, flags=re.IGNORECASE)
@@ -2988,8 +2988,8 @@ def plot_box(
                 os.makedirs(out_dir, exist_ok=True)
             with open(base + ".txt", "w", encoding="utf-8") as f_txt:
                 f_txt.write(txt_summary + "\n")
-            with open(base + ".json", "w", encoding="utf-8") as f_json:
-                json.dump(summary_dict, f_json, indent=2)
+            #with open(base + ".json", "w", encoding="utf-8") as f_json:
+            #    json.dump(summary_dict, f_json, indent=2)
 
     if inset_start_index is not None:
         small_ax = fig.add_axes([0.65, 0.3, 0.3, 0.3])  # Adjust these values as needed for positioning
