@@ -3,6 +3,7 @@
 """
 
 import logging
+import re, os, json
 import warnings
 from itertools import zip_longest
 
@@ -2920,6 +2921,74 @@ def plot_box(
                     ha='center',
                     va='top'
                 )
+        best_index_for_report = candidate_index if (p_value is not None) else max_median_index
+
+        # Per-group stats (NaN-safe); use sample std when n>1
+        means = [np.nanmean(d) for d in data]
+        stds = [np.nanstd(d, ddof=1) if np.sum(~np.isnan(d)) > 1 else np.nan for d in data]
+        ns = [np.sum(~np.isnan(d)) for d in data]
+        medians = [np.nanmedian(d) for d in data]
+
+        # Human-readable TXT
+        lines = []
+        crit = f"non-inferiority (p>{p_value})" if p_value is not None else "max median"
+        best_label = labels[best_index_for_report]
+        lines.append("=== Bi-CV log-likelihood summary ===")
+        lines.append(f"Best by {crit}: {best_label} "
+                     f"(mean={means[best_index_for_report]:.6f}, "
+                     f"std={stds[best_index_for_report]:.6f}, "
+                     f"n={ns[best_index_for_report]})")
+        if p_candidate is not None and candidate_index != max_median_index:
+            lines.append(f"(Selected simpler model index={candidate_index + 1} with p={p_candidate:.2g})")
+        lines.append("")
+        lines.append("Label\tN\tMean\t\tStd\t\tMedian")
+        for i, (lbl, n, m, s, med) in enumerate(zip(labels, ns, means, stds, medians)):
+            lbl_str = str(lbl) if lbl is not None else f"idx {i + 1}"
+            flag = "  <-- BEST" if i == best_index_for_report else ""
+            m_str = f"{m:.6f}" if np.isfinite(m) else "nan"
+            s_str = f"{s:.6f}" if np.isfinite(s) else "nan"
+            med_str = f"{med:.6f}" if np.isfinite(med) else "nan"
+            lines.append(f"{lbl_str}\t{n}\t{m_str}\t{s_str}\t{med_str}{flag}")
+        txt_summary = "\n".join(lines)
+
+        # JSON payload
+        per_label = []
+        for i, (lbl, n, m, s, med) in enumerate(zip(labels, ns, means, stds, medians)):
+            per_label.append({
+                "index": i,
+                "label": lbl,
+                "n": int(n),
+                "mean": None if not np.isfinite(m) else float(m),
+                "std": None if not np.isfinite(s) else float(s),
+                "median": None if not np.isfinite(med) else float(med),
+                "is_best": (i == best_index_for_report),
+            })
+        summary_dict = {
+            "criterion": crit,
+            "p_value_used": p_value is not None,
+            "p_candidate": None if p_candidate is None else float(p_candidate),
+            "best": {
+                "index": int(best_index_for_report),
+                "label": best_label,
+                "n": int(ns[best_index_for_report]),
+                "mean": None if not np.isfinite(means[best_index_for_report]) else float(means[best_index_for_report]),
+                "std": None if not np.isfinite(stds[best_index_for_report]) else float(stds[best_index_for_report]),
+                "median": None if not np.isfinite(medians[best_index_for_report]) else float(
+                    medians[best_index_for_report]),
+            },
+            "groups": per_label,
+        }
+
+        # Save alongside the figure: strip trailing .pdf (case-insensitive)
+        if filename is not None:
+            base = re.sub(r"\.pdf$", "", filename, flags=re.IGNORECASE)
+            out_dir = os.path.dirname(base)
+            if out_dir:
+                os.makedirs(out_dir, exist_ok=True)
+            with open(base + ".txt", "w", encoding="utf-8") as f_txt:
+                f_txt.write(txt_summary + "\n")
+            with open(base + ".json", "w", encoding="utf-8") as f_json:
+                json.dump(summary_dict, f_json, indent=2)
 
     if inset_start_index is not None:
         small_ax = fig.add_axes([0.65, 0.3, 0.3, 0.3])  # Adjust these values as needed for positioning
