@@ -2887,12 +2887,13 @@ def plot_box(
         ax.text(max_median_index + 1, ax.get_ylim()[1], '*', **text_kwargs)
         # ax.text(max_median_index + 1, bp['caps'][max_median_index * 2 + 1].get_data()[1], '*', ha='center', va='bottom')
 
+        candidate_index = max_median_index
+        p_candidate = None  # store the associated p-value for annotation
         # If p_value threshold is given, find the smallest number of states
         # that is NOT significantly worse than the best-performing model
         if p_value is not None:
             best_data = np.array(data[max_median_index])
-            candidate_index = max_median_index
-            p_candidate = None  # store the associated p-value for annotation
+
 
             for i in range(max_median_index - 1, -1, -1):
                 current_data = np.array(data[i])
