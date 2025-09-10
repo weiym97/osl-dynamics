@@ -912,8 +912,9 @@ class BatchAnalysis:
         else:
             return mean_diagonal
 
-    def post_hoc_analysis(self,model='hmm',n_state=6,sampling_frequency=1.389,ground_truth_dir=None):
-        save_dir = (f'{self.config_path}/{model}_state_{n_state}/repeat_1/')
+    def post_hoc_analysis(self,model='hmm',n_state=6,sampling_frequency=1.389,save_dir=None,ground_truth_dir=None):
+        if save_dir is None:
+            save_dir = (f'{self.config_path}/{model}_state_{n_state}/repeat_1/')
 
         plot_dir = f'{self.analysis_path}/{model}_state_{n_state}/'
 
