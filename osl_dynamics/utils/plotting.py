@@ -2395,6 +2395,9 @@ def plot_mode_pairing(
         sns_kwargs=None,
         ax=None,
         filename=None,
+        annotate_diagonal: bool = False,
+        annot_fmt: str = ".2f",
+        annot_fontsize: int = 12,
 
 ):
     """
@@ -2470,6 +2473,33 @@ def plot_mode_pairing(
 
     # Create a heatmap of the correlation matrix
     ax = sns.heatmap(data=metrics, ax=ax, **sns_kwargs)
+
+    if annotate_diagonal:
+        fmt = annot_fmt
+        mappable = ax.collections[0]
+        cmap = mappable.cmap
+        norm = mappable.norm
+
+        def _text_color_for_value(v):
+            rgba = cmap(norm(v))
+            r, g, b = rgba[0], rgba[1], rgba[2]
+            lum = 0.299 * r + 0.587 * g + 0.114 * b
+            return "white" if lum < 0.5 else "black"
+
+        n_rows, n_cols = metrics.shape[0], metrics.shape[1]
+        for idx in range(min(n_rows, n_cols)):
+            val = metrics[idx, idx]
+            txt = format(val, fmt)
+            ax.text(
+                idx + 0.5,
+                idx + 0.5,
+                txt,
+                ha="center",
+                va="center",
+                fontsize=annot_fontsize,
+                color=_text_color_for_value(val),
+                fontweight="bold",
+            )
     # Set xticks and yticks
     if indices is not None:
         ax.set_xticks(np.arange(len(indices["col"])) + 0.5, np.array(indices["col"]) + 1, fontsize=20)
