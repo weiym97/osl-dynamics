@@ -2832,6 +2832,11 @@ def plot_box(
         Axis object to plot on.
     filename : str, optional
         Output filename.
+    xtick_step : int, optional
+        Step for x-axis tick placement. Only every `xtick_step`-th label will be
+        shown on the x-axis (e.g. `xtick_step=2` shows ticks at positions 1, 3, 5, ...).
+        Applies to the main plot and — if `inset_start_index` is provided — to the inset
+        plot as well. Defaults to 2.
 
     Returns
     -------
@@ -3037,8 +3042,8 @@ def plot_box(
 
     # set x-ticks
     # Set x-ticks every two positions
-    xtick_positions = list(range(1, len(labels) + 1, 2))  # 1, 3, 5, ...
-    xtick_labels = [labels[i] for i in range(0, len(labels), 2)]  # label0, label2, label4, ...
+    xtick_positions = list(range(1, len(labels) + 1, xtick_step))  # 1, 3, 5, ...
+    xtick_labels = [labels[i] for i in range(0, len(labels), xtick_step)]  # label0, label2, label4, ...
 
     ax.set_xticks(xtick_positions)
     ax.set_xticklabels(xtick_labels)
