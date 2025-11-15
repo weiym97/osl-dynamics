@@ -436,8 +436,8 @@ def fisher_z_correlation(M1, M2):
     else:
         logger.warning(
             "fisher_z_correlation called with N==2; returning absolute difference of"
-            " the single off-diagonal elements (|r1 - r2|).")
-        return float(abs(v1.item() - v2.item()))
+            " the single off-diagonal elements (1-|r1 - r2|).")
+        return 1-float(abs(v1.item() - v2.item()))
 
 
 def pairwise_fisher_z_correlations(matrices):
