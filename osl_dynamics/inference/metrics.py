@@ -3,6 +3,8 @@
 """
 
 import warnings
+import logging
+logger = logging.getLogger(__name__)
 import numpy as np
 from scipy.linalg import eigvalsh
 from sklearn.metrics import confusion_matrix as sklearn_confusion_matrix
@@ -425,12 +427,17 @@ def fisher_z_correlation(M1, M2):
     v1 = M1[upper_indices]
     v2 = M2[upper_indices]
 
-    # Fisher-z-transformation
-    z1 = fisher_z_transform(v1)
-    z2 = fisher_z_transform(v2)
-
-    # return the correlation
-    return np.cov(z1, z2, ddof=0)[0, 1] / (np.std(z1, ddof=0) * np.std(z2, ddof=0))
+    if N >= 3:
+        # Fisher-z-transformation
+        z1 = fisher_z_transform(v1)
+        z2 = fisher_z_transform(v2)
+        # return the correlation
+        return np.cov(z1, z2, ddof=0)[0, 1] / (np.std(z1, ddof=0) * np.std(z2, ddof=0))
+    else:
+        logger.warning(
+            "fisher_z_correlation called with N==2; returning absolute difference of"
+            " the single off-diagonal elements (|r1 - r2|).")
+        return float(abs(v1.item() - v2.item()))
 
 
 def pairwise_fisher_z_correlations(matrices):
