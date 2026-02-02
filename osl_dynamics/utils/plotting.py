@@ -2965,6 +2965,11 @@ def plot_box(
         ns = [np.sum(~np.isnan(d)) for d in data]
         medians = [np.nanmedian(d) for d in data]
 
+        q1s = [np.nanpercentile(d, 25) if np.sum(~np.isnan(d))>0 else np.nan for d in data]
+        q3s = [np.nanpercentile(d, 75) if np.sum(~np.isnan(d))>0 else np.nan for d in data]
+        mins = [np.nanmin(d) if np.sum(~np.isnan(d))>0 else np.nan for d in data]
+        maxs = [np.nanmax(d) if np.sum(~np.isnan(d))>0 else np.nan for d in data]
+
         # Human-readable TXT
         lines = []
         crit = f"non-inferiority (p>{p_value})" if p_value is not None else "max median"
@@ -2986,19 +2991,24 @@ def plot_box(
             med_str = f"{med:.6f}" if np.isfinite(med) else "nan"
             lines.append(f"{lbl_str}\t{n}\t{m_str}\t{s_str}\t{med_str}{flag}")
         txt_summary = "\n".join(lines)
-        '''
-        # JSON payload
+        
         per_label = []
-        for i, (lbl, n, m, s, med) in enumerate(zip(labels, ns, means, stds, medians)):
+        for i, (lbl, n, m, s, med, q1, q3, mn, mx) in enumerate(zip(labels, ns, means, stds, medians, q1s, q3s, mins, maxs)):
+            # safe convert floats
             per_label.append({
-                "index": i,
-                "label": lbl,
+                "index": int(i),
+                "label": None if lbl is None else str(lbl),
                 "n": int(n),
                 "mean": None if not np.isfinite(m) else float(m),
                 "std": None if not np.isfinite(s) else float(s),
                 "median": None if not np.isfinite(med) else float(med),
+                "q1": None if not np.isfinite(q1) else float(q1),
+                "q3": None if not np.isfinite(q3) else float(q3),
+                "min": None if not np.isfinite(mn) else float(mn),
+                "max": None if not np.isfinite(mx) else float(mx),
                 "is_best": (i == best_index_for_report),
             })
+
         summary_dict = {
             "criterion": crit,
             "p_value_used": p_value is not None,
@@ -3009,22 +3019,23 @@ def plot_box(
                 "n": int(ns[best_index_for_report]),
                 "mean": None if not np.isfinite(means[best_index_for_report]) else float(means[best_index_for_report]),
                 "std": None if not np.isfinite(stds[best_index_for_report]) else float(stds[best_index_for_report]),
-                "median": None if not np.isfinite(medians[best_index_for_report]) else float(
-                    medians[best_index_for_report]),
-            },
+                "median": None if not np.isfinite(medians[best_index_for_report]) else float(medians[best_index_for_report]),
+                "q1": None if not np.isfinite(q1s[best_index_for_report]) else float(q1s[best_index_for_report]),
+                "q3": None if not np.isfinite(q3s[best_index_for_report]) else float(q3s[best_index_for_report]),
+                },
             "groups": per_label,
-        }
-        '''
+            }
         # Save alongside the figure: strip trailing .pdf (case-insensitive)
         if filename is not None:
-            base = re.sub(r"\.pdf$", "", filename, flags=re.IGNORECASE)
+            base, _ = os.path.splitext(filename)
             out_dir = os.path.dirname(base)
             if out_dir:
                 os.makedirs(out_dir, exist_ok=True)
             with open(base + ".txt", "w", encoding="utf-8") as f_txt:
                 f_txt.write(txt_summary + "\n")
-            #with open(base + ".json", "w", encoding="utf-8") as f_json:
-            #    json.dump(summary_dict, f_json, indent=2)
+            # Write machine-readable JSON
+            with open(base + ".json", "w", encoding="utf-8") as f_json:
+                json.dump(summary_dict, f_json, indent=2)
 
     if inset_start_index is not None:
         small_ax = fig.add_axes([0.65, 0.3, 0.3, 0.3])  # Adjust these values as needed for positioning
