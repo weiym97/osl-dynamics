@@ -2991,7 +2991,7 @@ def plot_box(
             med_str = f"{med:.6f}" if np.isfinite(med) else "nan"
             lines.append(f"{lbl_str}\t{n}\t{m_str}\t{s_str}\t{med_str}{flag}")
         txt_summary = "\n".join(lines)
-        
+        '''
         per_label = []
         for i, (lbl, n, m, s, med, q1, q3, mn, mx) in enumerate(zip(labels, ns, means, stds, medians, q1s, q3s, mins, maxs)):
             # safe convert floats
@@ -3008,7 +3008,7 @@ def plot_box(
                 "max": None if not np.isfinite(mx) else float(mx),
                 "is_best": (i == best_index_for_report),
             })
-
+        '''
         summary_dict = {
             "criterion": crit,
             "p_value_used": p_value is not None,
@@ -3023,7 +3023,7 @@ def plot_box(
                 "q1": None if not np.isfinite(q1s[best_index_for_report]) else float(q1s[best_index_for_report]),
                 "q3": None if not np.isfinite(q3s[best_index_for_report]) else float(q3s[best_index_for_report]),
                 },
-            "groups": per_label,
+            #"groups": per_label,
             }
         # Save alongside the figure: strip trailing .pdf (case-insensitive)
         if filename is not None:
@@ -3071,3 +3071,124 @@ def plot_box(
         save(fig, filename, tight_layout=True)
     elif create_fig:
         return fig, ax
+
+def plot_summary_models_median_iqr(model_json_map, save_dir,
+                                   figsize=(4.0, 4.0),
+                                   fontsize=12,
+                                   marker_size=60,
+                                   line_width=2.0,
+                                   xtick_rotation=0,
+                                   y_label="BCV log-likelihood",
+                                   title=None,
+                                   cmap_name="tab10",
+                                   save_name_base="summary_models_median_iqr"):
+    """
+    Plot a compact comparison across models using each model's 'best' summary JSON.
+
+    Parameters
+    ----------
+    model_json_map : dict
+        Mapping {model_name: json_filepath}. Each JSON must contain a top-level "best" dict
+        with keys: index, label, n, mean, std, median, q1, q3 (p_candidate optional).
+    save_dir : str
+        Directory to save output files (PNG and PDF).
+    figsize : tuple
+        Figure width and height in inches (compact by default for multi-panel layouts).
+    fontsize : int
+        Base font size for labels/ticks.
+    marker_size : float
+        Scatter marker size for medians.
+    line_width : float
+        Line width for IQR vertical lines.
+    xtick_rotation : int
+        Rotation angle for x tick labels.
+    y_label : str
+        Y-axis label.
+    title : str or None
+        Optional overall title for the figure.
+    cmap_name : str
+        Matplotlib colormap name for point colors (will cycle if more than one model).
+    save_name_base : str
+        Basename (without extension) for saved files.
+    """
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Collect model-level summaries (preserve insertion order)
+    model_names = []
+    medians = []
+    q1s = []
+    q3s = []
+    labels_for_tick = []
+    ns = []
+    p_candidates = []  # optional
+    colors = []
+
+    cmap = plt.get_cmap(cmap_name)
+
+    for i, (model_name, json_path) in enumerate(model_json_map.items()):
+        model_names.append(model_name)
+        if not os.path.exists(json_path):
+            raise FileNotFoundError(f"JSON for model '{model_name}' not found: {json_path}")
+        with open(json_path, "r", encoding="utf-8") as f:
+            js = json.load(f)
+
+        if "best" not in js or not isinstance(js["best"], dict):
+            raise ValueError(f"JSON for model '{model_name}' must contain a top-level 'best' dict.")
+        b = js["best"]
+
+        med = float(b.get("median", np.nan))
+        low = float(b.get("q1", np.nan))
+        high = float(b.get("q3", np.nan))
+        lab = b.get("label", None)  # model order label (e.g., number of states)
+        n = int(b.get("n", 0)) if b.get("n") is not None else 0
+        p_cand = js.get("p_candidate", None)
+
+        medians.append(med)
+        q1s.append(low)
+        q3s.append(high)
+        labels_for_tick.append(f"{model_name}\n(k={lab})" if lab is not None else f"{model_name}")
+        ns.append(n)
+        p_candidates.append(p_cand)
+        colors.append(cmap(i % cmap.N))
+
+    # Convert to arrays for easier math
+    medians = np.array(medians, dtype=float)
+    q1s = np.array(q1s, dtype=float)
+    q3s = np.array(q3s, dtype=float)
+
+    # Build figure
+    fig, ax = plt.subplots(figsize=figsize)
+    x = np.arange(len(model_names))
+
+    # Plot IQR lines and median points
+    for i in range(len(model_names)):
+        ax.vlines(x[i], q1s[i], q3s[i], linewidth=line_width, color=colors[i], zorder=1)
+        ax.scatter(x[i], medians[i], s=marker_size, color=colors[i], zorder=2, edgecolor="k", linewidth=0.5)
+
+    # Annotate p_candidate if present (placed a little below the q1)
+    y_min, y_max = ax.get_ylim()
+    y_span = y_max - y_min if (y_max - y_min) != 0 else 1.0
+    for i, p in enumerate(p_candidates):
+        if p is not None:
+            # place p-value text slightly below q1
+            text_y = q1s[i] - 0.08 * y_span
+            ax.text(x[i], text_y, f"p={p:.2g}", fontsize=max(8, fontsize-2), ha="center", va="top")
+
+    # X ticks and labels
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels_for_tick, fontsize=fontsize-2, rotation=xtick_rotation)
+    ax.tick_params(axis="y", labelsize=fontsize-1)
+    ax.set_ylabel(y_label, fontsize=fontsize)
+    if title is not None:
+        ax.set_title(title, fontsize=fontsize + 1)
+
+    # Tight layout and small padding so it fits panel A,B,C,D nicely
+    plt.tight_layout()
+
+    # Save files
+    out_svg = os.path.join(save_dir, save_name_base + ".svg")
+    out_pdf = os.path.join(save_dir, save_name_base + ".pdf")
+    fig.savefig(out_svg, bbox_inches="tight")
+    fig.savefig(out_pdf, bbox_inches="tight")
+    plt.close(fig)
+
