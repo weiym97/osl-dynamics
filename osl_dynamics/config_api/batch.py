@@ -1358,8 +1358,8 @@ class BatchAnalysis:
             spatial_map = MapIO(f'{self.spatial_map}/melodic_IC.dscalar.nii',dim2='mode').to_array()
             r1_approxs_surface = spatial_map@r1_approxs.T
             sum_of_degrees_surface = spatial_map@sum_of_degrees.T
-            mapIO(r1_approxs_surface,dim2='mode').to_cifti(f'{plot_dir}/r1_approx_FC_surface_map.dscalar.nii')
-            mapIO(sum_of_degrees_surface,dim2='mode').to_cifti(f'{plot_dir}/sum_of_degree_surface_map.dscalar.nii')
+            MapIO(r1_approxs_surface,dim2='mode').save_cifti(f'{plot_dir}/r1_approx_FC_surface_map.dscalar.nii')
+            MapIO(sum_of_degrees_surface,dim2='mode').save_cifti(f'{plot_dir}/sum_of_degree_surface_map.dscalar.nii')
 
         
 
