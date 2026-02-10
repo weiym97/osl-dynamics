@@ -30,6 +30,7 @@ from ..analysis.workbench import render
 from ..utils.misc import override_dict_defaults
 from ..utils.plotting import plot_box, plot_alpha, plot_violin, plot_mode_pairing,plot_mode_no_pairing, plot_matrices, plot_brain_surface
 from ..array_ops import cov2corr, first_eigenvector
+from profumo.io import MapIO
 
 
 
@@ -1347,11 +1348,19 @@ class BatchAnalysis:
             corr = corrs[i,:,:]
             r1_approxs.append(first_eigenvector(corr))
             np.fill_diagonal(corr,0)
-            sum_of_degrees.append(np.sum(corr,axis=1))
+            sum_of_degrees.append(np.sum(np.abs(corr),axis=1))
         r1_approxs = np.array(r1_approxs)
         sum_of_degrees = np.array(sum_of_degrees)
-        np.save(f'{save_dir}r1_approx_FC.npy', r1_approxs)
-        np.save(f'{save_dir}sum_of_degree.npy',sum_of_degrees)
+        np.save(f'{plot_dir}/r1_approx_FC.npy', r1_approxs)
+        np.save(f'{plot_dir}/sum_of_degree.npy',sum_of_degrees)
+
+        if self.spatial_map is not None:
+            spatial_map = MapIO(f'{self.spatial_map}/melodic_IC.dscalar.nii',dim2='mode').to_array()
+            r1_approxs_surface = spatial_map@r1_approxs.T
+            sum_of_degrees_surface = spatial_map@sum_of_degrees.T
+            mapIO(r1_approxs_surface,dim2='mode').to_cifti(f'{plot_dir}/r1_approx_FC_surface_map.dscalar.nii')
+            mapIO(sum_of_degrees_surface,dim2='mode').to_cifti(f'{plot_dir}/sum_of_degree_surface_map.dscalar.nii')
+
         
 
 
