@@ -778,5 +778,8 @@ def first_eigenvector(matrix: np.ndarray):
     from scipy.sparse.linalg import eigsh
     _, eigenvector = eigsh(matrix,k=1,which='LM')
     eigenvector = np.squeeze(eigenvector)
+
+    if np.mean(eigenvector) < 0:
+        eigenvector = -eigenvector
     # Ensure that the returned eigenvector has norm 1
     return eigenvector / (np.linalg.norm(eigenvector) + 1e-10)
