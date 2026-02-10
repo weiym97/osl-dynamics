@@ -14,6 +14,7 @@ import time
 import json
 from itertools import product
 import copy
+from pathlib import Path
 
 import yaml
 import numpy as np
@@ -1342,11 +1343,11 @@ class BatchAnalysis:
         #Rank-one approximation
         r1_approxs = []
         sum_of_degrees = []
-        for i in range(len(correlations)):
-            correlation = correlations[i,:,:]
-            r1_approxs.append(first_eigenvector(correlation))
-            np.fill_diagonal(correlation,0)
-            sum_of_degrees.append(np.sum(correlation,axis=1))
+        for i in range(len(corrs)):
+            corr = corrs[i,:,:]
+            r1_approxs.append(first_eigenvector(corr))
+            np.fill_diagonal(corr,0)
+            sum_of_degrees.append(np.sum(corr,axis=1))
         r1_approxs = np.array(r1_approxs)
         sum_of_degrees = np.array(sum_of_degrees)
         np.save(f'{save_dir}r1_approx_FC.npy', r1_approxs)
