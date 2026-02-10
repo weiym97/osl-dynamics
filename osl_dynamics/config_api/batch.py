@@ -459,6 +459,7 @@ class BatchAnalysis:
         self.indexparser = IndexParser(self.config_root)
         self.config_list = pd.read_csv(os.path.join(config_path, 'config_list.csv'), index_col=0)
         self.analysis_path = os.path.join(config_path, 'analysis')
+        self.spatial_map = self.config_root.get('spatial_map', None)
         if not os.path.exists(self.analysis_path):
             os.makedirs(self.analysis_path)
 
@@ -1326,6 +1327,31 @@ class BatchAnalysis:
         # Save the plot
         plt.savefig(f'{plot_dir}/ll_comparison.pdf', bbox_inches="tight")
         plt.close()
+
+    def plot_FC_brain_map(self,model='hmm',n_state=6,sampling_frequency=1.389,save_dir=None):
+        if save_dir is None:
+            save_dir = (f'{self.config_path}/{model}_state_{n_state}/repeat_1/')
+
+        # Create plot directory
+        plot_dir = Path(f'{self.analysis_path}/{model}_state_{n_state}/')
+        plot_dir.mkdir(parents=True, exist_ok=True)
+
+        covs = np.load(f'{save_dir}/inf_params/covs.npy')
+        corrs = cov2corr(covs)
+
+        #Rank-one approximation
+        r1_approxs = []
+        sum_of_degrees = []
+        for i in range(len(correlations)):
+            correlation = correlations[i,:,:]
+            r1_approxs.append(first_eigenvector(correlation))
+            np.fill_diagonal(correlation,0)
+            sum_of_degrees.append(np.sum(correlation,axis=1))
+        r1_approxs = np.array(r1_approxs)
+        sum_of_degrees = np.array(sum_of_degrees)
+        np.save(f'{save_dir}r1_approx_FC.npy', r1_approxs)
+        np.save(f'{save_dir}sum_of_degree.npy',sum_of_degrees)
+        
 
 
 
