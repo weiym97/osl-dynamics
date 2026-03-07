@@ -259,6 +259,91 @@ class Model(MarkovStateInferenceModelBase):
     # PROFUMO integration: M-step with pre-computed state time courses
     # -------------------------------------------------------------------------
 
+    def get_alpha(self, dataset, concatenate=False, remove_edge_effects=False,
+                  **kwargs):
+        """Get state probabilities.
+
+        Extends the base-class implementation to also accept a plain list of
+        ``(T_i, n_channels)`` numpy arrays, which is the format passed by
+        ``HMMWrapper::get_state_timecourses`` from the C++ side.
+
+        When a list of numpy arrays is detected, each session is manually
+        sliced into non-overlapping ``sequence_length`` windows, passed
+        through the model's Baum-Welch layer, and the resulting gamma
+        sequences are concatenated back to ``(T_i, n_states)`` per session.
+
+        All other input types (``osl_dynamics.data.Data``,
+        ``tf.data.Dataset``) are forwarded to the base-class implementation
+        unchanged.
+
+        Parameters
+        ----------
+        dataset : list of np.ndarray, tf.data.Dataset, or osl_dynamics.data.Data
+            If a list of ``(T_i, n_channels)`` float32 arrays, each element
+            is one session.
+        concatenate : bool, optional
+            Concatenate across sessions into a single array.
+        remove_edge_effects : bool, optional
+            Passed through to the base-class implementation for non-list inputs.
+
+        Returns
+        -------
+        alpha : list of np.ndarray or np.ndarray
+            State probabilities, each shaped ``(T_i, n_states)``, or
+            concatenated to ``(T_total, n_states)`` if ``concatenate=True``.
+        """
+        # Fast-path: list of numpy arrays (HMMWrapper call convention).
+        if (isinstance(dataset, list) and len(dataset) > 0
+                and isinstance(dataset[0], np.ndarray)):
+            seq_len    = self.config.sequence_length
+            n_states   = self.config.n_states
+            n_channels = self.config.n_channels
+
+            alpha = []
+            for x_sess in dataset:
+                T = x_sess.shape[0]
+                n_seq = T // seq_len
+                if n_seq == 0:
+                    # Session shorter than one window — pad with zeros.
+                    alpha.append(np.zeros((T, n_states), dtype=np.float32))
+                    continue
+
+                # Slice into (n_seq, seq_len, n_channels) batches.
+                x_seqs = (x_sess[: n_seq * seq_len]
+                          .reshape(n_seq, seq_len, n_channels)
+                          .astype(np.float32))
+
+                tf_ds = (tf.data.Dataset
+                         .from_tensor_slices({"data": x_seqs})
+                         .batch(self.config.batch_size)
+                         .prefetch(tf.data.AUTOTUNE))
+
+                # Collect gamma over all batches, then flatten sequences.
+                gamma_seqs = []
+                for batch in tf_ds:
+                    pred = self.predict(batch, **kwargs)
+                    gamma_seqs.append(pred["gamma"])   # (B, seq_len, K)
+                # gamma_seqs → (n_seq, seq_len, K) → (n_seq*seq_len, K)
+                gamma_full = np.concatenate(gamma_seqs, axis=0).reshape(
+                    n_seq * seq_len, n_states)
+
+                # Pad remainder rows with the last valid gamma row.
+                remainder = T - n_seq * seq_len
+                if remainder > 0:
+                    pad = np.tile(gamma_full[-1:], (remainder, 1))
+                    gamma_full = np.concatenate([gamma_full, pad], axis=0)
+
+                alpha.append(gamma_full)
+
+            if concatenate or len(alpha) == 1:
+                return np.concatenate(alpha, axis=0)
+            return alpha
+
+        # Default path: Data object or tf.data.Dataset.
+        return super().get_alpha(dataset, concatenate=concatenate,
+                                 remove_edge_effects=remove_edge_effects,
+                                 **kwargs)
+
     def fit_with_gamma(self, dataset, gammas, epochs=None, verbose=1):
         """Fit the group model M-step using pre-computed state time courses.
 
@@ -342,9 +427,9 @@ class Model(MarkovStateInferenceModelBase):
         ll_loss_layer = self.model.get_layer("ll_loss")
 
         data_in  = tf.keras.layers.Input(
-            shape=(seq_len, n_channels), dtype=tf.float32, name="m_data")
+            shape=(seq_len, n_channels), dtype=tf.float32, name="data")
         gamma_in = tf.keras.layers.Input(
-            shape=(seq_len, n_states), dtype=tf.float32, name="m_gamma")
+            shape=(seq_len, n_states), dtype=tf.float32, name="gamma")
 
         mu      = means_layer(data_in)
         D       = covs_layer(data_in)
@@ -370,8 +455,10 @@ class Model(MarkovStateInferenceModelBase):
         history  = {"loss": []}
 
         for epoch in range(epochs):
-            lr = self.config.learning_rate * np.exp(-lr_decay * epoch)
-            tf.keras.backend.set_value(obs_model.optimizer.learning_rate, lr)
+            lr = float(self.config.learning_rate * np.exp(-lr_decay * epoch))
+            # Keras 3: learning_rate is a float property, not a tf.Variable.
+            # Assign via the property setter (works for Keras 2 and 3).
+            obs_model.optimizer.learning_rate = lr
 
             h = obs_model.fit(tf_dataset, epochs=1, verbose=0)
             loss = h.history["loss"][0]
@@ -705,88 +792,3 @@ class Model(MarkovStateInferenceModelBase):
         self.config.learning_rate = original_learning_rate
 
         return alpha, np.array(means), np.array(covariances)
-    
-    def get_alpha(self, dataset, concatenate=False, remove_edge_effects=False,
-                  **kwargs):
-        """Get state probabilities.
-
-        Extends the base-class implementation to also accept a plain list of
-        ``(T_i, n_channels)`` numpy arrays, which is the format passed by
-        ``HMMWrapper::get_state_timecourses`` from the C++ side.
-
-        When a list of numpy arrays is detected, each session is manually
-        sliced into non-overlapping ``sequence_length`` windows, passed
-        through the model's Baum-Welch layer, and the resulting gamma
-        sequences are concatenated back to ``(T_i, n_states)`` per session.
-
-        All other input types (``osl_dynamics.data.Data``,
-        ``tf.data.Dataset``) are forwarded to the base-class implementation
-        unchanged.
-
-        Parameters
-        ----------
-        dataset : list of np.ndarray, tf.data.Dataset, or osl_dynamics.data.Data
-            If a list of ``(T_i, n_channels)`` float32 arrays, each element
-            is one session.
-        concatenate : bool, optional
-            Concatenate across sessions into a single array.
-        remove_edge_effects : bool, optional
-            Passed through to the base-class implementation for non-list inputs.
-
-        Returns
-        -------
-        alpha : list of np.ndarray or np.ndarray
-            State probabilities, each shaped ``(T_i, n_states)``, or
-            concatenated to ``(T_total, n_states)`` if ``concatenate=True``.
-        """
-        # Fast-path: list of numpy arrays (HMMWrapper call convention).
-        if (isinstance(dataset, list) and len(dataset) > 0
-                and isinstance(dataset[0], np.ndarray)):
-            seq_len    = self.config.sequence_length
-            n_states   = self.config.n_states
-            n_channels = self.config.n_channels
-
-            alpha = []
-            for x_sess in dataset:
-                T = x_sess.shape[0]
-                n_seq = T // seq_len
-                if n_seq == 0:
-                    # Session shorter than one window — pad with zeros.
-                    alpha.append(np.zeros((T, n_states), dtype=np.float32))
-                    continue
-
-                # Slice into (n_seq, seq_len, n_channels) batches.
-                x_seqs = (x_sess[: n_seq * seq_len]
-                          .reshape(n_seq, seq_len, n_channels)
-                          .astype(np.float32))
-
-                tf_ds = (tf.data.Dataset
-                         .from_tensor_slices({"data": x_seqs})
-                         .batch(self.config.batch_size)
-                         .prefetch(tf.data.AUTOTUNE))
-
-                # Collect gamma over all batches, then flatten sequences.
-                gamma_seqs = []
-                for batch in tf_ds:
-                    pred = self.predict(batch, **kwargs)
-                    gamma_seqs.append(pred["gamma"])   # (B, seq_len, K)
-                # gamma_seqs → (n_seq, seq_len, K) → (n_seq*seq_len, K)
-                gamma_full = np.concatenate(gamma_seqs, axis=0).reshape(
-                    n_seq * seq_len, n_states)
-
-                # Pad remainder rows with the last valid gamma row.
-                remainder = T - n_seq * seq_len
-                if remainder > 0:
-                    pad = np.tile(gamma_full[-1:], (remainder, 1))
-                    gamma_full = np.concatenate([gamma_full, pad], axis=0)
-
-                alpha.append(gamma_full)
-
-            if concatenate or len(alpha) == 1:
-                return np.concatenate(alpha, axis=0)
-            return alpha
-
-        # Default path: Data object or tf.data.Dataset.
-        return super().get_alpha(dataset, concatenate=concatenate,
-                                 remove_edge_effects=remove_edge_effects,
-                                 **kwargs)
