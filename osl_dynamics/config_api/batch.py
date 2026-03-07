@@ -28,7 +28,8 @@ from ..inference.modes import (argmax_time_courses, fractional_occupancies,
 from ..analysis.power import independent_components_to_surface_maps as ic2surface
 from ..analysis.workbench import render
 from ..utils.misc import override_dict_defaults
-from ..utils.plotting import plot_box, plot_alpha, plot_violin, plot_mode_pairing,plot_mode_no_pairing, plot_matrices, plot_brain_surface
+from ..utils.plotting import plot_box, plot_alpha, plot_violin, \
+plot_mode_pairing,plot_mode_no_pairing, plot_matrices, plot_brain_surface,plot_eigenspectra
 from ..array_ops import cov2corr, first_eigenvector
 from profumo.io import MapIO
 
@@ -1341,6 +1342,15 @@ class BatchAnalysis:
         covs = np.load(f'{save_dir}/inf_params/covs.npy')
         corrs = cov2corr(covs)
 
+        # ---- Plot eigenspectrum ----
+        if model == 'hmm':
+            title = f'HMM with {n_state} states'
+        elif model == 'dynemo':
+            title = f'DyNeMo with {n_state} modes'
+        else:
+            title = None
+        
+
         #Rank-one approximation
         r1_approxs = []
         #sum_of_degrees = []
@@ -1354,6 +1364,9 @@ class BatchAnalysis:
         np.save(f'{plot_dir}/r1_approx_FC.npy', r1_approxs)
         #np.save(f'{plot_dir}/sum_of_degree.npy',sum_of_degrees)
 
+        plot_eigenspectra(corrs, plot_dir,title=title,r1_approxs=r1_approxs)
+
+
         if self.spatial_map is not None:
             spatial_map = MapIO(f'{self.spatial_map}/melodic_IC.dscalar.nii',dim2='mode').to_array()
             r1_approxs_surface = spatial_map@r1_approxs.T
@@ -1363,7 +1376,7 @@ class BatchAnalysis:
 
             render(img=f'{plot_dir}/r1_approx_FC_surface_map.dscalar.nii',
                    save_dir=f'{plot_dir}/brain_map/r1_approx',
-                   gui=False,
+                   gui=True,
                    image_name=f'{plot_dir}/brain_map/fc_r1_approx',
                    input_is_cifti=True)
             '''

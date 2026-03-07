@@ -1,7 +1,7 @@
 """Plotting functions.
 
 """
-
+from pathlib import Path
 import logging
 import re, os, json
 import warnings
@@ -3192,3 +3192,121 @@ def plot_summary_models_median_iqr(model_json_map, save_dir,
     fig.savefig(out_pdf, bbox_inches="tight")
     plt.close(fig)
 
+def plot_eigenspectra(corrs, save_path, r1_approxs=None, title=None):
+    """
+    Compact 3-panel eigenspectrum diagnostic.
+
+    Panels (left->right):
+      A) Eigenspectra (descending eigenvalues; one line per state/mode)
+      B) Histogram of largest-eigenvalue ratio (largest / sum)
+      C) Cumulative eigenvector energy curves (sorted squared weights)
+
+    Parameters
+    ----------
+    corrs : array, shape (n_states, n_channels, n_channels)
+    save_path : str or Path
+        Directory in which to save 'eigenspectra.png' and .npy diagnostics.
+    r1_approxs : array, optional, shape (n_states, n_channels)
+        Precomputed dominant eigenvectors (one per state/mode); if None,
+        they are computed from `corrs`.
+    title : str, optional
+        Overall figure title.
+    """
+    if isinstance(save_path, str):
+        save_path = Path(save_path)
+    save_path.mkdir(parents=True, exist_ok=True)
+
+    corrs = np.asarray(corrs)
+    if corrs.ndim != 3:
+        raise ValueError("corrs must have shape (n_states, n_channels, n_channels)")
+    n_states, n_channels, _ = corrs.shape
+
+    # compute eigenspectra and largest-eigenvalue ratio
+    eigvals_all = np.zeros((n_states, n_channels), dtype=float)
+    largest_ratio = np.zeros(n_states, dtype=float)
+    for i in range(n_states):
+        M = 0.5 * (corrs[i] + corrs[i].T)
+        vals, vecs = np.linalg.eigh(M)   # ascending
+        vals = vals[::-1]                # descending
+        eigvals_all[i] = vals
+        s = vals.sum() if vals.sum() != 0 else 1.0
+        largest_ratio[i] = vals[0] / s
+
+    # determine/validate r1_approxs (n_states x n_channels)
+    if r1_approxs is None:
+        r1_approxs = np.zeros((n_states, n_channels), dtype=float)
+        for i in range(n_states):
+            M = 0.5 * (corrs[i] + corrs[i].T)
+            vals, vecs = np.linalg.eigh(M)
+            v = vecs[:, -1]  # eigenvector for largest eigenvalue (ascending)
+            # fix sign by largest-abs entry
+            if np.abs(v).max() != 0 and v[np.argmax(np.abs(v))] < 0:
+                v = -v
+            r1_approxs[i] = v
+    else:
+        r1_approxs = np.asarray(r1_approxs)
+        if r1_approxs.shape != (n_states, n_channels):
+            raise ValueError("r1_approxs must have shape (n_states, n_channels)")
+
+    # save diagnostics
+    np.save(save_path / 'eigvals_all.npy', eigvals_all)
+    np.save(save_path / 'largest_ratio.npy', largest_ratio)
+
+    # plotting params: make three approx-square panels by setting figsize so each ~3x3 inches
+    plt.rcParams.update({
+        "font.size": 10,
+        "axes.labelsize": 11,
+        "axes.titlesize": 11,
+        "xtick.labelsize": 10,
+        "ytick.labelsize": 10,
+    })
+    fig = plt.figure(figsize=(9, 3), constrained_layout=True)  # 3 panels * 3in each -> 9x3
+    gs = fig.add_gridspec(1, 3, width_ratios=[1, 1, 1])
+
+    # Panel A: eigenspectra
+    ax0 = fig.add_subplot(gs[0, 0])
+    x = np.arange(1, n_channels + 1)
+    for i in range(n_states):
+        ax0.plot(x, eigvals_all[i], linewidth=0.8, alpha=0.8)
+    mean_vals = eigvals_all.mean(axis=0)
+    std_vals = eigvals_all.std(axis=0)
+    ax0.plot(x, mean_vals, linewidth=2.0)
+    ax0.fill_between(x, mean_vals - std_vals, mean_vals + std_vals, alpha=0.15)
+    ax0.set_xlabel("Eigenvalue index (descending)")
+    ax0.set_ylabel("Eigenvalue")
+    ax0.set_title("Eigenspectra")
+    ax0.set_xlim(1, n_channels)
+    ax0.grid(True, linestyle=":", linewidth=0.4)
+    #ax0.text(-0.12, 1.05, "A", transform=ax0.transAxes, fontsize=16, fontweight="bold", va="top")
+
+    # Panel B: histogram of largest-eigenvalue ratio
+    ax1 = fig.add_subplot(gs[0, 1])
+    n_bins = min(20, max(5, n_states // 2))
+    ax1.hist(largest_ratio, bins=n_bins, edgecolor='k', alpha=0.8)
+    ax1.set_xlabel("Largest eigenvalue / sum of eigenvalues")
+    ax1.set_ylabel("Number of states/modes")
+    ax1.set_title("Dominance of first eigenvalue")
+    #ax1.text(-0.18, 1.05, "B", transform=ax1.transAxes, fontsize=16, fontweight="bold", va="top")
+
+    # Panel C: cumulative eigenvector energy curves
+    ax2 = fig.add_subplot(gs[0, 2])
+    # For each state, compute sorted squared weights and cumulative sum (energy)
+    for i in range(n_states):
+        w = r1_approxs[i].copy()
+        energy = np.sort(w**2)[::-1]  # descending squared weights
+        cum_energy = np.cumsum(energy)
+        ax2.plot(np.arange(1, n_channels + 1), cum_energy, linewidth=0.9, alpha=0.7)
+    ax2.set_xlabel("Components ranked by |weight|")
+    ax2.set_ylabel("Cumulative squared weight")
+    ax2.set_title("First eigenvector energy")
+    ax2.set_xlim(1, n_channels)
+    ax2.set_ylim(0, 1.0)
+    ax2.grid(True, linestyle=":", linewidth=0.4)
+    #ax2.text(-0.20, 1.05, "C", transform=ax2.transAxes, fontsize=16, fontweight="bold", va="top")
+
+    if title is not None:
+        fig.suptitle(title, fontsize=16, fontweight='bold')
+
+    plot_path = save_path / 'eigenspectra.png'
+    fig.savefig(plot_path, dpi=300)
+    plt.close(fig)
