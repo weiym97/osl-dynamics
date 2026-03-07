@@ -1,4 +1,4 @@
-name: osld
+name: profumo-hmm
 channels:
   - conda-forge
 dependencies:
@@ -444,7 +444,7 @@ dependencies:
       - flatbuffers==25.2.10
       - gast==0.6.0
       - google-pasta==0.2.0
-      - grpcio==1.71.0
+      - grpcio>=1.66
       - keras==3.9.0
       - libclang==18.1.1
       - markdown==3.7
@@ -479,4 +479,3 @@ dependencies:
       - termcolor==2.5.0
       - tf-keras==2.19.0
       - werkzeug==3.1.3
-      - osl-dynamics
