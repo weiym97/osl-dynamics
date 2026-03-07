@@ -255,6 +255,178 @@ class Model(MarkovStateInferenceModelBase):
         name = config.model_name
         self.model = tf.keras.Model(inputs=inputs, outputs=outputs, name=name)
 
+    # -------------------------------------------------------------------------
+    # PROFUMO integration: M-step with pre-computed state time courses
+    # -------------------------------------------------------------------------
+
+    def fit_with_gamma(self, dataset, gammas, epochs=None, verbose=1):
+        """Fit the group model M-step using pre-computed state time courses.
+
+        Called by PROFUMO's HMMGroup during the VB update loop. Instead of
+        running the full Baum-Welch E-step (which is embedded inside
+        ``HiddenMarkovStateInferenceLayer`` as a custom gradient), we accept
+        pre-computed gamma arrays from the per-run HMMRun children and:
+
+        1. Update the observation model (means / covariances) via gradient
+           descent on the log-likelihood weighted by the supplied gammas.
+        2. Update the transition probability matrix (TPM) via a manual EMA
+           M-step using the xi sufficient statistic computed from the gammas.
+
+        The TPM update mirrors the EMA performed by
+        ``MarkovStateModelOptimizer`` / ``ExponentialMovingAverage`` during a
+        normal ``fit()`` call, using the same decay schedule as
+        ``EMADecayCallback``.
+
+        Parameters
+        ----------
+        dataset : list of np.ndarray
+            Per-session data arrays, each shaped ``(T_i, n_channels)``.
+        gammas : list of np.ndarray
+            Per-session state probability arrays, each shaped
+            ``(T_i, n_states)``. Must be in the same order as ``dataset``.
+        epochs : int, optional
+            Number of gradient-descent epochs over the observation model.
+            Defaults to ``config.n_epochs``.
+        verbose : int, optional
+            Verbosity level (0 = silent, 1 = per-epoch summary).
+
+        Returns
+        -------
+        history : dict
+            ``{"loss": [float, ...]}`` — per-epoch observation model loss.
+        """
+        if epochs is None:
+            epochs = self.config.n_epochs
+
+        seq_len    = self.config.sequence_length
+        n_states   = self.config.n_states
+        n_channels = self.config.n_channels
+
+        # ------------------------------------------------------------------
+        # 1. Slice sessions into (seq_len,) windows and build a TF dataset
+        #    that pairs (data_window, gamma_window) batches.
+        #    We discard the trailing remainder — same convention as the
+        #    base class make_dataset().
+        # ------------------------------------------------------------------
+        def _to_sequences(x, g):
+            n = x.shape[0] // seq_len
+            x = x[: n * seq_len].reshape(n, seq_len, n_channels)
+            g = g[: n * seq_len].reshape(n, seq_len, n_states)
+            return x.astype(np.float32), g.astype(np.float32)
+
+        x_parts, g_parts = [], []
+        for x_sess, g_sess in zip(dataset, gammas):
+            xw, gw = _to_sequences(x_sess, g_sess)
+            x_parts.append(xw)
+            g_parts.append(gw)
+
+        x_all = np.concatenate(x_parts, axis=0)   # (N, seq_len, M)
+        g_all = np.concatenate(g_parts, axis=0)   # (N, seq_len, K)
+
+        tf_dataset = (
+            tf.data.Dataset
+            .from_tensor_slices({"data": x_all, "gamma": g_all})
+            .batch(self.config.batch_size)
+            .prefetch(tf.data.AUTOTUNE)
+        )
+
+        # ------------------------------------------------------------------
+        # 2. Observation model sub-model.
+        #    Reuse the already-built layer objects from self.model so that
+        #    gradient updates are applied to the same shared weights.
+        #    gamma is injected as an input, bypassing HiddenMarkovStateInferenceLayer.
+        # ------------------------------------------------------------------
+        means_layer   = self.model.get_layer("means")
+        covs_layer    = self.model.get_layer("covs")
+        ll_layer      = self.model.get_layer("ll")
+        ll_loss_layer = self.model.get_layer("ll_loss")
+
+        data_in  = tf.keras.layers.Input(
+            shape=(seq_len, n_channels), dtype=tf.float32, name="m_data")
+        gamma_in = tf.keras.layers.Input(
+            shape=(seq_len, n_states), dtype=tf.float32, name="m_gamma")
+
+        mu      = means_layer(data_in)
+        D       = covs_layer(data_in)
+        ll      = ll_layer([data_in, mu, D])
+        ll_loss = ll_loss_layer([ll, gamma_in])
+
+        obs_model = tf.keras.Model(
+            inputs={"data": data_in, "gamma": gamma_in},
+            outputs={"ll_loss": ll_loss},
+        )
+        obs_model.compile(
+            optimizer=tf.keras.optimizers.get({
+                "class_name": self.config.optimizer.lower(),
+                "config": {"learning_rate": self.config.learning_rate},
+            })
+        )
+
+        # ------------------------------------------------------------------
+        # 3. Gradient-descent M-step over the observation model.
+        #    LR follows the same exponential decay as MarkovStateInferenceModelBase.fit().
+        # ------------------------------------------------------------------
+        lr_decay = getattr(self.config, "lr_decay", 0.0)
+        history  = {"loss": []}
+
+        for epoch in range(epochs):
+            lr = self.config.learning_rate * np.exp(-lr_decay * epoch)
+            tf.keras.backend.set_value(obs_model.optimizer.learning_rate, lr)
+
+            h = obs_model.fit(tf_dataset, epochs=1, verbose=0)
+            loss = h.history["loss"][0]
+            history["loss"].append(loss)
+
+            if verbose:
+                print(f"[fit_with_gamma] epoch {epoch + 1}/{epochs}  "
+                      f"loss={loss:.4f}")
+
+        # ------------------------------------------------------------------
+        # 4. TPM M-step via manual EMA update.
+        #
+        #    During a normal fit(), the custom gradient on
+        #    HiddenMarkovStateInferenceLayer returns phi_interim (the
+        #    row-normalised xi/gamma sufficient statistic) as the "gradient",
+        #    and ExponentialMovingAverage applies:
+        #        trans_prob = (1 - rho) * trans_prob + rho * phi_interim
+        #    We replicate this exactly using the gammas already computed by
+        #    HMMRun's Baum-Welch, without needing another forward pass.
+        #
+        #    rho follows the EMADecayCallback schedule evaluated at the last
+        #    epoch: rho = (100 * (epochs-1) / n_epochs + 1 + delay)^{-forget}
+        # ------------------------------------------------------------------
+        if self.config.learn_trans_prob:
+            # Concatenate all sessions for a single aggregate update,
+            # consistent with PROFUMO's one-TPM-update-per-VB-iteration.
+            g_concat = np.concatenate(
+                [g.reshape(-1, n_states) for g in gammas], axis=0
+            ).astype(np.float64)                              # (T_total, K)
+
+            # xi sufficient statistic: sum_{t} gamma_t outer gamma_{t+1}
+            # Shape: (K, K), then row-normalise to get phi_interim.
+            xi_sum = g_concat[:-1].T @ g_concat[1:]          # (K, K)
+            row_sums = xi_sum.sum(axis=1, keepdims=True)
+            row_sums = np.where(row_sums == 0, 1.0, row_sums)
+            phi_interim = xi_sum / row_sums                   # (K, K), rows sum to 1
+
+            # EMA decay at the final epoch of this call.
+            n_epochs_total = self.config.n_epochs
+            last_epoch = epochs - 1
+            rho = (
+                100 * last_epoch / n_epochs_total + 1
+                + self.config.trans_prob_update_delay
+            ) ** -self.config.trans_prob_update_forget
+
+            current_tp = self.get_trans_prob().astype(np.float64)
+            new_tp = (1.0 - rho) * current_tp + rho * phi_interim
+
+            # Renormalise rows to sum to 1 (guards against numerical drift).
+            new_tp = new_tp / new_tp.sum(axis=1, keepdims=True)
+
+            self.set_trans_prob(new_tp.astype(np.float32))
+
+        return history
+
     def get_means(self):
         """Get the state means.
 
