@@ -417,9 +417,11 @@ class Model(MarkovStateInferenceModelBase):
 
         # ------------------------------------------------------------------
         # 2. Observation model sub-model.
-        #    Reuse the already-built layer objects from self.model so that
-        #    gradient updates are applied to the same shared weights.
-        #    gamma is injected as an input, bypassing HiddenMarkovStateInferenceLayer.
+        #    Reuse all four layers from self.model directly — they were
+        #    already traced correctly in build_model() with the right shapes,
+        #    and their weights are shared so gradient updates target the main
+        #    model. gamma is injected as a new Input, bypassing
+        #    HiddenMarkovStateInferenceLayer entirely.
         # ------------------------------------------------------------------
         means_layer   = self.model.get_layer("means")
         covs_layer    = self.model.get_layer("covs")
