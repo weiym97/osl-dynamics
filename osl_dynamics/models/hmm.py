@@ -319,10 +319,14 @@ class Model(MarkovStateInferenceModelBase):
                          .prefetch(tf.data.AUTOTUNE))
 
                 # Collect gamma over all batches, then flatten sequences.
+                # Use self.model() directly (synchronous forward pass) instead
+                # of self.model.predict(), which spawns its own background
+                # data-pipeline threads and deadlocks against the prefetch
+                # threads already running on tf_ds.
                 gamma_seqs = []
                 for batch in tf_ds:
-                    pred = self.predict(batch, **kwargs)
-                    gamma_seqs.append(pred["gamma"])   # (B, seq_len, K)
+                    pred = self.model(batch, training=False)
+                    gamma_seqs.append(pred["gamma"].numpy())   # (B, seq_len, K)
                 # gamma_seqs → (n_seq, seq_len, K) → (n_seq*seq_len, K)
                 gamma_full = np.concatenate(gamma_seqs, axis=0).reshape(
                     n_seq * seq_len, n_states)
@@ -515,6 +519,266 @@ class Model(MarkovStateInferenceModelBase):
             self.set_trans_prob(new_tp.astype(np.float32))
 
         return history
+    
+    def fit_and_get_alpha(self, dataset, sigmas=None, epochs=None, zscore=False, verbose=1):
+        """Fit the observation model and return state probabilities in one pass.
+
+        Runs a single custom training loop so that TF/Keras is invoked only
+        once per PROFUMO group-level VB update.  The full model (including
+        ``HiddenMarkovStateInferenceLayer``) is executed on every forward
+        pass, so Baum-Welch runs inside each batch.  Gamma outputs from the
+        **last epoch** are captured directly from ``model(batch)["gamma"]``
+        and returned to the caller — no second forward pass is needed.
+
+        The observation model (means / covariances) is updated via
+        ``GradientTape``; the TPM is updated at the end via the same manual
+        EMA as ``fit_with_gamma``.
+
+        Parameters
+        ----------
+        dataset : list of np.ndarray
+            Per-session data arrays, each shaped ``(T_i, n_channels)``.
+        sigmas : list of np.ndarray, optional
+            Per-session posterior covariance cubes from DMvN, each shaped
+            ``(T_i, n_channels, n_channels)`` (float32).  When provided,
+            the fully-Bayesian second-order emission correction
+            ``0.5 * sum_{t,k} gamma_{t,k} * tr(Lambda_k * Sigma_t)``
+            is added to the loss, preventing state-covariance collapse.
+            Pass ``None`` (default) for the original first-order behaviour.
+        epochs : int, optional
+            Number of training epochs.  Defaults to ``config.n_epochs``.
+        zscore : bool, optional
+            If True, z-score each session to zero mean / unit variance per
+            channel before training.  Default False.
+        verbose : int, optional
+            Verbosity (0 = silent, 1 = per-epoch summary).
+
+        Returns
+        -------
+        gammas : list of np.ndarray
+            Per-session state probabilities, each shaped
+            ``(T_i, n_states)``.
+        """
+        if epochs is None:
+            epochs = self.config.n_epochs
+
+        seq_len    = self.config.sequence_length
+        n_channels = self.config.n_channels
+        n_states   = self.config.n_states
+
+        # ------------------------------------------------------------------
+        # 1. Slice sessions into (seq_len,) windows and build one TF dataset
+        #    covering all sessions concatenated.  Record per-session metadata
+        #    so we can reassemble per-session gammas afterwards.
+        # ------------------------------------------------------------------
+        if zscore:
+            def _zscore(x):
+                mu  = x.mean(axis=0, keepdims=True)
+                std = x.std(axis=0, keepdims=True)
+                std = np.where(std < 1e-8, 1.0, std)
+                return (x - mu) / std
+            dataset = [_zscore(x) for x in dataset]
+
+        session_lengths = [x.shape[0] for x in dataset]
+        session_n_seqs  = [T // seq_len for T in session_lengths]
+
+        def _to_seqs(x):
+            n = x.shape[0] // seq_len
+            return x[:n * seq_len].reshape(n, seq_len, n_channels).astype(np.float32)
+
+        def _sigma_to_seqs(sigma):
+            n = sigma.shape[0] // seq_len
+            return sigma[:n * seq_len].reshape(
+                n, seq_len, n_channels, n_channels).astype(np.float32)
+
+        x_all = np.concatenate([_to_seqs(x) for x in dataset], axis=0)
+
+        if sigmas is not None:
+            sigma_all = np.concatenate(
+                [_sigma_to_seqs(s) for s in sigmas], axis=0)  # (N, seq_len, M, M)
+            tf_dataset = (
+                tf.data.Dataset
+                .from_tensor_slices({"data": x_all, "sigma": sigma_all})
+                .batch(self.config.batch_size)
+                .prefetch(tf.data.AUTOTUNE)
+            )
+        else:
+            tf_dataset = (
+                tf.data.Dataset
+                .from_tensor_slices({"data": x_all})
+                .batch(self.config.batch_size)
+                .prefetch(tf.data.AUTOTUNE)
+            )
+
+        # ------------------------------------------------------------------
+        # 2. Observation-model trainable variables only (means + covs).
+        #    The TPM is handled separately via manual EMA below.
+        # ------------------------------------------------------------------
+        obs_vars = (
+            self.model.get_layer("means").trainable_variables +
+            self.model.get_layer("covs").trainable_variables
+        )
+
+        lr_decay  = getattr(self.config, "lr_decay", 0.0)
+        optimizer = tf.keras.optimizers.get({
+            "class_name": self.config.optimizer.lower(),
+            "config": {"learning_rate": self.config.learning_rate},
+        })
+
+        # ------------------------------------------------------------------
+        # 3. Custom GradientTape training loop.
+        #    The full model runs on every batch: data → ll → Baum-Welch →
+        #    gamma → loss.  We collect gamma from the last epoch's batches.
+        # ------------------------------------------------------------------
+        last_gamma_seqs = None   # (N_total_seqs, seq_len, K), set on last epoch
+
+        for epoch in range(epochs):
+            optimizer.learning_rate = float(
+                self.config.learning_rate * np.exp(-lr_decay * epoch))
+
+            gamma_batches = []
+            epoch_loss    = 0.0
+            n_batches     = 0
+
+            for batch in tf_dataset:
+                # Always pass only {"data": ...} to the model so that any
+                # extra keys (e.g. "sigma") don't propagate into Keras layers.
+                model_input = {"data": batch["data"]}
+
+                with tf.GradientTape() as tape:
+                    outputs = self.model(model_input, training=True)
+                    loss    = tf.reduce_mean(outputs["ll_loss"])
+                    if self.model.losses:
+                        loss = loss + tf.add_n(self.model.losses)
+
+                    # ----------------------------------------------------------
+                    # Fully-Bayesian second-order correction:
+                    #   0.5 * (1/N_t) * sum_{b,s,k} gamma_{b,s,k}
+                    #                               * tr(Lambda_k * Sigma_{b,s})
+                    # where N_t = batch_size * seq_len is the number of time
+                    # points in the batch (normalises to a per-timepoint scale).
+                    # This is differentiable through the Cholesky tf.Variables
+                    # inside CovarianceMatricesLayer, so the gradient
+                    #   d/d(Lambda_k) = 0.5 * weighted_sigma_k
+                    # correctly pushes precisions away from zero.
+                    # ----------------------------------------------------------
+                    if sigmas is not None:
+                        sigma_batch = tf.cast(batch["sigma"], tf.float32)
+                        gamma_tf    = tf.cast(outputs["gamma"], tf.float32)
+                        # Retrieve differentiable (K, M, M) covariance matrices.
+                        covs_layer   = self.model.get_layer("covs")
+                        cov_matrices = covs_layer(None, training=False)   # (K, M, M)
+                        prec_matrices = tf.linalg.inv(cov_matrices)       # (K, M, M)
+                        # weighted_sigma[k,m,n] = sum_{b,s} gamma[b,s,k] * sigma[b,s,m,n]
+                        weighted_sigma = tf.einsum(
+                            "bsk,bsmn->kmn", gamma_tf, sigma_batch)
+                        n_t = tf.cast(
+                            tf.shape(batch["data"])[0] * seq_len, tf.float32)
+                        correction = (0.5 / n_t) * tf.reduce_sum(
+                            prec_matrices * tf.transpose(
+                                weighted_sigma, perm=[0, 2, 1]))
+                        loss = loss + correction
+
+                grads = tape.gradient(loss, obs_vars)
+                optimizer.apply_gradients(zip(grads, obs_vars))
+
+                gamma_batches.append(outputs["gamma"].numpy())  # (B, seq_len, K)
+                epoch_loss += float(loss)
+                n_batches  += 1
+
+            if verbose:
+                print(f"[fit_and_get_alpha] epoch {epoch + 1}/{epochs}  "
+                      f"loss={epoch_loss / max(n_batches, 1):.4f}")
+
+            if epoch == epochs - 1:
+                last_gamma_seqs = np.concatenate(
+                    gamma_batches, axis=0)           # (N_total_seqs, seq_len, K)
+
+        # ------------------------------------------------------------------
+        # 4. TPM M-step via manual EMA using the final epoch's gammas.
+        #    Mirrors the EMA in fit_with_gamma exactly.
+        # ------------------------------------------------------------------
+        if self.config.learn_trans_prob and last_gamma_seqs is not None:
+            g_concat = last_gamma_seqs.reshape(-1, n_states).astype(np.float64)
+
+            xi_sum   = g_concat[:-1].T @ g_concat[1:]
+            row_sums = xi_sum.sum(axis=1, keepdims=True)
+            row_sums = np.where(row_sums == 0, 1.0, row_sums)
+            phi_interim = xi_sum / row_sums
+
+            n_epochs_total = self.config.n_epochs
+            last_epoch     = epochs - 1
+            rho = (
+                100 * last_epoch / n_epochs_total + 1
+                + self.config.trans_prob_update_delay
+            ) ** -self.config.trans_prob_update_forget
+
+            current_tp = self.get_trans_prob().astype(np.float64)
+            new_tp     = (1.0 - rho) * current_tp + rho * phi_interim
+            new_tp     = new_tp / new_tp.sum(axis=1, keepdims=True)
+            self.set_trans_prob(new_tp.astype(np.float32))
+
+        # ------------------------------------------------------------------
+        # 5. Reassemble per-session gamma arrays.
+        #    Trailing remainder rows (T % seq_len) are padded by repeating
+        #    the last valid row — same convention as get_alpha.
+        # ------------------------------------------------------------------
+        gammas     = []
+        seq_offset = 0
+        for T, n_seqs in zip(session_lengths, session_n_seqs):
+            if n_seqs == 0:
+                gammas.append(np.zeros((T, n_states), dtype=np.float32))
+                continue
+
+            g = last_gamma_seqs[seq_offset: seq_offset + n_seqs]  # (n_seqs, seq_len, K)
+            g = g.reshape(n_seqs * seq_len, n_states)
+
+            remainder = T - n_seqs * seq_len
+            if remainder > 0:
+                g = np.concatenate(
+                    [g, np.tile(g[-1:], (remainder, 1))], axis=0)
+
+            gammas.append(g.astype(np.float32))
+            seq_offset += n_seqs
+
+        return gammas
+
+
+    def set_covariance_regularizer(self, n_sequences, c=10.0):
+        """Set an Inverse-Wishart prior on state covariances.
+
+        Mirrors PROFUMO's ``GROUP_PRECISION_MATRIX`` Wishart prior with the
+        same fixed template covariance gCM = 0.9*I + 0.1*ones::
+
+            Λ ~ W(a=c·M, B=c·M·gCM)  →  C ~ IW(ν=c·M, Ψ=c·M·gCM)
+
+        MAP mode ≈ gCM for large c, preventing covariance vanishing/explosion.
+
+        Parameters
+        ----------
+        n_sequences : int
+            Total non-overlapping sequence_length windows across all sessions.
+        c : float, optional
+            Concentration multiplier (default 10, matching PROFUMO).
+        """
+        from osl_dynamics.inference import regularizers as osld_reg
+
+        M    = self.config.n_channels
+        gCM  = 0.9 * np.eye(M, dtype=np.float32) + 0.1 * np.ones((M, M), dtype=np.float32)
+        nu   = c * float(M)
+        psi  = nu * gCM  # float32, matches the float32 Cholesky weights in __call__
+
+        scale_factor = 1.0 / float(n_sequences)
+        if self.config.loss_calc == "mean":
+            scale_factor /= float(self.config.sequence_length)
+
+        regularizer = osld_reg.InverseWishart(
+            nu       = nu,
+            psi      = psi,
+            epsilon  = self.config.covariances_epsilon,
+            strength = scale_factor,
+        )
+        self.model.get_layer("covs").layers[0].regularizer = regularizer
 
     def get_means(self):
         """Get the state means.
