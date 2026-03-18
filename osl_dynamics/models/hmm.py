@@ -260,7 +260,7 @@ class Model(MarkovStateInferenceModelBase):
     # -------------------------------------------------------------------------
 
     def get_alpha(self, dataset, concatenate=False, remove_edge_effects=False,
-                  **kwargs):
+                  zscore=False, **kwargs):
         """Get state probabilities.
 
         Extends the base-class implementation to also accept a plain list of
@@ -285,6 +285,12 @@ class Model(MarkovStateInferenceModelBase):
             Concatenate across sessions into a single array.
         remove_edge_effects : bool, optional
             Passed through to the base-class implementation for non-list inputs.
+        zscore : bool, optional
+            If True, z-score each session (zero mean, unit variance per
+            channel) before inference.  Must match the flag used during
+            training so that the data is in the same space as the learned
+            state covariances.  Passed through from
+            ``HMMWrapper::get_state_timecourses`` on the C++ side.
 
         Returns
         -------
@@ -295,6 +301,18 @@ class Model(MarkovStateInferenceModelBase):
         # Fast-path: list of numpy arrays (HMMWrapper call convention).
         if (isinstance(dataset, list) and len(dataset) > 0
                 and isinstance(dataset[0], np.ndarray)):
+            # Apply the same per-session z-scoring used during training
+            # (fit_and_get_alpha).  Skipping this when the model was trained
+            # with zscore=True would present data in a different scale than
+            # the learned covariances, producing miscalibrated state gammas.
+            if zscore:
+                def _zscore(x):
+                    mu  = x.mean(axis=0, keepdims=True)
+                    std = x.std(axis=0, keepdims=True)
+                    std = np.where(std < 1e-8, 1.0, std)
+                    return (x - mu) / std
+                dataset = [_zscore(x) for x in dataset]
+
             seq_len    = self.config.sequence_length
             n_states   = self.config.n_states
             n_channels = self.config.n_channels
@@ -566,6 +584,10 @@ class Model(MarkovStateInferenceModelBase):
         n_channels = self.config.n_channels
         n_states   = self.config.n_states
 
+        print('sequence length: ', seq_len)
+        print('n channels: ', n_channels)
+        print('n states: ', n_states)
+
         # ------------------------------------------------------------------
         # 1. Slice sessions into (seq_len,) windows and build one TF dataset
         #    covering all sessions concatenated.  Record per-session metadata
@@ -594,8 +616,11 @@ class Model(MarkovStateInferenceModelBase):
         x_all = np.concatenate([_to_seqs(x) for x in dataset], axis=0)
 
         if sigmas is not None:
+            print('Sigmas provided')
             sigma_all = np.concatenate(
                 [_sigma_to_seqs(s) for s in sigmas], axis=0)  # (N, seq_len, M, M)
+            print('x_all shape: ',x_all.shape)
+            print('sigma_all shape: ',sigma_all.shape)
             tf_dataset = (
                 tf.data.Dataset
                 .from_tensor_slices({"data": x_all, "sigma": sigma_all})
@@ -641,48 +666,79 @@ class Model(MarkovStateInferenceModelBase):
             n_batches     = 0
 
             for batch in tf_dataset:
-                # Always pass only {"data": ...} to the model so that any
-                # extra keys (e.g. "sigma") don't propagate into Keras layers.
-                model_input = {"data": batch["data"]}
+                x_batch = batch["data"]
 
                 with tf.GradientTape() as tape:
-                    outputs = self.model(model_input, training=True)
-                    loss    = tf.reduce_mean(outputs["ll_loss"])
-                    if self.model.losses:
-                        loss = loss + tf.add_n(self.model.losses)
+                    if sigmas is None:
+                        # --------------------------------------------------
+                        # Standard first-order path: run the full Keras model
+                        # (obs layers → Baum-Welch → loss) in one call.
+                        # --------------------------------------------------
+                        outputs = self.model({"data": x_batch}, training=True)
+                        loss    = tf.reduce_mean(outputs["ll_loss"])
+                        if self.model.losses:
+                            loss = loss + tf.add_n(self.model.losses)
+                        gamma_out = outputs["gamma"]
 
-                    # ----------------------------------------------------------
-                    # Fully-Bayesian second-order correction:
-                    #   0.5 * (1/N_t) * sum_{b,s,k} gamma_{b,s,k}
-                    #                               * tr(Lambda_k * Sigma_{b,s})
-                    # where N_t = batch_size * seq_len is the number of time
-                    # points in the batch (normalises to a per-timepoint scale).
-                    # This is differentiable through the Cholesky tf.Variables
-                    # inside CovarianceMatricesLayer, so the gradient
-                    #   d/d(Lambda_k) = 0.5 * weighted_sigma_k
-                    # correctly pushes precisions away from zero.
-                    # ----------------------------------------------------------
-                    if sigmas is not None:
+                    else:
+                        # --------------------------------------------------
+                        # Second-order (fully-Bayesian) path.
+                        #
+                        # E-step and M-step must use the SAME corrected
+                        # emission log-likelihood:
+                        #
+                        #   log p̃(x_t | k) = log p(x_t | k)
+                        #                    − 0.5 · tr(Λ_k · Σ_t)
+                        #
+                        # Using uncorrected ll in Baum-Welch but corrected
+                        # ll only in the gradient (old approach) makes the
+                        # E-step and M-step inconsistent: inflated covariances
+                        # broaden the emission Gaussians, causing state
+                        # assignments to leak across states and driving
+                        # covariances further above C_k^sample + C_k^sigma.
+                        #
+                        # By folding −0.5·tr(Λ_k·Σ_t) into the emission LL
+                        # before Baum-Welch, the E-step accounts for the
+                        # posterior uncertainty of the observations.  The
+                        # gradient of the corrected loss w.r.t. Λ_k then
+                        # automatically contains the sigma term — no separate
+                        # correction term is needed, and the EM fixed point is
+                        # self-consistent at C_k = C_k^sample + C_k^sigma.
+                        # --------------------------------------------------
                         sigma_batch = tf.cast(batch["sigma"], tf.float32)
-                        gamma_tf    = tf.cast(outputs["gamma"], tf.float32)
-                        # Retrieve differentiable (K, M, M) covariance matrices.
-                        covs_layer   = self.model.get_layer("covs")
-                        cov_matrices = covs_layer(None, training=False)   # (K, M, M)
-                        prec_matrices = tf.linalg.inv(cov_matrices)       # (K, M, M)
-                        # weighted_sigma[k,m,n] = sum_{b,s} gamma[b,s,k] * sigma[b,s,m,n]
-                        weighted_sigma = tf.einsum(
-                            "bsk,bsmn->kmn", gamma_tf, sigma_batch)
-                        n_t = tf.cast(
-                            tf.shape(batch["data"])[0] * seq_len, tf.float32)
-                        correction = (0.5 / n_t) * tf.reduce_sum(
-                            prec_matrices * tf.transpose(
-                                weighted_sigma, perm=[0, 2, 1]))
-                        loss = loss + correction
+
+                        # Compute emission LL via the obs-model layers.
+                        covs_layer    = self.model.get_layer("covs")
+                        means_layer   = self.model.get_layer("means")
+                        ll_layer      = self.model.get_layer("ll")
+                        cov_matrices  = covs_layer(x_batch, training=True)   # (K,M,M)
+                        mu            = means_layer(x_batch, training=True)  # (K,M)
+                        ll_raw        = ll_layer(
+                            [x_batch, mu, cov_matrices], training=True)      # (B,S,K)
+
+                        # Sigma correction to emission LL:
+                        #   correction[b,s,k] = 0.5 * tr(Λ_k * Σ_{b,s})
+                        #                     = 0.5 * einsum(kmn,bsmn->bsk)
+                        prec_matrices = tf.linalg.inv(cov_matrices)          # (K,M,M)
+                        ll_sigma_corr = 0.5 * tf.einsum(
+                            "kmn,bsmn->bsk", prec_matrices, sigma_batch)
+                        ll_corrected  = ll_raw - ll_sigma_corr               # (B,S,K)
+
+                        # E-step: Baum-Welch on corrected emission LL.
+                        hid_state_inf = self.model.get_layer("hid_state_inf")
+                        gamma_out, _xi = hid_state_inf(ll_corrected)
+
+                        # M-step loss: −E_γ[log p̃(x_t|k)] (includes sigma).
+                        ll_loss_layer = self.model.get_layer("ll_loss")
+                        ll_loss       = ll_loss_layer([ll_corrected, gamma_out])
+                        loss          = tf.reduce_mean(ll_loss)
+                        if self.model.losses:
+                            loss = loss + tf.add_n(self.model.losses)
 
                 grads = tape.gradient(loss, obs_vars)
                 optimizer.apply_gradients(zip(grads, obs_vars))
 
-                gamma_batches.append(outputs["gamma"].numpy())  # (B, seq_len, K)
+                gamma_batches.append(gamma_out.numpy())  # (B, seq_len, K)
                 epoch_loss += float(loss)
                 n_batches  += 1
 
