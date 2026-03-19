@@ -662,6 +662,7 @@ class Model(MarkovStateInferenceModelBase):
                 self.config.learning_rate * np.exp(-lr_decay * epoch))
 
             gamma_batches = []
+            xi_batches    = []
             epoch_loss    = 0.0
             n_batches     = 0
 
@@ -679,6 +680,7 @@ class Model(MarkovStateInferenceModelBase):
                         if self.model.losses:
                             loss = loss + tf.add_n(self.model.losses)
                         gamma_out = outputs["gamma"]
+                        xi_out    = outputs["xi"]
 
                     else:
                         # --------------------------------------------------
@@ -726,7 +728,7 @@ class Model(MarkovStateInferenceModelBase):
 
                         # E-step: Baum-Welch on corrected emission LL.
                         hid_state_inf = self.model.get_layer("hid_state_inf")
-                        gamma_out, _xi = hid_state_inf(ll_corrected)
+                        gamma_out, xi_out = hid_state_inf(ll_corrected)
 
                         # M-step loss: −E_γ[log p̃(x_t|k)] (includes sigma).
                         ll_loss_layer = self.model.get_layer("ll_loss")
@@ -739,6 +741,7 @@ class Model(MarkovStateInferenceModelBase):
                 optimizer.apply_gradients(zip(grads, obs_vars))
 
                 gamma_batches.append(gamma_out.numpy())  # (B, seq_len, K)
+                xi_batches.append(xi_out.numpy())         # (B, seq_len-1, K, K)
                 epoch_loss += float(loss)
                 n_batches  += 1
 
@@ -746,36 +749,42 @@ class Model(MarkovStateInferenceModelBase):
                 print(f"[fit_and_get_alpha] epoch {epoch + 1}/{epochs}  "
                       f"loss={epoch_loss / max(n_batches, 1):.4f}")
 
+            # ------------------------------------------------------------------
+            # TPM M-step: update after every epoch, matching the per-epoch EMA
+            # schedule of standard fit().  rho is evaluated at the current epoch
+            # so it follows the same decreasing schedule as EMADecayCallback.
+            # ------------------------------------------------------------------
+            if self.config.learn_trans_prob:
+                prior = self.model.get_layer("hid_state_inf").trans_prob_prior.numpy(
+                ).astype(np.float64)                               # (K, K)
+
+                epoch_xi    = np.concatenate(xi_batches, axis=0)     # (N, seq_len-1, K, K)
+                epoch_gamma = np.concatenate(gamma_batches, axis=0)  # (N, seq_len, K)
+
+                mean_xi    = epoch_xi.mean(axis=(0, 1)).astype(np.float64)        # (K, K)
+                mean_gamma = epoch_gamma[:, :-1].mean(axis=(0, 1)).astype(np.float64)  # (K,)
+
+                numerator   = mean_xi + prior
+                denominator = mean_gamma[:, np.newaxis] + prior.sum(axis=-1, keepdims=True)
+                phi_interim = numerator / denominator              # (K, K)
+
+                n_epochs_total = self.config.n_epochs
+                rho = (
+                    100 * epoch / n_epochs_total + 1
+                    + self.config.trans_prob_update_delay
+                ) ** -self.config.trans_prob_update_forget
+
+                current_tp = self.get_trans_prob().astype(np.float64)
+                new_tp     = (1.0 - rho) * current_tp + rho * phi_interim
+                new_tp     = new_tp / new_tp.sum(axis=1, keepdims=True)
+                self.set_trans_prob(new_tp.astype(np.float32))
+
             if epoch == epochs - 1:
                 last_gamma_seqs = np.concatenate(
                     gamma_batches, axis=0)           # (N_total_seqs, seq_len, K)
 
         # ------------------------------------------------------------------
-        # 4. TPM M-step via manual EMA using the final epoch's gammas.
-        #    Mirrors the EMA in fit_with_gamma exactly.
-        # ------------------------------------------------------------------
-        if self.config.learn_trans_prob and last_gamma_seqs is not None:
-            g_concat = last_gamma_seqs.reshape(-1, n_states).astype(np.float64)
-
-            xi_sum   = g_concat[:-1].T @ g_concat[1:]
-            row_sums = xi_sum.sum(axis=1, keepdims=True)
-            row_sums = np.where(row_sums == 0, 1.0, row_sums)
-            phi_interim = xi_sum / row_sums
-
-            n_epochs_total = self.config.n_epochs
-            last_epoch     = epochs - 1
-            rho = (
-                100 * last_epoch / n_epochs_total + 1
-                + self.config.trans_prob_update_delay
-            ) ** -self.config.trans_prob_update_forget
-
-            current_tp = self.get_trans_prob().astype(np.float64)
-            new_tp     = (1.0 - rho) * current_tp + rho * phi_interim
-            new_tp     = new_tp / new_tp.sum(axis=1, keepdims=True)
-            self.set_trans_prob(new_tp.astype(np.float32))
-
-        # ------------------------------------------------------------------
-        # 5. Reassemble per-session gamma arrays.
+        # 4. Reassemble per-session gamma arrays.
         #    Trailing remainder rows (T % seq_len) are padded by repeating
         #    the last valid row — same convention as get_alpha.
         # ------------------------------------------------------------------
