@@ -33,3 +33,21 @@ MANIFEST
 
 # Per-project virtualenvs
 .venv*/
+
+# Results
+result*
+
+# Data files
+# NIFTI files
+*.nii
+*.nii.gz
+# CIFTI files
+*.dscalar.nii
+*.dtseries.nii
+*.dlabel.nii
+*.ptseries.nii
+# Numeric/text data
+*.mat
+*.txt
+*.npy
+*.npz

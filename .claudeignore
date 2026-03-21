@@ -1,0 +1,13 @@
+result*
+
+# Large/binary data files
+**/*.nii
+**/*.nii.gz
+**/*.dscalar.nii
+**/*.dtseries.nii
+**/*.dlabel.nii
+**/*.ptseries.nii
+**/*.mat
+**/*.txt
+**/*.npy
+**/*.npz
