@@ -1,0 +1,6 @@
+{
+    "python.defaultInterpreterPath": "/well/win-fmrib-analysis/users/uap971/conda/skylake/envs/osld/bin/python",
+    "python.analysis.diagnosticSeverityOverrides": {
+        "reportMissingModuleSource": "none"
+    }
+}
