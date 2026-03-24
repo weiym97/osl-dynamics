@@ -808,6 +808,168 @@ class Model(MarkovStateInferenceModelBase):
 
         return gammas
 
+    def initialize_from_sessions(self, sessions, n_init=3, n_init_epochs=1,
+                                 zscore=False):
+        """Data-driven initialization of state means/covariances from sessions.
+
+        Called by PROFUMO's HMMWrapper on the very first group-level VB
+        iteration, when actual mode timecourses (A) are first available.
+        All K states start with near-identical covariances (≈ I), so
+        gradient descent alone cannot break the symmetry.  This method
+        samples random state time courses, computes per-state empirical
+        covariances, sets them as the observation model, and optionally
+        trains for a few epochs.  Repeats ``n_init`` times and keeps the
+        trial with the lowest loss.
+
+        Parameters
+        ----------
+        sessions : list of np.ndarray
+            Per-session data arrays, each shaped ``(T_i, n_channels)``.
+        n_init : int, optional
+            Number of random initialization trials.  Default 3.
+        n_init_epochs : int, optional
+            Number of training epochs per trial.  Default 1.
+        zscore : bool, optional
+            If True, z-score each session before initialization.
+
+        Returns
+        -------
+        gammas : list of np.ndarray
+            Per-session state probabilities from the best trial,
+            each shaped ``(T_i, n_states)``.
+        """
+        n_states   = self.config.n_states
+        n_channels = self.config.n_channels
+
+        # Optional per-session z-scoring (must match fit_and_get_alpha).
+        if zscore:
+            def _zscore(x):
+                mu  = x.mean(axis=0, keepdims=True)
+                std = x.std(axis=0, keepdims=True)
+                std = np.where(std < 1e-8, 1.0, std)
+                return (x - mu) / std
+            sessions = [_zscore(x) for x in sessions]
+
+        data_all = np.concatenate(sessions, axis=0)   # (T_total, M)
+        T_total  = data_all.shape[0]
+
+        # We need the TPM for sampling.  If it is still diagonal (untrained),
+        # build a simple high-self-transition TPM so we get sticky segments.
+        try:
+            trans_prob = self.get_trans_prob()
+            if np.allclose(trans_prob, np.eye(n_states)):
+                raise ValueError("diagonal")
+        except (ValueError, RuntimeError):
+            trans_prob = (
+                np.ones((n_states, n_states)) * 0.1 / max(n_states - 1, 1)
+            )
+            np.fill_diagonal(trans_prob, 0.9)
+            self.set_trans_prob(trans_prob.astype(np.float32))
+
+        best_loss    = np.inf
+        best_weights = None
+        best_gammas  = None
+
+        for trial in range(n_init):
+            _logger.info(f"[initialize_from_sessions] trial {trial + 1}/{n_init}")
+
+            # ----- sample a random state time course from the TPM -----
+            from osl_dynamics.simulation.hmm import HMM as SimHMM
+            sim = SimHMM(trans_prob)
+            stc = sim.generate_states(T_total)          # (T_total, K) one-hot
+
+            # Make sure every state activates with enough data points.
+            for retry in range(100):
+                counts = stc.sum(axis=0)
+                non_active = counts < 2 * n_channels
+                if not np.any(non_active):
+                    break
+                new_stc = sim.generate_states(T_total)
+                for k in range(n_states):
+                    if non_active[k] and new_stc[:, k].sum() > 0:
+                        stc[:, k] = new_stc[:, k]
+            else:
+                # If we still have empty states, fall back to random partition.
+                _logger.warning(
+                    "Could not activate all states via TPM sampling; "
+                    "falling back to random partition."
+                )
+                indices = np.random.randint(0, n_states, size=T_total)
+                stc = np.zeros((T_total, n_states), dtype=np.float32)
+                stc[np.arange(T_total), indices] = 1.0
+
+            # ----- compute per-state empirical mean & covariance -----
+            means       = np.zeros((n_states, n_channels), dtype=np.float32)
+            covariances = np.zeros(
+                (n_states, n_channels, n_channels), dtype=np.float32
+            )
+            for k in range(n_states):
+                mask = stc[:, k] == 1
+                x_k  = data_all[mask]
+                if x_k.shape[0] < 2 * n_channels:
+                    # Not enough points — use identity as fallback.
+                    covariances[k] = np.eye(n_channels, dtype=np.float32)
+                    continue
+                means[k] = x_k.mean(axis=0)
+                if n_channels == 1:
+                    covariances[k] = np.var(x_k).reshape(1, 1)
+                else:
+                    covariances[k] = np.cov(x_k, rowvar=False)
+
+            # ----- inject into the Keras model -----
+            if self.config.learn_means:
+                self.set_means(means, update_initializer=True)
+            if self.config.learn_covariances:
+                self.set_covariances(covariances, update_initializer=True)
+
+            # ----- short training run to refine & evaluate -----
+            if n_init_epochs > 0:
+                gammas = self.fit_and_get_alpha(
+                    sessions, epochs=n_init_epochs, zscore=False, verbose=0,
+                )
+            else:
+                gammas = self.fit_and_get_alpha(
+                    sessions, epochs=1, zscore=False, verbose=0,
+                )
+
+            # Evaluate loss: use the last-epoch loss from the training history
+            # stored internally.  fit_and_get_alpha doesn't return it, so we
+            # compute it via a quick forward pass on a small sample.
+            try:
+                seq_len = self.config.sequence_length
+                x_sample = data_all[:max(T_total // seq_len, 1) * seq_len]
+                x_sample = x_sample.reshape(-1, seq_len, n_channels).astype(
+                    np.float32
+                )
+                tf_sample = tf.data.Dataset.from_tensor_slices(
+                    {"data": x_sample}
+                ).batch(self.config.batch_size)
+                total_loss = 0.0
+                n_batches  = 0
+                for batch in tf_sample:
+                    out = self.model(batch, training=False)
+                    total_loss += float(tf.reduce_mean(out["ll_loss"]))
+                    n_batches  += 1
+                loss = total_loss / max(n_batches, 1)
+            except Exception:
+                loss = np.inf
+
+            _logger.info(
+                f"[initialize_from_sessions] trial {trial + 1} loss = {loss:.4f}"
+            )
+            if loss < best_loss:
+                best_loss    = loss
+                best_weights = self.get_weights()
+                best_gammas  = gammas
+
+        # Restore best trial.
+        if best_weights is not None:
+            self.set_weights(best_weights)
+
+        _logger.info(
+            f"[initialize_from_sessions] best loss = {best_loss:.4f}"
+        )
+        return best_gammas
 
     def set_covariance_regularizer(self, n_sequences, c=10.0):
         """Set an Inverse-Wishart prior on state covariances.
