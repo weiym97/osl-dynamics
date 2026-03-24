@@ -1,5 +1,5 @@
 result*
-
+data*
 # Large/binary data files
 **/*.nii
 **/*.nii.gz
