@@ -909,7 +909,10 @@ def plot_state_psds(data, output_dir: str) -> None:
     )
 
 
-def dual_estimation(data, output_dir: str, n_jobs: int = 1) -> None:
+def dual_estimation(
+    data, output_dir: str, n_jobs: int = 1,
+    concatenate: bool = False, method: str = "sample",
+) -> None:
     """Dual estimation for session-specific observation model parameters.
 
     This function expects a model has already been trained and the following
@@ -931,6 +934,10 @@ def dual_estimation(data, output_dir: str, n_jobs: int = 1) -> None:
         Path to output directory.
     n_jobs : int, optional
         Number of jobs to run in parallel.
+    concatenate : bool, optional
+        Whether to concatenate all sessions before calculating state statistics.
+    method : str, optional
+        Method for dual estimation. Default is ``"sample"``.
     """
     if data is None:
         raise ValueError("data must be passed.")
@@ -950,7 +957,9 @@ def dual_estimation(data, output_dir: str, n_jobs: int = 1) -> None:
     alpha = load(f"{inf_params_dir}/alp.pkl")
 
     # Dual estimation
-    means, covs = model.dual_estimation(data, alpha=alpha, n_jobs=n_jobs)
+    means, covs = model.dual_estimation(
+        data, alpha=alpha, n_jobs=n_jobs, concatenate=concatenate,
+    )
 
     # Save
     save(f"{dual_estimates_dir}/means.npy", means)
@@ -2441,3 +2450,184 @@ def plot_burst_summary_stats(
         y_label="Mean Amplitude (a.u.)",
         filename=f"{summary_stats_dir}/amp.png",
     )
+
+
+def build_hmm(data, output_dir: str, config_kwargs: dict) -> None:
+    """Build a Hidden Markov Model without training.
+
+    This function will:
+
+    1. Build an :code:`hmm.Model` object.
+    2. Save the model in :code:`<output_dir>/model`.
+
+    Parameters
+    ----------
+    data : osl_dynamics.data.Data
+        Data object.
+    output_dir : str
+        Path to output directory.
+    config_kwargs : dict
+        Keyword arguments to pass to :class:`osl_dynamics.models.hmm.Config`.
+    """
+    from osl_dynamics.models import hmm
+
+    # Directories
+    model_dir = output_dir + "/model"
+
+    # Create the model object
+    _logger.info("Building model")
+    default_config_kwargs = {
+        "n_channels": data.n_channels,
+        "sequence_length": 200,
+        "batch_size": 256,
+        "learning_rate": 0.01,
+        "n_epochs": 20,
+    }
+    config_kwargs = override_dict_defaults(default_config_kwargs, config_kwargs)
+    _logger.info(f"Using config_kwargs: {config_kwargs}")
+
+    # Deal with the special case of fixing the covariances to be static FC.
+    if (
+        not config_kwargs.get("learn_covariances", True)
+        and config_kwargs.get("initial_covariances") == "sfc"
+    ):
+        ts = data.time_series(prepared=True, concatenate=False)
+        ts = [ts[i] for i in data.keep]
+        ts = np.concatenate(ts, axis=0)
+
+        from osl_dynamics.utils.array_ops import estimate_gaussian_distribution
+
+        _, covs = estimate_gaussian_distribution(
+            ts, nonzero_means=config_kwargs.get("learn_means", True)
+        )
+        covs = np.stack(
+            [np.squeeze(covs)] * config_kwargs["n_states"], axis=0
+        )
+        config_kwargs["initial_covariances"] = covs
+
+    config = hmm.Config(**config_kwargs)
+    model = hmm.Model(config)
+
+    # Save model
+    _logger.info(f"Saving model to: {model_dir}")
+    model.save(model_dir)
+
+
+def log_likelihood(
+    data, output_dir: str, static_FC: bool = False,
+    spatial: Optional[dict] = None, infer_alpha: bool = False,
+) -> None:
+    """Log-likelihood estimation for the data.
+
+    This function expects a model has already been trained and the following
+    directories to exist:
+
+    - :code:`<output_dir>/model`, which contains the trained model.
+    - :code:`<output_dir>/inf_params`, which contains the temporal dynamics.
+
+    This function will create the following file:
+
+    - :code:`<output_dir>/metrics.json`, which contains the average
+      log-likelihood per session.
+
+    Parameters
+    ----------
+    data : osl_dynamics.data.Data
+        Data object.
+    output_dir : str
+        Path to output directory.
+    static_FC : bool, optional
+        Whether to work only with static FC, i.e., n_states=1.
+    spatial : dict, optional
+        Only when ``static_FC=True``, use the spatial map file paths here.
+    infer_alpha : bool, optional
+        Whether alpha should be inferred using the model when calculating
+        log-likelihood.
+    """
+    if data is None:
+        raise ValueError("data must be passed.")
+
+    import json
+
+    # Get the session-specific data
+    ts = data.time_series(prepared=True, concatenate=False)
+
+    # Note training_data.keep is in order. You need to preserve the order
+    # between data and alpha.
+    ts = [ts[i] for i in data.keep]
+
+    if static_FC:
+        means = np.load(spatial["means"])
+        covs = np.load(spatial["covs"])
+    else:
+        # Directories
+        model_dir = f"{output_dir}/model"
+        inf_params_dir = f"{output_dir}/inf_params"
+
+        # Load model
+        from osl_dynamics import models
+
+        model = models.load(model_dir)
+
+        if infer_alpha:
+            alpha = None
+        else:
+            # Load the inferred state probabilities
+            alpha = load(f"{inf_params_dir}/alp.pkl")
+            if len(alpha) != len(ts):
+                raise ValueError(
+                    "len(alpha) and training_data.n_sessions must be the same."
+                )
+            # Stack both ts and alpha
+            alpha = np.stack(alpha)
+
+    ts = np.stack(ts)
+
+    if static_FC:
+        from osl_dynamics.utils.array_ops import estimate_gaussian_log_likelihood
+
+        metrics = float(
+            estimate_gaussian_log_likelihood(ts, means, covs, average=True)
+        )
+    else:
+        # Get posterior expected log-likelihood (averaged over session)
+        metrics = float(
+            model.get_posterior_expected_log_likelihood(ts, alpha, average=True)
+        )
+
+    # Save
+    with open(f"{output_dir}metrics.json", "w") as file:
+        json.dump({"log_likelihood": metrics}, file)
+
+
+def free_energy(data, output_dir: str) -> None:
+    """Free energy estimation for the data.
+
+    This function expects a model has already been trained and the following
+    directories to exist:
+
+    - :code:`<output_dir>/model`, which contains the trained model.
+
+    This function will create the following file:
+
+    - :code:`<output_dir>/ncv_free_energy.json`, which contains the free energy.
+
+    Parameters
+    ----------
+    data : osl_dynamics.data.Data
+        Data object.
+    output_dir : str
+        Path to output directory.
+    """
+    import json
+
+    from osl_dynamics import models
+
+    if data is None:
+        raise ValueError("data must be passed.")
+
+    model_dir = f"{output_dir}/model/"
+    model = models.load(model_dir)
+    fe = float(model.free_energy(data))
+    with open(f"{output_dir}ncv_free_energy.json", "w") as f:
+        json.dump([fe], f)

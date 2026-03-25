@@ -470,3 +470,114 @@ def list_stds(list_of_lists: List[list]) -> np.ndarray:
         Numpy array with the standard deviation of each list.
     """
     return apply_to_lists(list_of_lists, func=np.std)
+
+
+def npz2list(array):
+    """Convert npz instance to a list of numpy arrays.
+
+    Return a list of length one if array is a np.ndarray.
+
+    Parameters
+    ----------
+    array : np.ndarray or np.lib.npyio.NpzFile
+        The input array to be converted.
+
+    Returns
+    -------
+    list_of_array : list
+        The returned list of np.ndarrays.
+    """
+    if isinstance(array, np.ndarray):
+        return [array]
+    elif isinstance(array, np.lib.npyio.NpzFile):
+        return [array[key] for key in array.keys()]
+
+
+def estimate_gaussian_distribution(data, nonzero_means=False, keepdims=True, bias=True):
+    """Estimate the mean and covariance of a Gaussian distribution from data.
+
+    Parameters
+    ----------
+    data : np.ndarray
+        The (N, M) data to estimate. N is the number of samples,
+        and M is the number of dimensions.
+    nonzero_means : bool, optional
+        Whether we would like the output means to be non-zero.
+    keepdims : bool, optional
+        Whether to keep the first dimension in the output.
+    bias : bool, optional
+        Used in the covariance estimation.
+
+    Returns
+    -------
+    mean : np.ndarray
+        The estimated mean.
+    cov : np.ndarray
+        The estimated covariance matrix.
+    """
+    if nonzero_means:
+        mean = np.mean(data, axis=0, keepdims=keepdims)
+    else:
+        mean = np.zeros((1, data.shape[1])) if keepdims else np.zeros(data.shape[1])
+
+    # Subtract the mean from the data to center it
+    centered_data = data - mean
+
+    # Calculate the covariance matrix
+    cov = np.cov(centered_data, rowvar=False, bias=bias)
+    if keepdims:
+        cov = np.expand_dims(cov, axis=0)
+
+    return mean, cov
+
+
+def estimate_gaussian_log_likelihood(data, means, covs, average=True):
+    """Calculate the Gaussian log-likelihood given data, means, and covariances.
+
+    Parameters
+    ----------
+    data : np.ndarray
+        The data to estimate the log-likelihood for. The last dimension
+        should be the number of channels. All previous dimensions will be
+        reshaped to form a 2D array where each row is a data point.
+    means : np.ndarray
+        The means of the Gaussian distribution. Shape (channels,)
+        or (1, channels).
+    covs : np.ndarray
+        The covariances of the Gaussian distribution. Shape
+        (channels, channels) or (1, channels, channels).
+    average : bool, optional
+        Whether to average the log-likelihood across all data points.
+
+    Returns
+    -------
+    float
+        The log-likelihood of the data under the Gaussian distribution.
+    """
+    from scipy.stats import multivariate_normal
+
+    data_channels = data.shape[-1]
+    means_channels = means.shape[-1] if len(means.shape) > 1 else means.shape[0]
+    covs_channels = covs.shape[-1]
+
+    if data_channels != means_channels or data_channels != covs_channels:
+        raise ValueError(
+            "The number of channels in data, means, and covs must be compatible."
+        )
+
+    # Reshape data to 2D array (num_samples, num_channels)
+    data = data.reshape(-1, data_channels)
+
+    # Handle broadcasting of means and covs
+    if means.ndim == 1:
+        means = means.reshape(1, -1)
+    if covs.ndim == 2:
+        covs = covs.reshape(1, data_channels, data_channels)
+
+    # Calculate the log-likelihood using scipy's multivariate_normal
+    log_likelihoods = multivariate_normal.logpdf(data, mean=means[0], cov=covs[0])
+
+    if average:
+        return np.mean(log_likelihoods)
+    else:
+        return np.sum(log_likelihoods)
