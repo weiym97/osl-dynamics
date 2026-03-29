@@ -248,6 +248,9 @@ class HMM_MVN(Simulation):
         Standard deviation of the error added to the generated data.
     random_seed : int, optional
         Seed for random number generator.
+    means_std : float, optional
+        Standard deviation of the Gaussian used to sample random means when
+        :code:`means='random'`. Default is 0.2.
     """
 
     def __init__(
@@ -263,6 +266,7 @@ class HMM_MVN(Simulation):
         stay_prob=None,
         observation_error=0.0,
         random_seed=None,
+        means_std=0.2,
     ):
         if n_states is None:
             n_states = n_modes
@@ -276,6 +280,7 @@ class HMM_MVN(Simulation):
             n_covariances_act=n_covariances_act,
             observation_error=observation_error,
             random_seed=random_seed,
+            means_std=means_std,
         )
 
         self.n_states = self.obs_mod.n_modes

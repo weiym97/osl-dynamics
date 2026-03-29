@@ -28,6 +28,9 @@ class MVN:
         Standard deviation of the error added to the generated data.
     random_seed : int, optional
         Seed for the random number generator.
+    means_std : float, optional
+        Standard deviation of the Gaussian used to sample random means when
+        :code:`means='random'`. Default is 0.2.
     """
 
     def __init__(
@@ -39,10 +42,12 @@ class MVN:
         n_covariances_act=1,
         observation_error=0.0,
         random_seed=None,
+        means_std=0.2,
     ):
         self._rng = np.random.default_rng(random_seed)
         self.n_covariances_act = n_covariances_act
         self.observation_error = observation_error
+        self.means_std = means_std
 
         # Both the means and covariances were passed as numpy arrays
         if isinstance(means, np.ndarray) and isinstance(covariances, np.ndarray):
@@ -90,7 +95,9 @@ class MVN:
         else:
             raise ValueError("means and covariance arugments not passed correctly.")
 
-    def create_means(self, option, mu=0, sigma=0.2):
+    def create_means(self, option, mu=0, sigma=None):
+        if sigma is None:
+            sigma = self.means_std
         if option == "zero":
             means = np.zeros([self.n_modes, self.n_channels])
         elif option == "random":
