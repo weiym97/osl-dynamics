@@ -233,6 +233,9 @@ class HMM_MVN(Simulation):
         is a :code:`str`. Must be between 0 and 1.
     observation_error : float, optional
         Standard deviation of the error added to the generated data.
+    means_std : float, optional
+        Standard deviation of the Gaussian used to sample random means when
+        :code:`means='random'`. Default is 0.2.
     """
 
     def __init__(
@@ -247,6 +250,7 @@ class HMM_MVN(Simulation):
         n_covariances_act=1,
         stay_prob=None,
         observation_error=0.0,
+        means_std=0.2,
     ):
         if n_states is None:
             n_states = n_modes
@@ -259,6 +263,7 @@ class HMM_MVN(Simulation):
             n_channels=n_channels,
             n_covariances_act=n_covariances_act,
             observation_error=observation_error,
+            means_std=means_std,
         )
 
         self.n_states = self.obs_mod.n_modes

@@ -24,6 +24,9 @@ class MVN:
         Number of iterations to add activations to covariance matrices.
     observation_error : float, optional
         Standard deviation of the error added to the generated data.
+    means_std : float, optional
+        Standard deviation of the Gaussian used to sample random means when
+        :code:`means='random'`. Default is 0.2.
     """
 
     def __init__(
@@ -34,9 +37,11 @@ class MVN:
         n_channels=None,
         n_covariances_act=1,
         observation_error=0.0,
+        means_std=0.2,
     ):
         self.n_covariances_act = n_covariances_act
         self.observation_error = observation_error
+        self.means_std = means_std
 
         # Both the means and covariances were passed as numpy arrays
         if isinstance(means, np.ndarray) and isinstance(covariances, np.ndarray):
@@ -84,7 +89,9 @@ class MVN:
         else:
             raise ValueError("means and covariance arguments not passed correctly.")
 
-    def create_means(self, option, mu=0, sigma=0.2):
+    def create_means(self, option, mu=0, sigma=None):
+        if sigma is None:
+            sigma = self.means_std
         if option == "zero":
             means = np.zeros([self.n_modes, self.n_channels])
         elif option == "random":
