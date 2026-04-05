@@ -486,6 +486,184 @@ class Model(VariationalInferenceModelBase):
                 self.config.diagonal_covariances,
             )
 
+    def fit_and_get_alpha(self, dataset, epochs=None, verbose=1):
+        """Fit DyNeMo and return per-session mode mixing coefficients.
+
+        Runs a custom GradientTape loop training all model parameters
+        (inference RNN, model RNN, observation model) and captures alpha
+        from the last epoch directly, avoiding a second forward pass.
+
+        KL annealing and learning-rate decay match the behaviour of the
+        standard :code:`VariationalInferenceModelBase.fit()` + callbacks.
+
+        Parameters
+        ----------
+        dataset : list of np.ndarray
+            Per-session data arrays, each shaped ``(T_i, n_channels)``.
+        epochs : int, optional
+            Number of training epochs.  Defaults to ``config.n_epochs``.
+        verbose : int, optional
+            Verbosity (0 = silent, 1 = per-epoch summary).
+
+        Returns
+        -------
+        alphas : list of np.ndarray
+            Per-session mode mixing coefficients, each shaped
+            ``(T_i, n_modes)``.
+        """
+        if epochs is None:
+            epochs = self.config.n_epochs
+
+        seq_len    = self.config.sequence_length
+        n_channels = self.config.n_channels
+        n_modes    = self.config.n_modes
+
+        # ------------------------------------------------------------------
+        # 1. Slice sessions into (seq_len,) windows and build one TF dataset.
+        #    Record per-session metadata for later reassembly.
+        # ------------------------------------------------------------------
+        session_lengths = [x.shape[0] for x in dataset]
+        session_n_seqs  = [T // seq_len for T in session_lengths]
+
+        def _to_seqs(x):
+            n = x.shape[0] // seq_len
+            return x[:n * seq_len].reshape(n, seq_len, n_channels).astype(
+                np.float32)
+
+        x_all = np.concatenate([_to_seqs(x) for x in dataset], axis=0)
+
+        if x_all.shape[0] == 0:
+            return [
+                np.full((T, n_modes), 1.0 / n_modes, dtype=np.float32)
+                for T in session_lengths
+            ]
+
+        tf_dataset = (
+            tf.data.Dataset
+            .from_tensor_slices({"data": x_all})
+            .batch(self.config.batch_size)
+            .prefetch(tf.data.AUTOTUNE)
+        )
+
+        # ------------------------------------------------------------------
+        # 2. Build optimizer and locate layers used in the loop.
+        # ------------------------------------------------------------------
+        opt_cfg = {
+            "class_name": self.config.optimizer.lower(),
+            "config": {"learning_rate": float(self.config.learning_rate)},
+        }
+        if getattr(self.config, "gradient_clip", None) is not None:
+            opt_cfg["config"]["clipnorm"] = self.config.gradient_clip
+        optimizer = tf.keras.optimizers.get(opt_cfg)
+
+        all_vars      = self.model.trainable_variables
+        kl_loss_layer = self.model.get_layer("kl_loss")
+        alpha_layer   = self.model.get_layer("alpha")
+
+        lr_decay      = float(getattr(self.config, "lr_decay", 0.0))
+        do_kl         = self.config.do_kl_annealing
+        n_kl          = self.config.n_kl_annealing_epochs if do_kl else 0
+        decay_start   = n_kl if do_kl else 0
+
+        # Reset KL factor to 0 at the start of each fit call.
+        if do_kl:
+            kl_loss_layer.annealing_factor.assign(0.0)
+
+        # ------------------------------------------------------------------
+        # 3. Custom GradientTape training loop.
+        # ------------------------------------------------------------------
+        last_theta_seqs = None
+        epoch_losses    = []
+
+        for epoch in range(epochs):
+            # ---- KL annealing factor (matches KLAnnealingCallback) --------
+            # on_epoch_end(e-1) sets the factor used by epoch e.
+            # For linear curve that gives factor = e / n_kl (0 at epoch 0).
+            if do_kl:
+                if epoch < n_kl:
+                    curve = self.config.kl_annealing_curve
+                    if curve == "tanh":
+                        kl_factor = float(
+                            0.5 * np.tanh(
+                                self.config.kl_annealing_sharpness
+                                * (epoch - 0.5 * n_kl) / n_kl
+                            ) + 0.5
+                        )
+                    else:  # linear
+                        kl_factor = epoch / n_kl
+                else:
+                    kl_factor = 1.0
+                kl_loss_layer.annealing_factor.assign(kl_factor)
+
+            # ---- Learning-rate decay (matches VariationalInferenceModelBase) -
+            if epoch < decay_start:
+                optimizer.learning_rate = float(self.config.learning_rate)
+            else:
+                optimizer.learning_rate = float(
+                    self.config.learning_rate
+                    * np.exp(-lr_decay * (epoch - decay_start + 1))
+                )
+
+            theta_batches = []
+            epoch_loss    = 0.0
+            n_batches     = 0
+
+            for batch in tf_dataset:
+                with tf.GradientTape() as tape:
+                    outputs = self.model(
+                        {"data": batch["data"]}, training=True)
+                    loss = tf.add_n(self.model.losses)
+
+                grads = tape.gradient(loss, all_vars)
+                optimizer.apply_gradients(zip(grads, all_vars))
+
+                epoch_loss += float(loss)
+                n_batches  += 1
+
+                if epoch == epochs - 1:
+                    theta_batches.append(
+                        outputs["theta"].numpy())  # (B, seq_len, K)
+
+            avg_loss = epoch_loss / max(n_batches, 1)
+            epoch_losses.append(avg_loss)
+
+            if verbose:
+                print(f"[fit_and_get_alpha] epoch {epoch + 1}/{epochs}  "
+                      f"loss={avg_loss:.4f}")
+
+        # Store history so get_free_energy() can read it.
+        self.history = {"loss": epoch_losses}
+
+        # ------------------------------------------------------------------
+        # 4. Recover alpha from last-epoch theta.
+        # ------------------------------------------------------------------
+        last_theta_seqs = np.concatenate(theta_batches, axis=0)  # (N, S, K)
+        last_alpha_seqs = alpha_layer(last_theta_seqs).numpy()    # (N, S, K)
+
+        # ------------------------------------------------------------------
+        # 5. Reassemble per-session alpha with remainder padding.
+        # ------------------------------------------------------------------
+        alphas     = []
+        seq_offset = 0
+        for T, n_seqs in zip(session_lengths, session_n_seqs):
+            if n_seqs == 0:
+                alphas.append(
+                    np.full((T, n_modes), 1.0 / n_modes, dtype=np.float32))
+                continue
+
+            a = last_alpha_seqs[seq_offset: seq_offset + n_seqs]  # (n_seqs, S, K)
+            a = a.reshape(n_seqs * seq_len, n_modes)
+
+            remainder = T - n_seqs * seq_len
+            if remainder > 0:
+                a = np.concatenate(
+                    [a, np.tile(a[-1:], (remainder, 1))], axis=0)
+
+            alphas.append(a.astype(np.float32))
+            seq_offset += n_seqs
+
+        return alphas
+
     def sample_alpha(self, n_samples, theta=None):
         """Uses the model RNN to sample mode mixing factors, :code:`alpha`.
 

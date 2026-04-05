@@ -634,7 +634,30 @@ class Model(MarkovStateInferenceModelBase):
                 .batch(self.config.batch_size)
                 .prefetch(tf.data.AUTOTUNE)
             )
+        
+        if sigmas is not None:
+            print('Start: sanity check for debugging: ')
+            _seg_labels = [
+                (slice(0, 100),   'state1 seg1'),
+                (slice(100, 200), 'state2 seg1'),
+                (slice(200, 300), 'state1 seg2'),
+                (slice(300, 400), 'state2 seg2'),
+            ]
+            for _sl, _label in _seg_labels:
+                _ea_segs  = [_sess_ea[_sl]  for _sess_ea  in dataset]
+                _cov_segs = [_sess_cov[_sl] for _sess_cov in sigmas]
+                _ea_k  = np.concatenate(_ea_segs,  axis=0)  # (100*n_sessions, M)
+                _cov_k = np.concatenate(_cov_segs, axis=0)  # (100*n_sessions, M, M)
+                _signal_cov = np.cov(_ea_k.T)
+                _noise_cov  = _cov_k.mean(axis=0)
+                _map_cov    = _signal_cov + _noise_cov
+                print(f'{_label}: signal cov =\n', _signal_cov)
+                print(f'{_label}: avg noise cov =\n', _noise_cov)
+                print(f'{_label}: MAP cov =\n', _map_cov)
 
+            print('Look at TPM: ',self.get_trans_prob())
+            print('End: sanity check for debugging.')
+        
         # ------------------------------------------------------------------
         # 2. Observation-model trainable variables only (means + covs).
         #    The TPM is handled separately via manual EMA below.
@@ -778,6 +801,29 @@ class Model(MarkovStateInferenceModelBase):
                 new_tp     = (1.0 - rho) * current_tp + rho * phi_interim
                 new_tp     = new_tp / new_tp.sum(axis=1, keepdims=True)
                 self.set_trans_prob(new_tp.astype(np.float32))
+
+            # Gamma summary: avg per 100-tp segment across sessions
+            if sigmas is not None:
+                _all_gamma = np.concatenate(gamma_batches, axis=0)  # (N_seqs, seq_len, K)
+                _sess_gammas, _seq_off = [], 0
+                for _n_seqs in session_n_seqs:
+                    if _n_seqs > 0:
+                        _g = _all_gamma[_seq_off:_seq_off + _n_seqs].reshape(
+                            _n_seqs * seq_len, n_states)
+                        _sess_gammas.append(_g)
+                    _seq_off += _n_seqs
+                _seg_labels = [
+                    '  t=0:100   (GT state1)', '  t=100:200 (GT state2)',
+                    '  t=200:300 (GT state1)', '  t=300:400 (GT state2)',
+                ]
+                print(f'Epoch {epoch + 1} gamma summary (avg across sessions):')
+                for _i, _label in enumerate(_seg_labels):
+                    _sl = slice(_i * 100, (_i + 1) * 100)
+                    _segs = [_g[_sl] for _g in _sess_gammas
+                             if _g.shape[0] >= (_i + 1) * 100]
+                    if _segs:
+                        _mean = np.stack(_segs).mean(axis=(0, 1))
+                        print(f'{_label}: {np.array2string(_mean, precision=3)}')
 
             if epoch == epochs - 1:
                 last_gamma_seqs = np.concatenate(
