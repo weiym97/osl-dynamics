@@ -668,21 +668,47 @@ class Model(MarkovStateInferenceModelBase):
         )
 
         lr_decay  = getattr(self.config, "lr_decay", 0.0)
-        optimizer = tf.keras.optimizers.get({
-            "class_name": self.config.optimizer.lower(),
-            "config": {"learning_rate": self.config.learning_rate},
-        })
+        # Create the observation-model optimizer once and reuse across VB
+        # iterations.  A fresh optimizer per call would retrace apply_gradients
+        # (TF recompile) and discard Adam momentum state.
+        # Named with a leading underscore so it does not clash with anything in
+        # ModelBase (self.config, self.model) or MarkovStateInferenceModelBase
+        # (self.model.optimizer is the MarkovStateModelOptimizer used by fit()).
+        if not hasattr(self, "_profumo_obs_optimizer"):
+            self._profumo_obs_optimizer = tf.keras.optimizers.get({
+                "class_name": self.config.optimizer.lower(),
+                "config": {"learning_rate": self.config.learning_rate},
+            })
+        optimizer = self._profumo_obs_optimizer
 
         # ------------------------------------------------------------------
         # 3. Custom GradientTape training loop.
         #    The full model runs on every batch: data → ll → Baum-Welch →
         #    gamma → loss.  We collect gamma from the last epoch's batches.
+        #
+        #    TPM update: replicates the per-batch EMA of standard fit().
+        #    rho is computed once per epoch from the local epoch index so
+        #    the decay schedule restarts each PROFUMO VB call, matching
+        #    EMADecayCallback in standard fit().
         # ------------------------------------------------------------------
         last_gamma_seqs = None   # (N_total_seqs, seq_len, K), set on last epoch
 
         for epoch in range(epochs):
+            # LR and rho both use the local epoch so the schedule restarts
+            # each VB call rather than accumulating across iterations.
             optimizer.learning_rate = float(
                 self.config.learning_rate * np.exp(-lr_decay * epoch))
+
+            # Compute rho and prior once per epoch (constant within the
+            # epoch, matching EMADecayCallback.on_epoch_end semantics).
+            if self.config.learn_trans_prob:
+                prior_np = self.model.get_layer("hid_state_inf").trans_prob_prior.numpy(
+                ).astype(np.float64)                                    # (K, K)
+                prior_row_sums = prior_np.sum(axis=-1, keepdims=True)   # (K, 1)
+                rho = (
+                    100 * epoch / epochs + 1
+                    + self.config.trans_prob_update_delay
+                ) ** -self.config.trans_prob_update_forget
 
             gamma_batches = []
             xi_batches    = []
@@ -768,39 +794,27 @@ class Model(MarkovStateInferenceModelBase):
                 epoch_loss += float(loss)
                 n_batches  += 1
 
+                # Per-batch TPM EMA update — mirrors ExponentialMovingAverage
+                # in standard fit(): A ← (1−ρ)·A + ρ·φ_batch, where φ_batch
+                # is HiddenMarkovStateInferenceLayer._trans_prob_update(γ, ξ).
+                # rho is fixed for the epoch (computed above), matching the
+                # EMADecayCallback.on_epoch_end convention.
+                if self.config.learn_trans_prob:
+                    xi_b = xi_out.numpy().astype(np.float64)    # (B, S-1, K, K)
+                    g_b  = gamma_out.numpy().astype(np.float64) # (B, S,   K)
+                    phi_batch = (
+                        xi_b.mean(axis=(0, 1)) + prior_np
+                    ) / (
+                        g_b[:, :-1].mean(axis=(0, 1))[:, np.newaxis] + prior_row_sums
+                    )
+                    current_tp = self.get_trans_prob().astype(np.float64)
+                    new_tp     = (1.0 - rho) * current_tp + rho * phi_batch
+                    new_tp     = new_tp / new_tp.sum(axis=1, keepdims=True)
+                    self.set_trans_prob(new_tp.astype(np.float32))
+
             if verbose:
                 print(f"[fit_and_get_alpha] epoch {epoch + 1}/{epochs}  "
                       f"loss={epoch_loss / max(n_batches, 1):.4f}")
-
-            # ------------------------------------------------------------------
-            # TPM M-step: update after every epoch, matching the per-epoch EMA
-            # schedule of standard fit().  rho is evaluated at the current epoch
-            # so it follows the same decreasing schedule as EMADecayCallback.
-            # ------------------------------------------------------------------
-            if self.config.learn_trans_prob:
-                prior = self.model.get_layer("hid_state_inf").trans_prob_prior.numpy(
-                ).astype(np.float64)                               # (K, K)
-
-                epoch_xi    = np.concatenate(xi_batches, axis=0)     # (N, seq_len-1, K, K)
-                epoch_gamma = np.concatenate(gamma_batches, axis=0)  # (N, seq_len, K)
-
-                mean_xi    = epoch_xi.mean(axis=(0, 1)).astype(np.float64)        # (K, K)
-                mean_gamma = epoch_gamma[:, :-1].mean(axis=(0, 1)).astype(np.float64)  # (K,)
-
-                numerator   = mean_xi + prior
-                denominator = mean_gamma[:, np.newaxis] + prior.sum(axis=-1, keepdims=True)
-                phi_interim = numerator / denominator              # (K, K)
-
-                n_epochs_total = self.config.n_epochs
-                rho = (
-                    100 * epoch / n_epochs_total + 1
-                    + self.config.trans_prob_update_delay
-                ) ** -self.config.trans_prob_update_forget
-
-                current_tp = self.get_trans_prob().astype(np.float64)
-                new_tp     = (1.0 - rho) * current_tp + rho * phi_interim
-                new_tp     = new_tp / new_tp.sum(axis=1, keepdims=True)
-                self.set_trans_prob(new_tp.astype(np.float32))
 
             # Gamma summary: avg per 100-tp segment across sessions
             if sigmas is not None:
