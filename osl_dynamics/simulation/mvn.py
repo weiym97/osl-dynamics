@@ -106,8 +106,25 @@ class MVN:
                 sigma,
                 size=[self.n_modes, self.n_channels],
             )
+        elif option == "equidistant":
+            if self.n_channels < self.n_modes - 1:
+                raise ValueError(
+                    f"equidistant means require n_channels >= n_modes - 1, "
+                    f"got n_channels={self.n_channels}, n_modes={self.n_modes}."
+                )
+            # Vertices of a regular (n_modes-1)-simplex centred at origin.
+            # V[i] = e_i - 1/K, giving all pairwise L2 distances = sqrt(2).
+            V = np.eye(self.n_modes) - 1.0 / self.n_modes  # (K, K)
+            # Random isometric embedding into n_channels dims via thin QR.
+            A = self._rng.standard_normal((self.n_channels, self.n_modes))
+            Q, _ = np.linalg.qr(A)  # Q: (M, K), orthonormal columns
+            means = V @ Q.T  # (K, M)
+            # Scale so std over all entries equals means_std.
+            means = means / means.std() * sigma
         else:
-            raise ValueError("means must be a np.array or 'zero' or 'random'.")
+            raise ValueError(
+                "means must be a np.array or 'zero', 'random', or 'equidistant'."
+            )
         return means
 
     def create_covariances(self, option, activation_strength=1, eps=1e-6):
