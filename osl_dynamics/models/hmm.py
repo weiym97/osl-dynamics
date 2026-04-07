@@ -584,9 +584,6 @@ class Model(MarkovStateInferenceModelBase):
         n_channels = self.config.n_channels
         n_states   = self.config.n_states
 
-        print('sequence length: ', seq_len)
-        print('n channels: ', n_channels)
-        print('n states: ', n_states)
 
         # ------------------------------------------------------------------
         # 1. Slice sessions into (seq_len,) windows and build one TF dataset
@@ -634,30 +631,7 @@ class Model(MarkovStateInferenceModelBase):
                 .batch(self.config.batch_size)
                 .prefetch(tf.data.AUTOTUNE)
             )
-        
-        if sigmas is not None:
-            print('Start: sanity check for debugging: ')
-            _seg_labels = [
-                (slice(0, 100),   'state1 seg1'),
-                (slice(100, 200), 'state2 seg1'),
-                (slice(200, 300), 'state1 seg2'),
-                (slice(300, 400), 'state2 seg2'),
-            ]
-            for _sl, _label in _seg_labels:
-                _ea_segs  = [_sess_ea[_sl]  for _sess_ea  in dataset]
-                _cov_segs = [_sess_cov[_sl] for _sess_cov in sigmas]
-                _ea_k  = np.concatenate(_ea_segs,  axis=0)  # (100*n_sessions, M)
-                _cov_k = np.concatenate(_cov_segs, axis=0)  # (100*n_sessions, M, M)
-                _signal_cov = np.cov(_ea_k.T)
-                _noise_cov  = _cov_k.mean(axis=0)
-                _map_cov    = _signal_cov + _noise_cov
-                print(f'{_label}: signal cov =\n', _signal_cov)
-                print(f'{_label}: avg noise cov =\n', _noise_cov)
-                print(f'{_label}: MAP cov =\n', _map_cov)
 
-            print('Look at TPM: ',self.get_trans_prob())
-            print('End: sanity check for debugging.')
-        
         # ------------------------------------------------------------------
         # 2. Observation-model trainable variables only (means + covs).
         #    The TPM is handled separately via manual EMA below.
