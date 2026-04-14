@@ -15,6 +15,7 @@ See Also
 """
 
 import os
+import time
 import logging
 from dataclasses import dataclass
 
@@ -584,6 +585,7 @@ class Model(MarkovStateInferenceModelBase):
         n_channels = self.config.n_channels
         n_states   = self.config.n_states
 
+        # _t_total_start = time.perf_counter()
 
         # ------------------------------------------------------------------
         # 1. Slice sessions into (seq_len,) windows and build one TF dataset
@@ -598,6 +600,7 @@ class Model(MarkovStateInferenceModelBase):
                 return (x - mu) / std
             dataset = [_zscore(x) for x in dataset]
 
+        # _t_prep_start  = time.perf_counter()
         session_lengths = [x.shape[0] for x in dataset]
         session_n_seqs  = [T // seq_len for T in session_lengths]
 
@@ -613,11 +616,11 @@ class Model(MarkovStateInferenceModelBase):
         x_all = np.concatenate([_to_seqs(x) for x in dataset], axis=0)
 
         if sigmas is not None:
-            print('Sigmas provided')
+            # print('Sigmas provided')
             sigma_all = np.concatenate(
                 [_sigma_to_seqs(s) for s in sigmas], axis=0)  # (N, seq_len, M, M)
-            print('x_all shape: ',x_all.shape)
-            print('sigma_all shape: ',sigma_all.shape)
+            # print('x_all shape: ',x_all.shape)
+            # print('sigma_all shape: ',sigma_all.shape)
             tf_dataset = (
                 tf.data.Dataset
                 .from_tensor_slices({"data": x_all, "sigma": sigma_all})
@@ -631,6 +634,9 @@ class Model(MarkovStateInferenceModelBase):
                 .batch(self.config.batch_size)
                 .prefetch(tf.data.AUTOTUNE)
             )
+
+        # _t_prep_end = time.perf_counter()
+        # print(f"[fit_and_get_alpha] data prep:  {_t_prep_end - _t_prep_start:.3f}s", flush=True)
 
         # ------------------------------------------------------------------
         # 2. Observation-model trainable variables only (means + covs).
@@ -656,56 +662,62 @@ class Model(MarkovStateInferenceModelBase):
         optimizer = self._profumo_obs_optimizer
 
         # ------------------------------------------------------------------
-        # 3. Custom GradientTape training loop.
-        #    The full model runs on every batch: data → ll → Baum-Welch →
-        #    gamma → loss.  We collect gamma from the last epoch's batches.
+        # 3. Compiled training step (@tf.function).
+        #    Traced once on the first call and cached on self so that
+        #    subsequent VB iterations reuse the compiled graph without
+        #    retracing.  Separate functions for the standard and sigma
+        #    paths avoid retracing on input-signature changes.
         #
-        #    TPM update: replicates the per-batch EMA of standard fit().
-        #    rho is computed once per epoch from the local epoch index so
-        #    the decay schedule restarts each PROFUMO VB call, matching
-        #    EMADecayCallback in standard fit().
+        #    Layer objects are captured in the closure at trace time;
+        #    TF variables (weights, optimizer state) are updated in-place
+        #    so the compiled graph always sees current values.
+        #
+        #    TPM update: still Python/NumPy per batch (negligible cost),
+        #    so it stays outside @tf.function to keep the compiled step
+        #    free of Python round-trips.
+        #
+        #    gamma is collected only on the last epoch to avoid
+        #    unnecessary .numpy() copies on intermediate epochs.
         # ------------------------------------------------------------------
-        last_gamma_seqs = None   # (N_total_seqs, seq_len, K), set on last epoch
+        if sigmas is None:
+            if not hasattr(self, "_profumo_train_step"):
+                _obs_vars      = obs_vars
+                _optimizer     = optimizer
+                _means_layer   = self.model.get_layer("means")
+                _covs_layer    = self.model.get_layer("covs")
+                _ll_layer      = self.model.get_layer("ll")
+                _hid_state_inf = self.model.get_layer("hid_state_inf")
+                _ll_loss_layer = self.model.get_layer("ll_loss")
 
-        for epoch in range(epochs):
-            # LR and rho both use the local epoch so the schedule restarts
-            # each VB call rather than accumulating across iterations.
-            optimizer.learning_rate = float(
-                self.config.learning_rate * np.exp(-lr_decay * epoch))
+                @tf.function
+                def _train_step(x_batch):
+                    with tf.GradientTape() as tape:
+                        mu        = _means_layer(x_batch, training=True)
+                        D         = _covs_layer(x_batch, training=True)
+                        ll        = _ll_layer([x_batch, mu, D], training=True)
+                        gamma_out, xi_out = _hid_state_inf(ll)
+                        loss      = tf.reduce_mean(
+                            _ll_loss_layer([ll, gamma_out]))
+                    grads = tape.gradient(loss, _obs_vars)
+                    _optimizer.apply_gradients(zip(grads, _obs_vars))
+                    return loss, gamma_out, xi_out
 
-            # Compute rho and prior once per epoch (constant within the
-            # epoch, matching EMADecayCallback.on_epoch_end semantics).
-            if self.config.learn_trans_prob:
-                prior_np = self.model.get_layer("hid_state_inf").trans_prob_prior.numpy(
-                ).astype(np.float64)                                    # (K, K)
-                prior_row_sums = prior_np.sum(axis=-1, keepdims=True)   # (K, 1)
-                rho = (
-                    100 * epoch / epochs + 1
-                    + self.config.trans_prob_update_delay
-                ) ** -self.config.trans_prob_update_forget
+                self._profumo_train_step = _train_step
+            train_step_fn = self._profumo_train_step
 
-            gamma_batches = []
-            xi_batches    = []
-            epoch_loss    = 0.0
-            n_batches     = 0
+        else:
+            if not hasattr(self, "_profumo_train_step_sigma"):
+                _obs_vars      = obs_vars
+                _optimizer     = optimizer
+                _means_layer   = self.model.get_layer("means")
+                _covs_layer    = self.model.get_layer("covs")
+                _ll_layer      = self.model.get_layer("ll")
+                _hid_state_inf = self.model.get_layer("hid_state_inf")
+                _ll_loss_layer = self.model.get_layer("ll_loss")
 
-            for batch in tf_dataset:
-                x_batch = batch["data"]
-
-                with tf.GradientTape() as tape:
-                    if sigmas is None:
-                        # --------------------------------------------------
-                        # Standard first-order path: run the full Keras model
-                        # (obs layers → Baum-Welch → loss) in one call.
-                        # --------------------------------------------------
-                        outputs = self.model({"data": x_batch}, training=True)
-                        loss    = tf.reduce_mean(outputs["ll_loss"])
-                        if self.model.losses:
-                            loss = loss + tf.add_n(self.model.losses)
-                        gamma_out = outputs["gamma"]
-                        xi_out    = outputs["xi"]
-
-                    else:
+                @tf.function
+                def _train_step_sigma(x_batch, sigma_batch):
+                    with tf.GradientTape() as tape:
                         # --------------------------------------------------
                         # Second-order (fully-Bayesian) path.
                         #
@@ -730,41 +742,56 @@ class Model(MarkovStateInferenceModelBase):
                         # correction term is needed, and the EM fixed point is
                         # self-consistent at C_k = C_k^sample + C_k^sigma.
                         # --------------------------------------------------
-                        sigma_batch = tf.cast(batch["sigma"], tf.float32)
-
-                        # Compute emission LL via the obs-model layers.
-                        covs_layer    = self.model.get_layer("covs")
-                        means_layer   = self.model.get_layer("means")
-                        ll_layer      = self.model.get_layer("ll")
-                        cov_matrices  = covs_layer(x_batch, training=True)   # (K,M,M)
-                        mu            = means_layer(x_batch, training=True)  # (K,M)
-                        ll_raw        = ll_layer(
-                            [x_batch, mu, cov_matrices], training=True)      # (B,S,K)
-
-                        # Sigma correction to emission LL:
-                        #   correction[b,s,k] = 0.5 * tr(Λ_k * Σ_{b,s})
-                        #                     = 0.5 * einsum(kmn,bsmn->bsk)
-                        prec_matrices = tf.linalg.inv(cov_matrices)          # (K,M,M)
+                        cov_matrices  = _covs_layer(x_batch, training=True)   # (K,M,M)
+                        mu            = _means_layer(x_batch, training=True)  # (K,M)
+                        ll_raw        = _ll_layer(
+                            [x_batch, mu, cov_matrices], training=True)       # (B,S,K)
+                        # Sigma correction: correction[b,s,k] = 0.5*tr(Λ_k·Σ_{b,s})
+                        prec_matrices = tf.linalg.inv(cov_matrices)           # (K,M,M)
                         ll_sigma_corr = 0.5 * tf.einsum(
                             "kmn,bsmn->bsk", prec_matrices, sigma_batch)
-                        ll_corrected  = ll_raw - ll_sigma_corr               # (B,S,K)
+                        ll_corrected  = ll_raw - ll_sigma_corr                # (B,S,K)
+                        gamma_out, xi_out = _hid_state_inf(ll_corrected)
+                        loss = tf.reduce_mean(
+                            _ll_loss_layer([ll_corrected, gamma_out]))
+                    grads = tape.gradient(loss, _obs_vars)
+                    _optimizer.apply_gradients(zip(grads, _obs_vars))
+                    return loss, gamma_out, xi_out
 
-                        # E-step: Baum-Welch on corrected emission LL.
-                        hid_state_inf = self.model.get_layer("hid_state_inf")
-                        gamma_out, xi_out = hid_state_inf(ll_corrected)
+                self._profumo_train_step_sigma = _train_step_sigma
+            train_step_fn = self._profumo_train_step_sigma
 
-                        # M-step loss: −E_γ[log p̃(x_t|k)] (includes sigma).
-                        ll_loss_layer = self.model.get_layer("ll_loss")
-                        ll_loss       = ll_loss_layer([ll_corrected, gamma_out])
-                        loss          = tf.reduce_mean(ll_loss)
-                        if self.model.losses:
-                            loss = loss + tf.add_n(self.model.losses)
+        last_gamma_seqs = None
 
-                grads = tape.gradient(loss, obs_vars)
-                optimizer.apply_gradients(zip(grads, obs_vars))
+        for epoch in range(epochs):
+            # LR and rho both use the local epoch so the schedule restarts
+            # each VB call rather than accumulating across iterations.
+            optimizer.learning_rate = float(
+                self.config.learning_rate * np.exp(-lr_decay * epoch))
 
-                gamma_batches.append(gamma_out.numpy())  # (B, seq_len, K)
-                xi_batches.append(xi_out.numpy())         # (B, seq_len-1, K, K)
+            # Compute rho and prior once per epoch (constant within the
+            # epoch, matching EMADecayCallback.on_epoch_end semantics).
+            if self.config.learn_trans_prob:
+                prior_np = self.model.get_layer("hid_state_inf").trans_prob_prior.numpy(
+                ).astype(np.float64)                                    # (K, K)
+                prior_row_sums = prior_np.sum(axis=-1, keepdims=True)   # (K, 1)
+                rho = (
+                    100 * epoch / epochs + 1
+                    + self.config.trans_prob_update_delay
+                ) ** -self.config.trans_prob_update_forget
+
+            is_last_epoch = (epoch == epochs - 1)
+            gamma_batches = [] if is_last_epoch else None
+            epoch_loss    = 0.0
+            n_batches     = 0
+
+            for batch in tf_dataset:
+                if sigmas is None:
+                    loss, gamma_out, xi_out = train_step_fn(batch["data"])
+                else:
+                    loss, gamma_out, xi_out = train_step_fn(
+                        batch["data"], tf.cast(batch["sigma"], tf.float32))
+
                 epoch_loss += float(loss)
                 n_batches  += 1
 
@@ -786,36 +813,14 @@ class Model(MarkovStateInferenceModelBase):
                     new_tp     = new_tp / new_tp.sum(axis=1, keepdims=True)
                     self.set_trans_prob(new_tp.astype(np.float32))
 
-            if verbose:
-                print(f"[fit_and_get_alpha] epoch {epoch + 1}/{epochs}  "
-                      f"loss={epoch_loss / max(n_batches, 1):.4f}")
+                if is_last_epoch:
+                    gamma_batches.append(gamma_out.numpy())
 
-            # Gamma summary: avg per 100-tp segment across sessions
-            if sigmas is not None:
-                _all_gamma = np.concatenate(gamma_batches, axis=0)  # (N_seqs, seq_len, K)
-                _sess_gammas, _seq_off = [], 0
-                for _n_seqs in session_n_seqs:
-                    if _n_seqs > 0:
-                        _g = _all_gamma[_seq_off:_seq_off + _n_seqs].reshape(
-                            _n_seqs * seq_len, n_states)
-                        _sess_gammas.append(_g)
-                    _seq_off += _n_seqs
-                _seg_labels = [
-                    '  t=0:100   (GT state1)', '  t=100:200 (GT state2)',
-                    '  t=200:300 (GT state1)', '  t=300:400 (GT state2)',
-                ]
-                print(f'Epoch {epoch + 1} gamma summary (avg across sessions):')
-                for _i, _label in enumerate(_seg_labels):
-                    _sl = slice(_i * 100, (_i + 1) * 100)
-                    _segs = [_g[_sl] for _g in _sess_gammas
-                             if _g.shape[0] >= (_i + 1) * 100]
-                    if _segs:
-                        _mean = np.stack(_segs).mean(axis=(0, 1))
-                        print(f'{_label}: {np.array2string(_mean, precision=3)}')
+            print(f"[fit_and_get_alpha] epoch {epoch + 1}/{epochs}  "
+                  f"loss={epoch_loss / max(n_batches, 1):.4f}", flush=True)
 
-            if epoch == epochs - 1:
-                last_gamma_seqs = np.concatenate(
-                    gamma_batches, axis=0)           # (N_total_seqs, seq_len, K)
+        last_gamma_seqs = np.concatenate(
+            gamma_batches, axis=0)                   # (N_total_seqs, seq_len, K)
 
         # ------------------------------------------------------------------
         # 4. Reassemble per-session gamma arrays.
@@ -840,10 +845,13 @@ class Model(MarkovStateInferenceModelBase):
             gammas.append(g.astype(np.float32))
             seq_offset += n_seqs
 
+        # print(f"[fit_and_get_alpha] total:      "
+        #       f"{time.perf_counter() - _t_total_start:.2f}s", flush=True)
+
         return gammas
 
     def initialize_from_sessions(self, sessions, n_init=3, n_init_epochs=1,
-                                 zscore=False):
+                                 zscore=False, verbose=0):
         """Data-driven initialization of state means/covariances from sessions.
 
         Called by PROFUMO's HMMWrapper on the very first group-level VB
@@ -959,11 +967,11 @@ class Model(MarkovStateInferenceModelBase):
             # ----- short training run to refine & evaluate -----
             if n_init_epochs > 0:
                 gammas = self.fit_and_get_alpha(
-                    sessions, epochs=n_init_epochs, zscore=False, verbose=0,
+                    sessions, epochs=n_init_epochs, zscore=False, verbose=verbose,
                 )
             else:
                 gammas = self.fit_and_get_alpha(
-                    sessions, epochs=1, zscore=False, verbose=0,
+                    sessions, epochs=1, zscore=False, verbose=verbose,
                 )
 
             # Evaluate loss: use the last-epoch loss from the training history
