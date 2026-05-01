@@ -486,7 +486,7 @@ class Model(VariationalInferenceModelBase):
                 self.config.diagonal_covariances,
             )
 
-    def fit_and_get_alpha(self, dataset, epochs=None, verbose=1):
+    def fit_and_get_alpha(self, dataset, sigmas=None, epochs=None, verbose=1):
         """Fit DyNeMo and return per-session mode mixing coefficients.
 
         Runs a custom GradientTape loop training all model parameters
@@ -500,6 +500,22 @@ class Model(VariationalInferenceModelBase):
         ----------
         dataset : list of np.ndarray
             Per-session data arrays, each shaped ``(T_i, n_channels)``.
+        sigmas : list of np.ndarray, optional
+            Per-session posterior covariance cubes from DMvN, each shaped
+            ``(T_i, n_channels, n_channels)`` (float32).  When provided,
+            the fully-Bayesian second-order emission correction
+
+            .. math::
+
+                0.5 \\sum_{t,k} \\alpha_{t,k} \\operatorname{tr}(\\Lambda_k \\Sigma_t)
+
+            is added to the ELBO after the inference network has produced
+            :math:`\\alpha_t` from the first-order data.  A
+            ``tf.stop_gradient`` is applied to :math:`\\alpha_t` inside the
+            correction term so that only the mode-covariance parameters
+            :math:`D_k` receive the second-order gradient; the inference RNN
+            is updated solely by the standard ELBO.  Pass ``None`` (default)
+            for the original first-order behaviour.
         epochs : int, optional
             Number of training epochs.  Defaults to ``config.n_epochs``.
         verbose : int, optional
@@ -538,12 +554,26 @@ class Model(VariationalInferenceModelBase):
                 for T in session_lengths
             ]
 
-        tf_dataset = (
-            tf.data.Dataset
-            .from_tensor_slices({"data": x_all})
-            .batch(self.config.batch_size)
-            .prefetch(tf.data.AUTOTUNE)
-        )
+        if sigmas is not None:
+            def _sigma_to_seqs(sigma):
+                n = sigma.shape[0] // seq_len
+                return sigma[:n * seq_len].reshape(
+                    n, seq_len, n_channels, n_channels).astype(np.float32)
+            sigma_all = np.concatenate(
+                [_sigma_to_seqs(s) for s in sigmas], axis=0)
+            tf_dataset = (
+                tf.data.Dataset
+                .from_tensor_slices({"data": x_all, "sigma": sigma_all})
+                .batch(self.config.batch_size)
+                .prefetch(tf.data.AUTOTUNE)
+            )
+        else:
+            tf_dataset = (
+                tf.data.Dataset
+                .from_tensor_slices({"data": x_all})
+                .batch(self.config.batch_size)
+                .prefetch(tf.data.AUTOTUNE)
+            )
 
         # ------------------------------------------------------------------
         # 2. Build optimizer and locate layers used in the loop.
@@ -554,7 +584,15 @@ class Model(VariationalInferenceModelBase):
         }
         if getattr(self.config, "gradient_clip", None) is not None:
             opt_cfg["config"]["clipnorm"] = self.config.gradient_clip
-        optimizer = tf.keras.optimizers.get(opt_cfg)
+
+        if sigmas is not None:
+            # Cache the optimizer across VB iterations to preserve Adam
+            # momentum state, matching the HMMWrapper/HMMGroup design.
+            if not hasattr(self, "_profumo_sigma_optimizer"):
+                self._profumo_sigma_optimizer = tf.keras.optimizers.get(opt_cfg)
+            optimizer = self._profumo_sigma_optimizer
+        else:
+            optimizer = tf.keras.optimizers.get(opt_cfg)
 
         all_vars      = self.model.trainable_variables
         kl_loss_layer = self.model.get_layer("kl_loss")
@@ -570,10 +608,122 @@ class Model(VariationalInferenceModelBase):
             kl_loss_layer.annealing_factor.assign(0.0)
 
         # ------------------------------------------------------------------
-        # 3. Custom GradientTape training loop.
+        # 3a. Compiled sigma training step (built once, cached on self).
+        #
+        #     Design rationale
+        #     ----------------
+        #     The inference RNN only sees first-order data x_t and infers
+        #     alpha_t.  The second-order correction
+        #
+        #         0.5 * sum_k alpha_k * tr(inv(D_k) * Sigma_t)
+        #
+        #     is added to the ELBO *after* alpha_t has been produced, with
+        #     tf.stop_gradient applied to alpha so that only the mode
+        #     covariance parameters D_k receive this gradient.  The inference
+        #     RNN continues to be updated by the standard NLL + KL ELBO.
+        #
+        #     We call all DyNeMo layers manually (rather than self.model(batch))
+        #     so that D_k appears exactly once in the tape — calling covs_layer
+        #     inside the model and again for the correction would double its
+        #     gradient.
+        #
+        #     kl_loss_layer.annealing_factor and optimizer.learning_rate are
+        #     TF Variables, so per-epoch Python assignments outside @tf.function
+        #     are visible inside the compiled graph without retracing.
         # ------------------------------------------------------------------
-        last_theta_seqs = None
-        epoch_losses    = []
+        if sigmas is not None and not hasattr(self, "_profumo_train_step_sigma"):
+            _all_vars         = all_vars
+            _opt              = optimizer
+            _data_drop_layer  = self.model.get_layer("data_drop")
+            _inf_rnn_layer    = self.model.get_layer("inf_rnn")
+            _inf_mu_layer     = self.model.get_layer("inf_mu")
+            _inf_sigma_layer  = self.model.get_layer("inf_sigma")
+            _theta_layer      = self.model.get_layer("theta")
+            _alpha_layer      = alpha_layer
+            _means_layer      = self.model.get_layer("means")
+            _covs_layer       = self.model.get_layer("covs")
+            _mix_means_layer  = self.model.get_layer("mix_means")
+            _mix_covs_layer   = self.model.get_layer("mix_covs")
+            _ll_loss_layer    = self.model.get_layer("ll_loss")
+            _theta_drop_layer = self.model.get_layer("theta_drop")
+            _mod_rnn_layer    = self.model.get_layer("mod_rnn")
+            _mod_mu_layer     = self.model.get_layer("mod_mu")
+            _mod_sigma_layer  = self.model.get_layer("mod_sigma")
+            _kl_div_layer     = self.model.get_layer("kl_div")
+            _kl_loss_layer    = kl_loss_layer
+            _loss_calc        = self.config.loss_calc  # constant; baked in at trace time
+
+            @tf.function
+            def _train_step_sigma(x_batch, sigma_batch):
+                with tf.GradientTape() as tape:
+                    # ---- Encoder: first-order path (unchanged) ----------
+                    data_drop = _data_drop_layer(x_batch, training=True)
+                    inf_rnn   = _inf_rnn_layer(data_drop, training=True)
+                    inf_mu    = _inf_mu_layer(inf_rnn, training=True)
+                    inf_sigma = _inf_sigma_layer(inf_rnn, training=True)
+                    theta     = _theta_layer([inf_mu, inf_sigma], training=True)
+                    alpha     = _alpha_layer(theta, training=True)
+
+                    # ---- Observation model ------------------------------
+                    mu = _means_layer(x_batch, training=True)
+                    D  = _covs_layer(x_batch, training=True)   # (K, M, M)
+                    m  = _mix_means_layer([alpha, mu], training=True)
+                    C  = _mix_covs_layer([alpha, D], training=True)
+                    # LogLikelihoodLossLayer returns tf.expand_dims(nll, -1)
+                    nll = tf.squeeze(
+                        _ll_loss_layer([x_batch, m, C], training=True))
+
+                    # ---- KL prior (temporal model RNN) ------------------
+                    theta_drop = _theta_drop_layer(theta, training=True)
+                    mod_rnn    = _mod_rnn_layer(theta_drop, training=True)
+                    mod_mu     = _mod_mu_layer(mod_rnn, training=True)
+                    mod_sigma  = _mod_sigma_layer(mod_rnn, training=True)
+                    kl_div     = _kl_div_layer(
+                        [inf_mu, inf_sigma, mod_mu, mod_sigma], training=True)
+                    # KLLossLayer applies annealing_factor; returns expand_dims(kl, -1)
+                    kl = tf.squeeze(_kl_loss_layer(kl_div, training=True))
+
+                    # ---- Second-order Bayesian correction ---------------
+                    # alpha is detached so the inference RNN receives no
+                    # gradient from the second-order term; only D_k is updated.
+                    prec     = tf.linalg.inv(D)                          # (K, M, M)
+                    alpha_sg = tf.stop_gradient(alpha)                   # (B, S, K)
+                    corr     = tf.einsum(
+                        "bsk,kmn,bsmn->bs", alpha_sg, prec, sigma_batch) # (B, S)
+                    if _loss_calc == "sum":
+                        sigma_corr = 0.5 * tf.reduce_mean(
+                            tf.reduce_sum(corr, axis=1))
+                    else:
+                        sigma_corr = 0.5 * tf.reduce_mean(corr)
+
+                    loss = nll + kl + sigma_corr
+
+                grads = tape.gradient(loss, _all_vars)
+                _opt.apply_gradients(zip(grads, _all_vars))
+                return loss, theta
+
+            self._profumo_train_step_sigma = _train_step_sigma
+
+        if sigmas is None and not hasattr(self, "_profumo_train_step"):
+            _all_vars = all_vars
+            _opt      = optimizer
+            _model    = self.model
+
+            @tf.function
+            def _train_step(x_batch):
+                with tf.GradientTape() as tape:
+                    outputs = _model({"data": x_batch}, training=True)
+                    loss = tf.add_n(_model.losses)
+                grads = tape.gradient(loss, _all_vars)
+                _opt.apply_gradients(zip(grads, _all_vars))
+                return loss, outputs["theta"]
+
+            self._profumo_train_step = _train_step
+
+        # ------------------------------------------------------------------
+        # 3b. Custom GradientTape training loop.
+        # ------------------------------------------------------------------
+        epoch_losses = []
 
         for epoch in range(epochs):
             # ---- KL annealing factor (matches KLAnnealingCallback) --------
@@ -595,34 +745,32 @@ class Model(VariationalInferenceModelBase):
                     kl_factor = 1.0
                 kl_loss_layer.annealing_factor.assign(kl_factor)
 
-            # ---- Learning-rate decay (matches VariationalInferenceModelBase) -
-            if epoch < decay_start:
-                optimizer.learning_rate = float(self.config.learning_rate)
-            else:
-                optimizer.learning_rate = float(
-                    self.config.learning_rate
-                    * np.exp(-lr_decay * (epoch - decay_start + 1))
-                )
+            # ---- Learning-rate decay ------------------------------------
+            cur_lr = float(
+                self.config.learning_rate
+                if epoch < decay_start
+                else self.config.learning_rate
+                     * np.exp(-lr_decay * (epoch - decay_start + 1))
+            )
+            optimizer.learning_rate = cur_lr
 
             theta_batches = []
             epoch_loss    = 0.0
             n_batches     = 0
 
             for batch in tf_dataset:
-                with tf.GradientTape() as tape:
-                    outputs = self.model(
-                        {"data": batch["data"]}, training=True)
-                    loss = tf.add_n(self.model.losses)
-
-                grads = tape.gradient(loss, all_vars)
-                optimizer.apply_gradients(zip(grads, all_vars))
+                if sigmas is None:
+                    loss, theta_out = self._profumo_train_step(batch["data"])
+                else:
+                    loss, theta_out = self._profumo_train_step_sigma(
+                        batch["data"],
+                        tf.cast(batch["sigma"], tf.float32))
 
                 epoch_loss += float(loss)
                 n_batches  += 1
 
                 if epoch == epochs - 1:
-                    theta_batches.append(
-                        outputs["theta"].numpy())  # (B, seq_len, K)
+                    theta_batches.append(theta_out.numpy())  # (B, seq_len, K)
 
             avg_loss = epoch_loss / max(n_batches, 1)
             epoch_losses.append(avg_loss)
