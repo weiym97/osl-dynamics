@@ -227,6 +227,9 @@ class DummyLayer(layers.Layer):
     def call(self, inputs, **kwargs):
         return inputs
 
+    def compute_output_shape(self, input_shape):
+        return input_shape
+
 
 class InverseCholeskyLayer(layers.Layer):
     """Layer for getting Cholesky vectors from positive definite symmetric matrices.

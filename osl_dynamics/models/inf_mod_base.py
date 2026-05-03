@@ -187,6 +187,9 @@ class VariationalInferenceModelBase(ModelBase):
         history : history
             The training history of the best initialization.
         """
+        print('We are in random subset initialization')
+        print('Type of training data: ', type(training_data))
+        print('####################################')
         n_epochs = n_epochs or self.config.n_init_epochs
         n_init = n_init or self.config.n_init
         take = take or self.config.init_take
