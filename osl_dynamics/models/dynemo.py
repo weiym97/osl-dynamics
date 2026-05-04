@@ -486,7 +486,8 @@ class Model(VariationalInferenceModelBase):
                 self.config.diagonal_covariances,
             )
 
-    def fit_and_get_alpha(self, dataset, sigmas=None, epochs=None, verbose=1):
+    def fit_and_get_alpha(self, dataset, sigmas=None, epochs=None, verbose=1,
+                          do_kl_annealing=None, n_kl_annealing_epochs=None):
         """Fit DyNeMo and return per-session mode mixing coefficients.
 
         Runs a custom GradientTape loop training all model parameters
@@ -520,6 +521,12 @@ class Model(VariationalInferenceModelBase):
             Number of training epochs.  Defaults to ``config.n_epochs``.
         verbose : int, optional
             Verbosity (0 = silent, 1 = per-epoch summary).
+        do_kl_annealing : bool, optional
+            Override ``config.do_kl_annealing`` for this call only.
+            ``None`` (default) uses the config value.
+        n_kl_annealing_epochs : int, optional
+            Override ``config.n_kl_annealing_epochs`` for this call only.
+            ``None`` (default) uses the config value.
 
         Returns
         -------
@@ -599,8 +606,10 @@ class Model(VariationalInferenceModelBase):
         alpha_layer   = self.model.get_layer("alpha")
 
         lr_decay      = float(getattr(self.config, "lr_decay", 0.0))
-        do_kl         = self.config.do_kl_annealing
-        n_kl          = self.config.n_kl_annealing_epochs if do_kl else 0
+        do_kl         = (do_kl_annealing if do_kl_annealing is not None
+                         else self.config.do_kl_annealing)
+        n_kl          = (n_kl_annealing_epochs if n_kl_annealing_epochs is not None
+                         else (self.config.n_kl_annealing_epochs if do_kl else 0))
         decay_start   = n_kl if do_kl else 0
 
         # Reset KL factor to 0 at the start of each fit call.
