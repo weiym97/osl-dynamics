@@ -534,6 +534,10 @@ class Model(VariationalInferenceModelBase):
             Per-session mode mixing coefficients, each shaped
             ``(T_i, n_modes)``.
         """
+
+        print('KL annealing is', 'ON' if (do_kl_annealing if do_kl_annealing is not None else self.config.do_kl_annealing) else 'OFF')
+        print('KL annealing epochs:', n_kl_annealing_epochs if n_kl_annealing_epochs is not None else self.config.n_kl_annealing_epochs)
+        print('##########################################################')
         if epochs is None:
             epochs = self.config.n_epochs
 
