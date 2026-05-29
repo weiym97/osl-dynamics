@@ -508,15 +508,18 @@ class Model(VariationalInferenceModelBase):
 
             .. math::
 
-                0.5 \\sum_{t,k} \\alpha_{t,k} \\operatorname{tr}(\\Lambda_k \\Sigma_t)
+                0.5 \\sum_t \\operatorname{tr}(\\Lambda_t \\Sigma_t), \\quad
+                \\Lambda_t = \\Bigl(\\sum_k \\alpha_{t,k} D_k\\Bigr)^{-1}
 
             is added to the ELBO after the inference network has produced
-            :math:`\\alpha_t` from the first-order data.  A
-            ``tf.stop_gradient`` is applied to :math:`\\alpha_t` inside the
-            correction term so that only the mode-covariance parameters
-            :math:`D_k` receive the second-order gradient; the inference RNN
-            is updated solely by the standard ELBO.  Pass ``None`` (default)
-            for the original first-order behaviour.
+            :math:`\\alpha_t` from the first-order data.  :math:`\\Lambda_t`
+            is the inverse of the *blended* covariance at each time step, not
+            a weighted sum of per-mode precisions.  A ``tf.stop_gradient`` is
+            applied to :math:`\\alpha_t` inside the blended covariance so
+            that only the mode-covariance parameters :math:`D_k` receive the
+            second-order gradient; the inference RNN is updated solely by the
+            standard ELBO.  Pass ``None`` (default) for the original
+            first-order behaviour.
         epochs : int, optional
             Number of training epochs.  Defaults to ``config.n_epochs``.
         verbose : int, optional
@@ -632,17 +635,20 @@ class Model(VariationalInferenceModelBase):
         #     The inference RNN only sees first-order data x_t and infers
         #     alpha_t.  The second-order correction
         #
-        #         0.5 * sum_k alpha_k * tr(inv(D_k) * Sigma_t)
+        #         0.5 * tr(inv(sum_k alpha_k * D_k) * Sigma_t)
+        #           = 0.5 * tr(Lambda_t * Sigma_t)
         #
         #     is added to the ELBO *after* alpha_t has been produced, with
-        #     tf.stop_gradient applied to alpha so that only the mode
-        #     covariance parameters D_k receive this gradient.  The inference
-        #     RNN continues to be updated by the standard NLL + KL ELBO.
+        #     tf.stop_gradient applied to alpha inside the blended covariance
+        #     so that only the mode covariance parameters D_k receive this
+        #     gradient.  The inference RNN is updated solely by the standard
+        #     NLL + KL ELBO.
         #
         #     We call all DyNeMo layers manually (rather than self.model(batch))
-        #     so that D_k appears exactly once in the tape — calling covs_layer
-        #     inside the model and again for the correction would double its
-        #     gradient.
+        #     so that D_k's gradient accumulates correctly from two paths:
+        #       - NLL path: through C = mix_covs(alpha, D)
+        #       - correction path: through C_sg = mix_covs(stop_gradient(alpha), D)
+        #     Both contributions are correct and desired.
         #
         #     kl_loss_layer.annealing_factor and optimizer.learning_rate are
         #     TF Variables, so per-epoch Python assignments outside @tf.function
@@ -701,12 +707,19 @@ class Model(VariationalInferenceModelBase):
                     kl = tf.squeeze(_kl_loss_layer(kl_div, training=True))
 
                     # ---- Second-order Bayesian correction ---------------
-                    # alpha is detached so the inference RNN receives no
-                    # gradient from the second-order term; only D_k is updated.
-                    prec     = tf.linalg.inv(D)                          # (K, M, M)
-                    alpha_sg = tf.stop_gradient(alpha)                   # (B, S, K)
-                    corr     = tf.einsum(
-                        "bsk,kmn,bsmn->bs", alpha_sg, prec, sigma_batch) # (B, S)
+                    # Correct term: 0.5 * tr(Λ_t Σ_t) where
+                    # Λ_t = (sum_k α_{t,k} D_k)^{-1}  (blended precision).
+                    # Recompute blended covariance with stop_gradient(alpha)
+                    # so the inference RNN receives no gradient from this
+                    # term; only D_k is updated.  MixMatricesLayer has no
+                    # trainable params, so calling it twice is safe — the
+                    # D gradients from both C and C_sg accumulate correctly.
+                    alpha_sg = tf.stop_gradient(alpha)                    # (B, S, K)
+                    C_sg     = _mix_covs_layer([alpha_sg, D],
+                                               training=True)             # (B, S, M, M)
+                    Lambda_t = tf.linalg.inv(C_sg)                       # (B, S, M, M)
+                    corr     = tf.einsum("bsmn,bsmn->bs",
+                                         Lambda_t, sigma_batch)           # (B, S)
                     if _loss_calc == "sum":
                         sigma_corr = 0.5 * tf.reduce_mean(
                             tf.reduce_sum(corr, axis=1))
