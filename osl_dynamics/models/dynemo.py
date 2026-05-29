@@ -603,7 +603,11 @@ class Model(VariationalInferenceModelBase):
                 self._profumo_sigma_optimizer = tf.keras.optimizers.get(opt_cfg)
             optimizer = self._profumo_sigma_optimizer
         else:
-            optimizer = tf.keras.optimizers.get(opt_cfg)
+            # Cache optimizer so Adam momentum accumulates across VB iterations,
+            # matching the behaviour of the sigma path.
+            if not hasattr(self, "_profumo_optimizer"):
+                self._profumo_optimizer = tf.keras.optimizers.get(opt_cfg)
+            optimizer = self._profumo_optimizer
 
         all_vars      = self.model.trainable_variables
         kl_loss_layer = self.model.get_layer("kl_loss")
