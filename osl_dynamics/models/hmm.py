@@ -577,6 +577,11 @@ class Model(MarkovStateInferenceModelBase):
         gammas : list of np.ndarray
             Per-session state probabilities, each shaped
             ``(T_i, n_states)``.
+        gamma_kls : list of float
+            Per-session KL divergence of the state posterior from the HMM
+            prior, ``KL[q(z_{1:T}) || p(z_{1:T} | pi_0, TPM)]``.  Computed
+            exactly from the last-epoch gamma and xi (pairwise marginals)
+            returned by Baum-Welch.  One scalar per session.
         """
         if epochs is None:
             epochs = self.config.n_epochs
@@ -782,6 +787,7 @@ class Model(MarkovStateInferenceModelBase):
 
             is_last_epoch = (epoch == epochs - 1)
             gamma_batches = [] if is_last_epoch else None
+            xi_batches    = [] if is_last_epoch else None
             epoch_loss    = 0.0
             n_batches     = 0
 
@@ -815,12 +821,15 @@ class Model(MarkovStateInferenceModelBase):
 
                 if is_last_epoch:
                     gamma_batches.append(gamma_out.numpy())
+                    xi_batches.append(xi_out.numpy())
 
             print(f"[fit_and_get_alpha] epoch {epoch + 1}/{epochs}  "
                   f"loss={epoch_loss / max(n_batches, 1):.4f}", flush=True)
 
         last_gamma_seqs = np.concatenate(
             gamma_batches, axis=0)                   # (N_total_seqs, seq_len, K)
+        last_xi_seqs    = np.concatenate(
+            xi_batches, axis=0)                      # (N_total_seqs, seq_len-1, K, K)
 
         # ------------------------------------------------------------------
         # 4. Reassemble per-session gamma arrays.
@@ -845,10 +854,46 @@ class Model(MarkovStateInferenceModelBase):
             gammas.append(g.astype(np.float32))
             seq_offset += n_seqs
 
+        # ------------------------------------------------------------------
+        # 5. Compute per-session gamma KL divergences.
+        #
+        #    KL[q(z_{1:T}) || p(z_{1:T} | pi_0, TPM)]
+        #      = sum_{t,k} gamma_{t,k} log gamma_{t,k}     (negative entropy)
+        #      - sum_k gamma_{1,k} log pi_0_k              (initial state)
+        #      - sum_{t,k,l} xi_{t,k,l} log TPM_{k,l}     (transition term)
+        #
+        #    For the windowed case, sequences are treated independently in
+        #    Baum-Welch, so we sum over all windows within a session.
+        #    The xi arrays cover (seq_len-1) transitions per window and
+        #    already carry the correct Baum-Welch joint posteriors.
+        # ------------------------------------------------------------------
+        eps      = np.finfo(np.float32).eps
+        trans_prob = self.get_trans_prob().astype(np.float64)   # (K, K)
+        pi0        = self.get_initial_state_probs().astype(np.float64)  # (K,)
+        log_tpm    = np.log(trans_prob + eps)                   # (K, K)
+        log_pi0    = np.log(pi0 + eps)                          # (K,)
+
+        gamma_kls = []
+        seq_offset = 0
+        for n_seqs in session_n_seqs:
+            if n_seqs == 0:
+                gamma_kls.append(0.0)
+                continue
+
+            g = last_gamma_seqs[seq_offset: seq_offset + n_seqs].astype(np.float64)
+            x = last_xi_seqs[seq_offset: seq_offset + n_seqs].astype(np.float64)
+
+            neg_entropy  = float(np.sum(g * np.log(g + eps)))
+            initial_term = float(np.sum(g[:, 0, :] * log_pi0))
+            trans_term   = float(np.sum(x * log_tpm))
+
+            gamma_kls.append(neg_entropy - initial_term - trans_term)
+            seq_offset += n_seqs
+
         # print(f"[fit_and_get_alpha] total:      "
         #       f"{time.perf_counter() - _t_total_start:.2f}s", flush=True)
 
-        return gammas
+        return gammas, gamma_kls
 
     def initialize_from_sessions(self, sessions, n_init=3, n_init_epochs=1,
                                  zscore=False, verbose=0):
@@ -966,11 +1011,11 @@ class Model(MarkovStateInferenceModelBase):
 
             # ----- short training run to refine & evaluate -----
             if n_init_epochs > 0:
-                gammas = self.fit_and_get_alpha(
+                gammas, _ = self.fit_and_get_alpha(
                     sessions, epochs=n_init_epochs, zscore=False, verbose=verbose,
                 )
             else:
-                gammas = self.fit_and_get_alpha(
+                gammas, _ = self.fit_and_get_alpha(
                     sessions, epochs=1, zscore=False, verbose=verbose,
                 )
 
