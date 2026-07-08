@@ -214,7 +214,7 @@ class IndexParser:
         mode_index = []
         # Deal with bi-cross-validation
         if 'bcv' in mode.keys():
-            bcv_kwargs = mode['bcv']
+            bcv_kwargs = {k: v for k, v in mode['bcv'].items() if k != 'n_temp_save'}
             bcv = CVSplit(**bcv_kwargs)
             bcv.save(f'{self.save_dir}/bcv_partition/')
             mode_index.extend([f'bcv_{i}' for i in range(1,bcv.get_n_splits()+1)])
