@@ -188,6 +188,7 @@ class IndexParser:
         else:
             new_config['n_modes'] = int(n_states)
             new_config.pop('n_states', None)
+        new_config['n_temp_save'] = new_config['mode'].get('bcv', {}).get('n_temp_save', 5)
         new_config['mode'] = mode
 
         ### Deal with the cross validation split
@@ -376,7 +377,7 @@ class BatchTrain:
             '''
 
         elif "bcv" in self.config["mode"]:
-            bcv = BCV(self.config)
+            bcv = BCV(self.config, n_temp_save=self.config.get('n_temp_save', 5))
             bcv.validate()
             '''
             if self.config['model'] == 'hmm':
