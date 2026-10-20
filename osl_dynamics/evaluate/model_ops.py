@@ -204,11 +204,18 @@ def weighted_moments(
         Means. Shape is (n_states, n_channels).
     covs : np.ndarray
         Covariances. Shape is (n_states, n_channels, n_channels). States
-        with zero total weight get an identity matrix (plus :code:`eps`).
+        with too few time points (non-zero weights) for a full-rank
+        covariance get a zero mean and an identity covariance (plus
+        :code:`eps`), the same as states with no time points.
     """
     from osl_dynamics.analysis.post_hoc import hmm_dual_estimation
 
     n_states, n_channels = alpha.shape[1], x.shape[1]
+
+    # Minimum number of time points for a full-rank covariance
+    min_samples = 1 if diagonal_covariances else n_channels
+    if not zero_mean:
+        min_samples += 1
     with np.errstate(divide="ignore", invalid="ignore"):
         means, covs = hmm_dual_estimation(
             np.asarray(x, dtype=np.float64),
@@ -221,10 +228,11 @@ def weighted_moments(
     means = np.reshape(means, (n_states, n_channels))
     covs = np.reshape(covs, (n_states, n_channels, n_channels))
 
-    for state in np.flatnonzero(np.sum(alpha, axis=0) == 0):
+    n_samples = np.count_nonzero(np.asarray(alpha) > 0, axis=0)
+    for state in np.flatnonzero(n_samples < min_samples):
         _logger.warning(
-            f"No time points assigned to state/mode {state}. "
-            "Using an identity covariance."
+            f"State/mode {state} has {n_samples[state]} time points, which is "
+            f"too few for a full-rank covariance. Using an identity covariance."
         )
         means[state] = 0
         covs[state] = (1 + eps) * np.eye(n_channels)
@@ -652,7 +660,9 @@ class HMMOps(ModelOps):
       maximum likelihood estimate given the state probabilities).
     - :code:`"weighted"`: same as :code:`"mle"` for the HMM.
 
-    States with no time points assigned are given an identity covariance.
+    States with too few time points for a full-rank covariance (e.g. no
+    time points assigned with :code:`"sample"`) are given an identity
+    covariance.
     """
 
     name = "hmm"
