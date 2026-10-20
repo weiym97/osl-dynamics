@@ -230,3 +230,47 @@ def test_data_object_and_numpy_values(data_dir, tmp_path):
     with open(tmp_path / "results" / "config_root.yaml") as file:
         assert yaml.safe_load(file)["load_data"] is None
     data.delete_dir()
+
+
+def test_failed_jobs_are_recorded(data_dir, tmp_path, monkeypatch):
+    save_dir = str(tmp_path / "results")
+    config = swc_config(
+        data_dir,
+        save_dir,
+        modes={
+            "bcv": {
+                "split_row": {"method_kwargs": {"n_splits": 2}},
+                "split_column": {"method_kwargs": {"n_splits": 2}},
+            }
+        },
+    )
+
+    # Make every bi-cross-validation of 3 states fail
+    original_validate = batch.BCV.validate
+
+    def failing_validate(self, data, fold, output_dir=None, save_temporal=None):
+        if self.ops.n_states == 3:
+            raise RuntimeError("Simulated failure")
+        return original_validate(self, data, fold, output_dir, save_temporal)
+
+    monkeypatch.setattr(batch.BCV, "validate", failing_validate)
+    summary = batch.run(config)
+
+    # The other jobs ran and the failures were recorded
+    assert len(summary["bcv"]) == 2
+    with open(f"{save_dir}/summary/failed_jobs.txt") as file:
+        failed = file.read().split()
+    assert failed == [f"{save_dir}/swc_state_3/bcv_{i}" for i in [1, 2]]
+    with open(f"{save_dir}/swc_state_3/bcv_1/error.txt") as file:
+        assert "Simulated failure" in file.read()
+
+    # A single job raises the error
+    with pytest.raises(RuntimeError, match="Simulated failure"):
+        batch.run(config, index=3)
+
+    # Failed jobs are retried on the next run
+    monkeypatch.setattr(batch.BCV, "validate", original_validate)
+    summary = batch.run(config)
+    assert len(summary["bcv"]) == 4
+    assert not os.path.exists(f"{save_dir}/summary/failed_jobs.txt")
+    assert not os.path.exists(f"{save_dir}/swc_state_3/bcv_1/error.txt")

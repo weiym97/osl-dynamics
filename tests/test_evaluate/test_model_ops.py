@@ -404,3 +404,40 @@ def test_static_is_the_same_for_every_model():
         ),
     ]
     npt.assert_allclose(results, results[0])
+
+
+@pytest.mark.parametrize("learn_means", [False, True])
+def test_rare_states_get_an_identity_covariance(learn_means):
+    """A state with too few time points for a full-rank covariance.
+
+    The research code only used an identity for states with no time points,
+    so this intentionally differs from it. States with just enough time
+    points still match the research code.
+    """
+    rng = np.random.default_rng(8)
+    n_channels = 4
+    min_samples = n_channels + int(learn_means)
+    x = f32([rng.normal(size=(500, n_channels))])
+
+    # State 1 is the most probable state at min_samples - 1 time points and
+    # state 2 at min_samples time points
+    labels = np.zeros(500, dtype=int)
+    labels[: min_samples - 1] = 1
+    labels[100 : 100 + min_samples] = 2
+    alpha = np.eye(3)[labels] * 0.8 + 0.1
+
+    ops = get_model_ops(
+        "hmm",
+        {"n_states": 3, "learn_means": learn_means, "learn_covariances": True},
+    )
+    result = ops.infer_spatial(Data(x), [alpha])
+    means, covs = ref.hmm_dual_estimation(
+        x, [alpha], n_channels, learn_means, np.zeros((3, n_channels)), 1e-6
+    )
+
+    npt.assert_allclose(result["covs"][1], (1 + 1e-6) * np.eye(n_channels))
+    npt.assert_allclose(result["means"][1], 0)
+    assert np.linalg.matrix_rank(covs[1] - 1e-6 * np.eye(n_channels)) < n_channels
+    for state in [0, 2]:
+        npt.assert_allclose(result["covs"][state], covs[state], rtol=1e-10)
+        npt.assert_allclose(result["means"][state], means[state], rtol=1e-10)
