@@ -1,0 +1,23 @@
+# Bi-cross-validation of an HMM with 1 to 10 states.
+#
+# Run with:
+#
+#     osl-dynamics-evaluate config_minimal.yml
+#
+# The results are saved in results/summary.
+
+# Directory containing one .npy file per session, each with shape
+# (n_samples, n_channels). The data are standardized.
+data: path/to/npy_dir
+
+# Directory to save the results to
+save_dir: results
+
+# Model: hmm, dynemo, mdynemo or swc
+model: hmm
+
+# Numbers of states (or modes for dynemo and mdynemo)
+n_states: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+# Evaluation modes: bcv, ncv, repeat and/or split
+modes: [bcv]

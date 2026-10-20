@@ -1,0 +1,97 @@
+# Model selection for fMRI data (e.g. ICA time courses) with every option.
+#
+# Run on a cluster with:
+#
+#     osl-dynamics-evaluate config_full.yml --init   # prints the number of jobs
+#     sbatch --array=1-<number of jobs> submit_slurm.sh config_full.yml
+#     osl-dynamics-evaluate config_full.yml --summarise
+
+# Data loading and preparation (same as load_data in the config API).
+# Each step uses the prepared data, so channels are split after preparation.
+load_data:
+  inputs: path/to/npy_dir
+  kwargs:
+    load_memmaps: true  # keep the data on disk rather than in memory
+  prepare:
+    standardize: {}
+
+save_dir: results
+
+# Models and their settings. config_kwargs are passed to each model's Config
+# (n_channels is set from the data). Defaults are the same as the
+# config_api.wrappers.train_* functions.
+model:
+  hmm:
+    config_kwargs:
+      learn_means: false
+      learn_covariances: true
+      learn_trans_prob: true
+      sequence_length: 400
+      batch_size: 256
+      learning_rate: 0.001
+      n_epochs: 30
+    init_kwargs:
+      n_init: 10
+      n_epochs: 2
+    # How to estimate the spatial parameters given the time courses in
+    # bi-cross-validation: sample (default for the HMM), mle or weighted
+    spatial_method: sample
+  dynemo:
+    config_kwargs:
+      learn_means: false
+      learn_covariances: true
+      sequence_length: 100
+      inference_n_units: 64
+      inference_normalization: layer
+      model_n_units: 64
+      model_normalization: layer
+      learn_alpha_temperature: true
+      initial_alpha_temperature: 1.0
+      do_kl_annealing: true
+      kl_annealing_curve: tanh
+      kl_annealing_sharpness: 5
+      n_kl_annealing_epochs: 15
+      batch_size: 64
+      learning_rate: 0.001
+      n_epochs: 30
+    init_kwargs:
+      n_init: 10
+      n_epochs: 2
+    spatial_method: mle  # default for DyNeMo
+  swc:
+    config_kwargs:
+      window_length: 100
+      window_offset: 100
+
+# Numbers of states (n_modes for dynemo)
+n_states: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+
+# Evaluation modes. n_samples defaults to the number of sessions (split_row)
+# or channels (split_column).
+modes:
+  # Bi-cross-validation: 100 folds, each with 80% of the sessions for
+  # training and the channels split in half
+  bcv:
+    split_row:
+      method: ShuffleSplit
+      method_kwargs: {n_splits: 100, train_size: 0.8}
+    split_column:
+      method: ShuffleSplit
+      method_kwargs: {n_splits: 100, train_size: 0.5}
+    strategy: pairing  # pair the i-th row split with the i-th column split
+    random_state: 0
+    n_temp_save: 5  # save the time courses for the first 5 folds only
+  # Naive cross-validation: 5-fold over sessions
+  ncv:
+    split_row:
+      method: KFold
+      method_kwargs: {n_splits: 5}
+  # Train on all the data 3 times
+  repeat:
+    n_realizations: 3
+  # Split-half reproducibility: 5 random splits of the sessions in half
+  split:
+    split_row:
+      method: ShuffleSplit
+      method_kwargs: {n_splits: 5, train_size: 0.5}
+    random_state: 0
