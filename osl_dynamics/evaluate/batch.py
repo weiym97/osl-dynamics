@@ -256,6 +256,7 @@ def init(config: Union[str, dict], data=None) -> int:
     os.makedirs(save_dir, exist_ok=True)
 
     loaded_data = None
+    data = config["data"] if data is None else data
     if _needs_data_dims(config) and data is None:
         data = loaded_data = _load_data(config)
     _write_partitions(config, data)
@@ -374,7 +375,9 @@ def run_job(
     os.makedirs(job_dir, exist_ok=True)
     with open(f"{job_dir}/batch_config.yaml", "w") as file:
         yaml.safe_dump(
-            {"model": model, "mode": f"{mode}_{i}", **kwargs, "settings": settings},
+            _to_yaml(
+                {"model": model, "mode": f"{mode}_{i}", **kwargs, "settings": settings}
+            ),
             file,
             default_flow_style=False,
         )
@@ -618,7 +621,22 @@ def _write_config(config: dict) -> None:
     if config["data"] is not None:
         config_to_save["load_data"] = None
     with open(f"{config['save_dir']}/config_root.yaml", "w") as file:
-        yaml.safe_dump(config_to_save, file, default_flow_style=False, sort_keys=False)
+        yaml.safe_dump(
+            _to_yaml(config_to_save), file, default_flow_style=False, sort_keys=False
+        )
+
+
+def _to_yaml(obj):
+    """Convert numpy arrays and scalars so a config can be saved as YAML."""
+    if isinstance(obj, dict):
+        return {key: _to_yaml(value) for key, value in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_to_yaml(value) for value in obj]
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, np.generic):
+        return obj.item()
+    return obj
 
 
 def _write_job_list(jobs: list, filename: str) -> None:
