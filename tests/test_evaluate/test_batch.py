@@ -202,3 +202,31 @@ def test_index_requires_init_for_random_folds(data_dir, tmp_path):
         batch.run(config, index=1)
     assert batch.init(config) == 2 * 10
     batch.run(config, index=1)
+
+
+def test_data_object_and_numpy_values(data_dir, tmp_path):
+    from osl_dynamics.data import Data
+
+    data = Data(data_dir)
+    config = {
+        "data": data,
+        "save_dir": str(tmp_path / "results"),
+        "model": {
+            "swc": {
+                "window_length": np.int64(50),
+                "window_offset": 25,
+                "random_state": 0,
+            }
+        },
+        "n_states": np.array([1, 3]),
+        "modes": {"bcv": {"split_row": {"method_kwargs": {"n_splits": 2}}}},
+    }
+    assert batch.init(config) == 2 * 2
+    batch.run(config, index=4)
+    with open(
+        tmp_path / "results" / "swc_state_3" / "bcv_2" / "batch_config.yaml"
+    ) as file:
+        assert yaml.safe_load(file)["config_kwargs"]["window_length"] == 50
+    with open(tmp_path / "results" / "config_root.yaml") as file:
+        assert yaml.safe_load(file)["load_data"] is None
+    data.delete_dir()
