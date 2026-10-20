@@ -103,6 +103,7 @@ tf-cuda = [
 [project.scripts]
 osl-dynamics = "osl_dynamics.config_api.pipeline:osl_dynamics_cli"
 osl-dynamics-download-data = "osl_dynamics.files._fetch:download_data_cli"
+osl-dynamics-evaluate = "osl_dynamics.evaluate.batch:main"
 
 # The version number is derived automatically from git tags
 [tool.setuptools_scm]
