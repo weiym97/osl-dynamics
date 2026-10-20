@@ -1206,7 +1206,10 @@ class SWCOps(ModelOps):
         return self.get_spatial(model), _as_list(alpha)
 
     def infer_temporal(self, data, spatial: Dict[str, np.ndarray]) -> List[np.ndarray]:
-        model = self.train(data, spatial=spatial)
+        from osl_dynamics.models import swc
+
+        # With fixed covariances, each window is assigned to the nearest state
+        model = swc.Model(self._config(data.n_channels, spatial))
         return self.get_temporal(model, data)
 
     def infer_spatial(self, data, temporal: List[np.ndarray]) -> Dict[str, np.ndarray]:
