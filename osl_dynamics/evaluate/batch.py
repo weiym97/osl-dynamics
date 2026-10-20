@@ -23,6 +23,7 @@ import itertools
 import json
 import logging
 import os
+import traceback
 from typing import List, Optional, Tuple, Union
 
 import numpy as np
@@ -314,7 +315,14 @@ def run(
             # identically, otherwise the folds must be created with init first
             _write_partitions(config, data, require_deterministic=index is not None)
             for job in pending:
-                run_job(config, data, *job, overwrite=overwrite)
+                try:
+                    run_job(config, data, *job, overwrite=overwrite)
+                except Exception:
+                    # Record the error. When running every job, carry on with
+                    # the others (the job is retried on the next run).
+                    _record_error(_job_dir(config, *job))
+                    if index is not None:
+                        raise
         finally:
             if loaded:
                 data.delete_dir()
@@ -359,6 +367,8 @@ def run_job(
         return
 
     _logger.info(f"Running {model}, n_states={n_states}, {mode}_{i}: {job_dir}")
+    if os.path.exists(f"{job_dir}/error.txt"):
+        os.remove(f"{job_dir}/error.txt")
     spec = config["models"][model]
     settings = config["modes"][mode]
     config_kwargs = dict(spec["config_kwargs"])
@@ -427,15 +437,28 @@ def summarise(config: Union[str, dict]) -> dict:
 
     rows = {mode: [] for mode in config["modes"]}
     n_missing = 0
+    failed = []
     for model, n_states, mode, i in get_jobs(config):
-        result = _job_result(_job_dir(config, model, n_states, mode, i), mode)
+        job_dir = _job_dir(config, model, n_states, mode, i)
+        result = _job_result(job_dir, mode)
         if result is None:
-            if not (mode == "ncv" and n_states == 1):
+            if os.path.exists(f"{job_dir}/error.txt"):
+                failed.append(job_dir)
+            elif not (mode == "ncv" and n_states == 1):
                 n_missing += 1
             continue
         rows[mode].append({"model": model, "n_states": n_states, "run": i, **result})
     if n_missing > 0:
         _logger.warning(f"{n_missing} jobs have not finished.")
+    if failed:
+        with open(f"{summary_dir}/failed_jobs.txt", "w") as file:
+            file.write("\n".join(failed) + "\n")
+        _logger.warning(
+            f"{len(failed)} jobs failed, see {summary_dir}/failed_jobs.txt and "
+            "error.txt in each job directory."
+        )
+    elif os.path.exists(f"{summary_dir}/failed_jobs.txt"):
+        os.remove(f"{summary_dir}/failed_jobs.txt")
 
     summary = {}
     for mode, mode_rows in rows.items():
@@ -676,6 +699,14 @@ def _job_result(job_dir: str, mode: str) -> Optional[dict]:
     if result is not None:
         return {"riemannian_distance": result["riemannian_distance"]}
     return None
+
+
+def _record_error(job_dir: str) -> None:
+    """Log the current exception and save it to <job_dir>/error.txt."""
+    _logger.exception(f"Job failed: {job_dir}")
+    os.makedirs(job_dir, exist_ok=True)
+    with open(f"{job_dir}/error.txt", "w") as file:
+        file.write(traceback.format_exc())
 
 
 def _read_json(filename: str):

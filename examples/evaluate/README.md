@@ -27,7 +27,7 @@ Put the data in a directory with one `.npy` file per session. Each file must hav
 osl-dynamics-evaluate config_minimal.yml
 ```
 
-This runs every job one after another and saves tables and plots in `<save_dir>/summary`. If it is interrupted, running the same command again skips the jobs that have finished.
+This runs every job one after another and saves tables and plots in `<save_dir>/summary`. If it is interrupted, running the same command again skips the jobs that have finished. Jobs that fail are listed in `<save_dir>/summary/failed_jobs.txt` (the error is in `error.txt` in the job's directory) and are retried the next time the command is run.
 
 ### Running on a cluster
 
