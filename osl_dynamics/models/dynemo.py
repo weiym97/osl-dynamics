@@ -26,6 +26,7 @@ from tensorflow.keras import layers
 from tqdm.auto import trange
 
 from osl_dynamics.inference.layers import (
+    CoordinatedDropoutLayer,
     CovarianceMatricesLayer,
     DiagonalMatricesLayer,
     InferenceRNNLayer,
@@ -83,6 +84,18 @@ class Config(BaseModelConfig, VariationalInferenceModelConfig):
         Dropout rate.
     inference_regularizer : str
         Regularizer.
+    coordinated_dropout : float
+        Probability of hiding each channel from the inference network
+        during training. The log-likelihood is then computed only on the
+        hidden channels, so a mode time course is never used to reconstruct
+        the channels it was inferred from. Defaults to 0 (off).
+    private_variance : np.ndarray or str or float, optional
+        If passed, a diagonal private-noise covariance with these variances
+        (one per channel, or a scalar for all) is added to the mixed
+        covariance at every time point, i.e. C_t = sum_j alpha_jt D_j + Psi.
+        Psi is not mixed by alpha, so it is a floor alpha cannot remove.
+    learn_private_variance : bool
+        Should we learn :code:`private_variance` (as an initial value)?
 
     model_rnn : str
         RNN to use, either :code:`'gru'` or :code:`'lstm'`.
@@ -171,6 +184,7 @@ class Config(BaseModelConfig, VariationalInferenceModelConfig):
     inference_activation: str = None
     inference_dropout: float = 0.0
     inference_regularizer: str = None
+    coordinated_dropout: float = 0.0
 
     # Model network parameters
     model_rnn: str = "lstm"
@@ -190,6 +204,8 @@ class Config(BaseModelConfig, VariationalInferenceModelConfig):
     covariances_epsilon: float = None
     means_regularizer: tf.keras.regularizers.Regularizer = None
     covariances_regularizer: tf.keras.regularizers.Regularizer = None
+    private_variance: Union[np.ndarray, str, float] = None
+    learn_private_variance: bool = False
 
     def __post_init__(self):
         # Check whether initial_means and initial_covarainces are file directories,
@@ -200,6 +216,8 @@ class Config(BaseModelConfig, VariationalInferenceModelConfig):
         if isinstance(self.initial_covariances,str):
             if self.initial_covariances.endswith('.npy'):
                 self.initial_covariances = np.load(self.initial_covariances)
+        if isinstance(self.private_variance, str):
+            self.private_variance = np.load(self.private_variance)
         self.validate_rnn_parameters()
         self.validate_observation_model_parameters()
         self.validate_alpha_parameters()
@@ -213,6 +231,9 @@ class Config(BaseModelConfig, VariationalInferenceModelConfig):
 
         if self.model_n_units is None:
             raise ValueError("Please pass model_n_units.")
+
+        if not 0 <= self.coordinated_dropout < 1:
+            raise ValueError("coordinated_dropout must be in [0, 1).")
 
     def validate_observation_model_parameters(self):
         if self.learn_means is None or self.learn_covariances is None:
@@ -272,6 +293,19 @@ class Model(VariationalInferenceModelBase):
             Mode covariances.
         """
         return self.get_means(), self.get_covariances()
+
+    def get_private_variance(self):
+        """Get the private-noise variances (diagonal of Psi).
+
+        Returns
+        -------
+        private_variance : np.ndarray
+            Private-noise variance per channel, or :code:`None` if the model
+            has no private-noise term.
+        """
+        if self.config.private_variance is None:
+            return None
+        return np.diag(self.model.get_layer("private_var")(1).numpy()[0])
 
     def get_observation_model_parameters(self):
         """Wrapper for :code:`get_means_covariances`."""
@@ -827,7 +861,14 @@ class Model(VariationalInferenceModelBase):
         )
 
         # Data flow
-        data_drop = data_drop_layer(inputs)
+        if config.coordinated_dropout > 0:
+            coordinated_dropout_layer = CoordinatedDropoutLayer(
+                config.coordinated_dropout, name="coordinated_dropout"
+            )
+            inf_inputs, ll_mask = coordinated_dropout_layer(inputs)
+        else:
+            inf_inputs, ll_mask = inputs, None
+        data_drop = data_drop_layer(inf_inputs)
         inf_rnn = inf_rnn_layer(data_drop)
         inf_mu = inf_mu_layer(inf_rnn)
         inf_sigma = inf_sigma_layer(inf_rnn)
@@ -867,7 +908,27 @@ class Model(VariationalInferenceModelBase):
         )  # inputs not used
         m = mix_means_layer([alpha, mu])
         C = mix_covs_layer([alpha, D])
-        ll_loss = ll_loss_layer([inputs, m, C])
+        if config.private_variance is not None:
+            private_variance = np.broadcast_to(
+                np.asarray(config.private_variance, dtype=np.float32),
+                (config.n_channels,),
+            )
+            private_var_layer = DiagonalMatricesLayer(
+                1,
+                config.n_channels,
+                config.learn_private_variance,
+                private_variance[np.newaxis],
+                0.0,
+                name="private_var",
+            )
+            Psi = private_var_layer(
+                inputs, static_loss_scaling_factor=static_loss_scaling_factor
+            )  # inputs not used
+            C = C + Psi[0]
+        if ll_mask is None:
+            ll_loss = ll_loss_layer([inputs, m, C])
+        else:
+            ll_loss = ll_loss_layer([inputs, m, C, ll_mask])
 
         # Model RNN:
         # - Learns p(theta_t |theta_<t) ~ N(theta_t | mod_mu, mod_sigma), where
