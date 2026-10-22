@@ -42,7 +42,9 @@ VARIANTS = {
     "dynemo_mean_psi_learn": ("dynemo", dict(learn_means=True, private_variance=0.3,
                                              learn_private_variance=True)),
     "dynemo_mean_psi_oracle": ("dynemo", dict(learn_means=True, private_variance="oracle")),
+    "dynemo_mean_psi_fa4": ("dynemo", dict(learn_means=True, private_variance="fa4")),
     "dynemo_mean_psi_fa8": ("dynemo", dict(learn_means=True, private_variance="fa8")),
+    "dynemo_mean_psi_fa12": ("dynemo", dict(learn_means=True, private_variance="fa12")),
     "dynemo_mean_cd50_psi_learn": ("dynemo", dict(learn_means=True, coordinated_dropout=0.5,
                                                   private_variance=0.3,
                                                   learn_private_variance=True)),
@@ -65,7 +67,7 @@ def resolve_private_variance(overrides, x, truth):
     return {**overrides, "private_variance": value.astype(np.float32)}
 
 
-def train_dynemo(data, n_channels, n_modes, n_epochs, overrides):
+def train_dynemo(data, n_channels, n_modes, n_epochs, overrides, n_init=5):
     from osl_dynamics.models.dynemo import Config, Model
 
     config = Config(
@@ -77,12 +79,12 @@ def train_dynemo(data, n_channels, n_modes, n_epochs, overrides):
     )
     model = Model(config)
     model.set_regularizers(data)
-    init_history = model.random_subset_initialization(data, n_init=5, n_epochs=2, take=1)
+    init_history = model.random_subset_initialization(data, n_init=n_init, n_epochs=2, take=1)
     history = model.fit(data)
     return model, {"init_loss": init_history["loss"], "loss": history["loss"]}
 
 
-def train_hmm(data, n_channels, n_modes, n_epochs, overrides):
+def train_hmm(data, n_channels, n_modes, n_epochs, overrides, n_init=5):
     from osl_dynamics.models.hmm import Config, Model
 
     config = Config(
@@ -98,7 +100,7 @@ def train_hmm(data, n_channels, n_modes, n_epochs, overrides):
     )
     model = Model(config)
     model.set_regularizers(data)
-    init_history = model.random_subset_initialization(data, n_init=5, n_epochs=2, take=1)
+    init_history = model.random_subset_initialization(data, n_init=n_init, n_epochs=2, take=1)
     history = model.fit(data)
     return model, {"init_loss": init_history["loss"], "loss": history["loss"]}
 
@@ -111,6 +113,7 @@ def main():
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--n_modes", type=int, default=4)
     parser.add_argument("--n_epochs", type=int, default=30)
+    parser.add_argument("--n_init", type=int, default=5)
     args = parser.parse_args()
 
     import tensorflow as tf
@@ -132,7 +135,8 @@ def main():
     overrides = resolve_private_variance(overrides, x, truth)
     trainer = {"dynemo": train_dynemo, "hmm": train_hmm}[family]
     t0 = time.time()
-    model, history = trainer(data, x.shape[-1], args.n_modes, args.n_epochs, overrides)
+    model, history = trainer(data, x.shape[-1], args.n_modes, args.n_epochs, overrides,
+                             n_init=args.n_init)
     train_minutes = (time.time() - t0) / 60
 
     alpha = np.array(model.get_alpha(data))
@@ -154,7 +158,7 @@ def main():
         result.update(private_var_mean=float(psi.mean()),
                       private_var_true_mean=float(truth["private_var"].mean()))
     result.update(variant=args.variant, sim=os.path.basename(os.path.normpath(args.sim_dir)),
-                  seed=args.seed, n_modes=args.n_modes, n_epochs=args.n_epochs,
+                  seed=args.seed, n_modes=args.n_modes, n_epochs=args.n_epochs, n_init=args.n_init,
                   final_loss=float(history["loss"][-1]), train_minutes=train_minutes)
     with open(f"{args.out_dir}/metrics.json", "w") as f:
         json.dump(result, f, indent=1)
