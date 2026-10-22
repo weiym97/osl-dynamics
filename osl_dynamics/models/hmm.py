@@ -1167,7 +1167,7 @@ class Model(ModelBase):
             if log_smoothing_distribution is None:
                 initial_distribution = self.get_stationary_distribution()
                 log_prediction_distribution = np.broadcast_to(
-                    np.expand_dims(initial_distribution, axis=0),
+                    np.expand_dims(np.log(initial_distribution), axis=0),
                     (batch_size, self.config.n_states),
                 )
             else:
