@@ -58,6 +58,19 @@ learned prior makes this cheap.
   white-noise control at 100 epochs, cd25/cd50 seeds, n_init=10 for cd50 (dead modes), fixed-Psi
   oracle/FA(4, 8, 12) at 100 epochs, HMM at 100 epochs.
 
+- Phase 3 results (benchmark: sim_smooth, K=4, 100 epochs; oracle KL 0, static 2.6, HMM 1.64):
+  - Baseline, 3 seeds: lam 0.13-0.15, R2 0.24, KL 11.8-12.4 (very consistent). White control at
+    100 epochs: lam 0.81, KL 0.51.
+  - **cd25, 3 seeds: lam 0.94-0.95, R2 0.01, KL 0.68-0.69, alpha 0.91, all healthy.** Best overall.
+  - cd50: dead modes with n_init 5 (KL 0.79-1.21); n_init 10 fixes it (2/2 seeds: KL 0.79, alpha 0.90).
+  - Fixed Psi at 100 epochs only bounds the damage. The mean still copies (R2 0.08-0.10). Oracle:
+    lam 0.81, KL 1.0. FA8: lam 0.89-0.94, KL 0.96-1.31. FA4/FA12: KL 1.21/1.06. Depends on the FA rank.
+  - Pattern recovery (`recovery.py`, matched modes): every model recovers mean/FC patterns well,
+    collapsed baseline included (mean 0.97, FC 0.96), so the collapse doesn't show in mode maps.
+    cd25: mean 1.00, FC 0.96, FC contrast 0.97. Psi floor: FC 0.98-0.99. HMM: FC 0.74.
+- Phase 4 (jobs 33893063-5): cd25 robustness on sim_white (cost when not needed), sim_smooth95,
+  K=2, K=8; cd10.
+
 ## Notes for moving to real data later
 
 - With a Psi floor, the BCV path must include Psi. `dual_estimation` (it rebuilds the observation model

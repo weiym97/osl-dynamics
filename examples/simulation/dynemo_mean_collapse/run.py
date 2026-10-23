@@ -35,6 +35,7 @@ DYNEMO_BASE = dict(
 VARIANTS = {
     "dynemo_mean": ("dynemo", dict(learn_means=True)),
     "dynemo_nomean": ("dynemo", dict(learn_means=False)),
+    "dynemo_mean_cd10": ("dynemo", dict(learn_means=True, coordinated_dropout=0.1)),
     "dynemo_mean_cd25": ("dynemo", dict(learn_means=True, coordinated_dropout=0.25)),
     "dynemo_mean_cd50": ("dynemo", dict(learn_means=True, coordinated_dropout=0.5)),
     # Diagonal private-noise floor Psi added to every C_t ("oracle" = true private
