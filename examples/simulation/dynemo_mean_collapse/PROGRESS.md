@@ -140,3 +140,7 @@ learned prior makes this cheap.
 - With a Psi floor, the BCV path must include Psi. `dual_estimation` (it rebuilds the observation model
   from the "mix_covs" and "ll_loss" layers) and `get_posterior_expected_log_likelihood` currently ignore it.
 - Coordinated dropout needs no downstream changes, since evaluation runs with training=False.
+
+## Explainer notebook
+
+`dynemo_mean_collapse_explained.ipynb`: a beginner-friendly 3-channel toy (problem, fix, why it works), executed with outputs. Old model: mean = 0.99 shared + 0.94 private noise; it claims 0.046 noise for the channel average against a true 0.5 (3.8 nats/time point held-out penalty). With coordinated dropout: 0.69 / 0.24, claims 1.09 (cautious, 0.12 nats). KL to truth 9.3 against 0.30.
