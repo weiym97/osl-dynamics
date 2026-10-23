@@ -77,6 +77,12 @@ learned prior makes this cheap.
 - HCP-scale check (jobs 33893283-4): sim_hcp = 500 sessions x 4800, 25 channels, run with the real
   ICA_50_mean training config (batch 64, 30 epochs, n_init 10). Baseline vs cd25 at K=4 (2 seeds)
   and K=2.
+  - K=4 baseline: lam 0.11-0.12, 3 dirs < 0.5, R2 0.18-0.19, KL 15.3-16.2. cd25: lam 0.95-0.96,
+    R2 0.00, KL 0.71, alpha 0.94. Mean/FC recovery is 0.96-1.00 for both.
+  - K=2 baseline: lam 0.089, KL 12.1. cd25: lam 0.96, KL 2.12.
+  - The conclusions hold at HCP scale with the real training config (~1 h per run on 4 CPUs).
+- 02:45: first work block done (~2.5 h). Next, after a 1 h rest: check whether M-DyNeMo (the MAGE-like
+  model) has the same failure on the benchmark, plus a State-DyNeMo (discrete alpha) control.
 
 ## Conclusions so far
 
