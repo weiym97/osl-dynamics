@@ -97,19 +97,45 @@ learned prior makes this cheap.
   layers as DyNeMo).
 - Phase 6 (job 33894910, 100 epochs): mdynemo cd25 (2 seeds), cd10, sim_white cd25.
 
-## Conclusions so far
+- Phase 6 results (100 epochs, sim_smooth K=4): **coordinated dropout fixes M-DyNeMo too.** cd25
+  (2 seeds): lam 0.95, R2 0.01, KL 0.76-0.91 (baseline 13.6-15.2), alpha 0.90-0.91. cd10: lam 0.91,
+  KL 1.01. sim_white cd25: KL 0.63 (baseline M-DyNeMo 1.56).
+
+## Conclusions
 
 1. The simulation reproduces the HCP failure, provided the private noise is temporally smooth.
-   White private noise doesn't. Collapse grows with training and is worst at small K.
-2. Coordinated channel dropout (rate 0.1-0.25) fixes it at every K tested. Copying goes from
-   R2 0.24 to 0.01, lam_min from ~0.1 to ~0.95, and KL to truth from 12-20 to 0.7 (K=4). Mode
-   mean/FC recovery is kept. Rate 0.5 also works but gives dead modes unless n_init is raised.
+   White private noise doesn't. Collapse grows with training and is worst at small K. It also holds at
+   HCP scale with the real ICA_50_mean training config.
+2. **Coordinated channel dropout (rate 0.25 recommended) fixes it** at every K tested (2/4/8), for
+   phi 0.9/0.95, at HCP scale, and for both DyNeMo and M-DyNeMo. Copying goes from R2 ~0.24-0.38 to
+   0.01, lam_min from ~0.1 to ~0.95, and KL to truth from 12-20 to ~0.7-0.9 (K=4). Mode mean/FC
+   recovery is kept, and the cost when nothing needs fixing is ~0.05 nats. Rate 0.1 is nearly as good.
+   Rate 0.5 gives dead modes unless n_init is raised.
 3. A fixed diagonal private-noise floor only bounds the damage: the mean keeps copying, and the
    result depends on the FA rank. A learned floor shrinks and does nothing (not identifiable).
-4. Collapse doesn't show in mode maps (pattern recovery is good even for the collapsed baseline).
+4. Separate mean/FC dynamics (M-DyNeMo, the MAGE-like model) don't protect; they copy even more.
+   Discrete alpha (State-DyNeMo, HMM) avoids collapse but fits worse than DyNeMo with cd25.
+5. Collapse doesn't show in mode maps (pattern recovery is good even for the collapsed baseline).
    Only likelihood-type checks catch it, which is consistent with BCV.
 
+## Summary table (sim_smooth, K=4, 100 epochs; KL to truth: oracle 0, static K=1 2.6)
+
+| model | lam_min | R2 mean~private | KL |
+|---|---|---|---|
+| DyNeMo + means | 0.13-0.15 | 0.24 | 11.8-12.4 |
+| DyNeMo + means + cd25 | 0.94-0.95 | 0.01 | 0.68-0.69 |
+| DyNeMo + means + fixed Psi (FA8 / oracle) | 0.81-0.94 | 0.08-0.10 | 0.96-1.31 |
+| M-DyNeMo + means | 0.13-0.14 | 0.34-0.38 | 13.6-15.2 |
+| M-DyNeMo + means + cd25 | 0.95 | 0.01 | 0.76-0.91 |
+| State-DyNeMo + means | 0.96 | 0.02 | 0.99 |
+| HMM + means | 0.87 | 0.01 | 1.64 |
+
 ## Notes for moving to real data later
+
+- To use it in the config API: add `coordinated_dropout: 0.25` to `model: dynemo: config_kwargs`
+  (config_kwargs go straight into dynemo.Config). BCV's X_test step then also trains with dropout,
+  which is consistent. The Y_test and dual-estimation steps run with training=False or call the loss
+  layer without a mask, so they're unaffected.
 
 - With a Psi floor, the BCV path must include Psi. `dual_estimation` (it rebuilds the observation model
   from the "mix_covs" and "ll_loss" layers) and `get_posterior_expected_log_likelihood` currently ignore it.
