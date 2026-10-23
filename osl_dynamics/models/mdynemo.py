@@ -17,6 +17,7 @@ from tqdm.auto import trange
 
 from osl_dynamics.inference.layers import (
     ConcatenateLayer,
+    CoordinatedDropoutLayer,
     CorrelationMatricesLayer,
     DiagonalMatricesLayer,
     InferenceRNNLayer,
@@ -77,6 +78,11 @@ class Config(BaseModelConfig, VariationalInferenceModelConfig):
         Dropout rate.
     inference_regularizer : str
         Regularizer.
+    coordinated_dropout : float
+        Probability of hiding each channel from the inference network
+        during training. The log-likelihood is then computed only on the
+        hidden channels, so a mode time course is never used to reconstruct
+        the channels it was inferred from. Defaults to 0 (off).
 
     model_rnn : str
         RNN to use, either :code:`'gru'` or :code:`'lstm'`.
@@ -164,6 +170,7 @@ class Config(BaseModelConfig, VariationalInferenceModelConfig):
     inference_activation: str = None
     inference_dropout: float = 0.0
     inference_regularizer: str = None
+    coordinated_dropout: float = 0.0
 
     # Model network parameters
     model_rnn: str = "lstm"
@@ -205,6 +212,9 @@ class Config(BaseModelConfig, VariationalInferenceModelConfig):
 
         if self.model_n_units is None:
             raise ValueError("Please pass model_n_units.")
+
+        if not 0 <= self.coordinated_dropout < 1:
+            raise ValueError("coordinated_dropout must be in [0, 1).")
 
     def validate_observation_model_parameters(self):
         if (
@@ -552,7 +562,14 @@ def _model_structure(config):
     )
 
     # Data flow
-    data_drop = data_drop_layer(inputs)
+    if config.coordinated_dropout > 0:
+        coordinated_dropout_layer = CoordinatedDropoutLayer(
+            config.coordinated_dropout, name="coordinated_dropout"
+        )
+        inf_inputs, ll_mask = coordinated_dropout_layer(inputs)
+    else:
+        inf_inputs, ll_mask = inputs, None
+    data_drop = data_drop_layer(inf_inputs)
     inf_rnn = inf_rnn_layer(data_drop)
 
     #
@@ -693,7 +710,10 @@ def _model_structure(config):
     F = mix_fcs_layer([gamma, pca_D])
     C = matmul_layer([G, F, G])
 
-    ll_loss = ll_loss_layer([inputs, m, C])
+    if ll_mask is None:
+        ll_loss = ll_loss_layer([inputs, m, C])
+    else:
+        ll_loss = ll_loss_layer([inputs, m, C, ll_mask])
 
     #
     # Model RNN

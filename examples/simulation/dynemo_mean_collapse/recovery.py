@@ -30,7 +30,7 @@ def main():
         for d in sorted(glob.glob(f"{runs_dir}/*/")):
             r = json.load(open(f"{d}/metrics.json"))
             truth = np.load(f"{HERE}/output/{r['sim']}/truth.npz")
-            if r["n_modes"] != truth["alpha"].shape[-1]:
+            if r["n_modes"] != truth["alpha"].shape[-1] or not os.path.exists(f"{d}/covs.npy"):
                 continue
             K = r["n_modes"]
             a = np.load(f"{d}/alpha.npy").reshape(-1, K)[::20]

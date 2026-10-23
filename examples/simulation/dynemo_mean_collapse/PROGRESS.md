@@ -87,6 +87,16 @@ learned prior makes this cheap.
   statedynemo_mean (2 seeds). Then a 1 h rest.
   model) has the same failure on the benchmark, plus a State-DyNeMo (discrete alpha) control.
 
+- Phase 5 results (100 epochs, sim_smooth K=4):
+  - **M-DyNeMo with means (the MAGE-like model) collapses like DyNeMo, or worse.** 2 seeds: lam 0.13-0.14,
+    3 dirs < 0.5, R2 mean~private 0.34-0.38, KL 13.6-15.2. Even on sim_white: lam 0.67, KL 1.56
+    (DyNeMo 0.51). Separating mean and FC dynamics doesn't protect against copying.
+  - State-DyNeMo (discrete alpha), 2 seeds: lam 0.96, R2 0.02, KL 0.99, alpha 0.86. No collapse, but it
+    fits worse than DyNeMo with cd25 (0.69).
+- 03:56: second work block started. Added `coordinated_dropout` to M-DyNeMo (`models/mdynemo.py`, same
+  layers as DyNeMo).
+- Phase 6 (job 33894910, 100 epochs): mdynemo cd25 (2 seeds), cd10, sim_white cd25.
+
 ## Conclusions so far
 
 1. The simulation reproduces the HCP failure, provided the private noise is temporally smooth.

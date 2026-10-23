@@ -50,6 +50,8 @@ VARIANTS = {
                                                   private_variance=0.3,
                                                   learn_private_variance=True)),
     "mdynemo_mean": ("mdynemo", dict(learn_means=True)),
+    "mdynemo_mean_cd10": ("mdynemo", dict(learn_means=True, coordinated_dropout=0.1)),
+    "mdynemo_mean_cd25": ("mdynemo", dict(learn_means=True, coordinated_dropout=0.25)),
     "statedynemo_mean": ("statedynemo", dict(learn_means=True)),
     "hmm_mean": ("hmm", dict(learn_means=True)),
 }
