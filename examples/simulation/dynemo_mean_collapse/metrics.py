@@ -31,8 +31,13 @@ def gaussian_kl(m0, C0, m1, C1):
     return 0.5 * (tr + maha - n + logdet1 - logdet0)
 
 
-def score(means, covs, alpha, truth, seed=0):
-    """means (K, n), covs (K, n, n), alpha (n_sessions, T, K); truth from simulate.py."""
+def score(means, covs, alpha, truth, seed=0, moments=None):
+    """means (K, n), covs (K, n, n), alpha (n_sessions, T, K); truth from simulate.py.
+
+    moments, optional: function of flat sample indices returning the model's per-sample
+    mean (N, n) and covariance (N, n, n), for models whose covariance is not sum alpha C_k
+    (e.g. M-DyNeMo). alpha is then only used for mode time-course recovery.
+    """
     rng = np.random.default_rng(seed)
     K, n = means.shape
     T = alpha.shape[1]
@@ -44,10 +49,16 @@ def score(means, covs, alpha, truth, seed=0):
     psi = np.diag(truth["private_var"])
 
     idx = rng.choice(len(a), size=min(N_SUB, len(a)), replace=False)
-    m_model = a[idx] @ means
+    if moments is None:
+        def moments(rows):
+            return a[rows] @ means, np.einsum("tk,kij->tij", a[rows], covs)
+    m_model = moments(idx)[0]
 
     # 1. Collapse: model's time-averaged covariance vs the true conditional covariance
-    C_model = np.einsum("k,kij->ij", a.mean(0), covs)
+    if covs is not None:
+        C_model = np.einsum("k,kij->ij", a.mean(0), covs)
+    else:
+        C_model = moments(idx[:20000])[1].mean(0)
     C_true = np.einsum("k,kij->ij", a_true.mean(0), truth["covs"]) + psi
     lam, V = eigh(C_model, C_true)
     cov_m = np.cov(m_model.T)
@@ -62,8 +73,8 @@ def score(means, covs, alpha, truth, seed=0):
     # 3. Calibration to the truth: KL(true conditional given alpha_true || model given alpha)
     sub = idx[:5000]
     C_t_true = np.einsum("tk,kij->tij", a_true[sub], truth["covs"]) + psi
-    C_t_model = np.einsum("tk,kij->tij", a[sub], covs)
-    kl = gaussian_kl(m_true[sub], C_t_true, a[sub] @ means, C_t_model)
+    m_t_model, C_t_model = moments(sub)
+    kl = gaussian_kl(m_true[sub], C_t_true, m_t_model, C_t_model)
 
     # 4. Mode time-course recovery (matched by correlation)
     corr = np.corrcoef(a[idx].T, a_true[idx].T)[:K, K:]

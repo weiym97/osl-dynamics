@@ -49,6 +49,8 @@ VARIANTS = {
     "dynemo_mean_cd50_psi_learn": ("dynemo", dict(learn_means=True, coordinated_dropout=0.5,
                                                   private_variance=0.3,
                                                   learn_private_variance=True)),
+    "mdynemo_mean": ("mdynemo", dict(learn_means=True)),
+    "statedynemo_mean": ("statedynemo", dict(learn_means=True)),
     "hmm_mean": ("hmm", dict(learn_means=True)),
 }
 
@@ -77,6 +79,45 @@ def train_dynemo(data, n_channels, n_modes, n_epochs, overrides, n_init=5, batch
         n_epochs=n_epochs,
         n_kl_annealing_epochs=max(1, n_epochs // 2),
         **{**DYNEMO_BASE, "batch_size": batch_size, **overrides},
+    )
+    model = Model(config)
+    model.set_regularizers(data)
+    init_history = model.random_subset_initialization(data, n_init=n_init, n_epochs=2, take=1)
+    history = model.fit(data)
+    return model, {"init_loss": init_history["loss"], "loss": history["loss"]}
+
+
+def train_mdynemo(data, n_channels, n_modes, n_epochs, overrides, n_init=5, batch_size=32):
+    from osl_dynamics.models.mdynemo import Config, Model
+
+    base = {k: v for k, v in DYNEMO_BASE.items() if k != "learn_covariances"}
+    config = Config(
+        n_modes=n_modes,
+        n_fc_modes=n_modes,
+        n_channels=n_channels,
+        n_epochs=n_epochs,
+        n_kl_annealing_epochs=max(1, n_epochs // 2),
+        learn_stds=True,
+        learn_fcs=True,
+        **{**base, "batch_size": batch_size, **overrides},
+    )
+    model = Model(config)
+    model.set_regularizers(data)
+    init_history = model.random_subset_initialization(data, n_init=n_init, n_epochs=2, take=1)
+    history = model.fit(data)
+    return model, {"init_loss": init_history["loss"], "loss": history["loss"]}
+
+
+def train_statedynemo(data, n_channels, n_modes, n_epochs, overrides, n_init=5, batch_size=32):
+    from osl_dynamics.models.state_dynemo import Config, Model
+
+    base = {k: v for k, v in DYNEMO_BASE.items() if "alpha_temperature" not in k}
+    config = Config(
+        n_states=n_modes,
+        n_channels=n_channels,
+        n_epochs=n_epochs,
+        n_kl_annealing_epochs=max(1, n_epochs // 2),
+        **{**base, "batch_size": batch_size, **overrides},
     )
     model = Model(config)
     model.set_regularizers(data)
@@ -135,23 +176,51 @@ def main():
 
     family, overrides = VARIANTS[args.variant]
     overrides = resolve_private_variance(overrides, x, truth)
-    trainer = {"dynemo": train_dynemo, "hmm": train_hmm}[family]
+    trainer = {"dynemo": train_dynemo, "mdynemo": train_mdynemo,
+               "statedynemo": train_statedynemo, "hmm": train_hmm}[family]
     t0 = time.time()
     model, history = trainer(data, x.shape[-1], args.n_modes, args.n_epochs, overrides,
                              n_init=args.n_init,
                              **({"batch_size": args.batch_size} if args.batch_size else {}))
     train_minutes = (time.time() - t0) / 60
 
+    with open(f"{args.out_dir}/history.pkl", "wb") as f:
+        pickle.dump(history, f)
+
+    if family == "mdynemo":
+        # C_t = G_t F_t G_t with G_t = sum alpha stds (means share alpha), F_t = sum gamma fcs
+        alpha, gamma = map(np.array, model.get_alpha(data))
+        means, stds, fcs = model.get_means_stds_fcs()
+        for name, arr in [("alpha", alpha), ("gamma", gamma), ("means", means),
+                          ("stds", stds), ("fcs", fcs)]:
+            np.save(f"{args.out_dir}/{name}.npy", arr.astype(np.float32))
+        a_flat = alpha.reshape(-1, alpha.shape[-1])
+        g_flat = gamma.reshape(-1, gamma.shape[-1])
+
+        def moments(rows):
+            G = np.einsum("tk,kij->tij", a_flat[rows], stds)
+            F = np.einsum("tk,kij->tij", g_flat[rows], fcs)
+            return a_flat[rows] @ means, G @ F @ G
+
+        result = score(means, None, alpha, truth, moments=moments)
+        result.update(variant=args.variant, sim=os.path.basename(os.path.normpath(args.sim_dir)),
+                      seed=args.seed, n_modes=args.n_modes, n_epochs=args.n_epochs,
+                      n_init=args.n_init, final_loss=float(history["loss"][-1]),
+                      train_minutes=train_minutes)
+        with open(f"{args.out_dir}/metrics.json", "w") as f:
+            json.dump(result, f, indent=1)
+        print(json.dumps(result))
+        return
+
     alpha = np.array(model.get_alpha(data))
     means, covs = model.get_means_covariances()
     np.save(f"{args.out_dir}/alpha.npy", alpha.astype(np.float32))
     np.save(f"{args.out_dir}/means.npy", means)
     np.save(f"{args.out_dir}/covs.npy", covs)
-    with open(f"{args.out_dir}/history.pkl", "wb") as f:
-        pickle.dump(history, f)
 
     # The private-noise floor is part of every C_t (alpha sums to one)
-    psi = model.get_private_variance() if hasattr(model, "get_private_variance") else None
+    has_psi = getattr(model.config, "private_variance", None) is not None
+    psi = model.get_private_variance() if has_psi else None
     if psi is not None:
         np.save(f"{args.out_dir}/private_var.npy", psi)
         covs = covs + np.diag(psi)

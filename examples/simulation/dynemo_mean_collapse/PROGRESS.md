@@ -81,7 +81,10 @@ learned prior makes this cheap.
     R2 0.00, KL 0.71, alpha 0.94. Mean/FC recovery is 0.96-1.00 for both.
   - K=2 baseline: lam 0.089, KL 12.1. cd25: lam 0.96, KL 2.12.
   - The conclusions hold at HCP scale with the real training config (~1 h per run on 4 CPUs).
-- 02:45: first work block done (~2.5 h). Next, after a 1 h rest: check whether M-DyNeMo (the MAGE-like
+- 02:45: first work block done (~2.5 h). Added M-DyNeMo and State-DyNeMo families to run.py (metrics.score
+  now accepts a per-sample moments function); smoke tests pass.
+- Phase 5 (submitted ~03:05, 100 epochs, sim_smooth K=4): mdynemo_mean (2 seeds + sim_white control),
+  statedynemo_mean (2 seeds). Then a 1 h rest.
   model) has the same failure on the benchmark, plus a State-DyNeMo (discrete alpha) control.
 
 ## Conclusions so far
