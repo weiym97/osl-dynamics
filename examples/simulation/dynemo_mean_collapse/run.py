@@ -68,7 +68,7 @@ def resolve_private_variance(overrides, x, truth):
     return {**overrides, "private_variance": value.astype(np.float32)}
 
 
-def train_dynemo(data, n_channels, n_modes, n_epochs, overrides, n_init=5):
+def train_dynemo(data, n_channels, n_modes, n_epochs, overrides, n_init=5, batch_size=32):
     from osl_dynamics.models.dynemo import Config, Model
 
     config = Config(
@@ -76,7 +76,7 @@ def train_dynemo(data, n_channels, n_modes, n_epochs, overrides, n_init=5):
         n_channels=n_channels,
         n_epochs=n_epochs,
         n_kl_annealing_epochs=max(1, n_epochs // 2),
-        **{**DYNEMO_BASE, **overrides},
+        **{**DYNEMO_BASE, "batch_size": batch_size, **overrides},
     )
     model = Model(config)
     model.set_regularizers(data)
@@ -85,7 +85,7 @@ def train_dynemo(data, n_channels, n_modes, n_epochs, overrides, n_init=5):
     return model, {"init_loss": init_history["loss"], "loss": history["loss"]}
 
 
-def train_hmm(data, n_channels, n_modes, n_epochs, overrides, n_init=5):
+def train_hmm(data, n_channels, n_modes, n_epochs, overrides, n_init=5, batch_size=64):
     from osl_dynamics.models.hmm import Config, Model
 
     config = Config(
@@ -115,6 +115,7 @@ def main():
     parser.add_argument("--n_modes", type=int, default=4)
     parser.add_argument("--n_epochs", type=int, default=30)
     parser.add_argument("--n_init", type=int, default=5)
+    parser.add_argument("--batch_size", type=int, default=None)
     args = parser.parse_args()
 
     import tensorflow as tf
@@ -137,7 +138,8 @@ def main():
     trainer = {"dynemo": train_dynemo, "hmm": train_hmm}[family]
     t0 = time.time()
     model, history = trainer(data, x.shape[-1], args.n_modes, args.n_epochs, overrides,
-                             n_init=args.n_init)
+                             n_init=args.n_init,
+                             **({"batch_size": args.batch_size} if args.batch_size else {}))
     train_minutes = (time.time() - t0) / 60
 
     alpha = np.array(model.get_alpha(data))

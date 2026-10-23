@@ -68,8 +68,27 @@ learned prior makes this cheap.
   - Pattern recovery (`recovery.py`, matched modes): every model recovers mean/FC patterns well,
     collapsed baseline included (mean 0.97, FC 0.96), so the collapse doesn't show in mode maps.
     cd25: mean 1.00, FC 0.96, FC contrast 0.97. Psi floor: FC 0.98-0.99. HMM: FC 0.74.
-- Phase 4 (jobs 33893063-5): cd25 robustness on sim_white (cost when not needed), sim_smooth95,
-  K=2, K=8; cd10.
+- Phase 4 (jobs 33893063-5, 100 epochs):
+  - K=2: baseline lam 0.048, KL 20.2 (catastrophic, like HCP K=2); cd25 (2 seeds) lam 0.955, KL 1.72.
+  - K=8: baseline lam 0.13, 5 dirs < 0.5, KL 20.6; cd25 lam 0.88/0.94, KL 1.04/0.71.
+  - smooth95: cd25 KL 0.69-0.70 (baseline 16.6). cd10 on smooth: KL 0.72-0.73, lam 0.94-0.95.
+  - sim_white (nothing to fix): cd25 KL 0.55-0.56 against baseline 0.50-0.51, a negligible cost.
+    Mean/FC recovery 0.95-1.00 throughout.
+- HCP-scale check (jobs 33893283-4): sim_hcp = 500 sessions x 4800, 25 channels, run with the real
+  ICA_50_mean training config (batch 64, 30 epochs, n_init 10). Baseline vs cd25 at K=4 (2 seeds)
+  and K=2.
+
+## Conclusions so far
+
+1. The simulation reproduces the HCP failure, provided the private noise is temporally smooth.
+   White private noise doesn't. Collapse grows with training and is worst at small K.
+2. Coordinated channel dropout (rate 0.1-0.25) fixes it at every K tested. Copying goes from
+   R2 0.24 to 0.01, lam_min from ~0.1 to ~0.95, and KL to truth from 12-20 to 0.7 (K=4). Mode
+   mean/FC recovery is kept. Rate 0.5 also works but gives dead modes unless n_init is raised.
+3. A fixed diagonal private-noise floor only bounds the damage: the mean keeps copying, and the
+   result depends on the FA rank. A learned floor shrinks and does nothing (not identifiable).
+4. Collapse doesn't show in mode maps (pattern recovery is good even for the collapsed baseline).
+   Only likelihood-type checks catch it, which is consistent with BCV.
 
 ## Notes for moving to real data later
 
