@@ -1158,6 +1158,57 @@ class MixMatricesLayer(layers.Layer):
         return C
 
 
+class CoordinatedDropoutLayer(layers.Layer):
+    """Layer to hide whole channels from the inference network.
+
+    During training, each sequence hides a random subset of channels (each
+    channel with probability :code:`rate`, at least one hidden and one
+    visible). The hidden channels are zeroed in the returned inputs (the
+    rest are scaled by :code:`1 / (1 - rate)`, as in dropout) and the
+    returned mask marks the hidden channels, so the log-likelihood can be
+    computed on them only. Outside training, nothing is hidden and the mask
+    selects every channel.
+
+    See Keshtkaran & Pandarinath (2019), "Enabling hyperparameter
+    optimization in sequential autoencoders for spiking neural data".
+
+    Parameters
+    ----------
+    rate : float
+        Probability of hiding each channel.
+    kwargs : keyword arguments, optional
+        Keyword arguments to pass to the base class.
+    """
+
+    def __init__(self, rate: float, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.rate = rate
+
+    def call(
+        self, inputs: tf.Tensor, training: Optional[bool] = None, **kwargs
+    ) -> Tuple[tf.Tensor, tf.Tensor]:
+        """
+        The method takes the data and returns the inputs for the inference
+        network and the channel mask for the log-likelihood.
+        """
+        mask_shape = tf.stack([tf.shape(inputs)[0], 1, tf.shape(inputs)[-1]])
+        if training:
+            u = tf.random.uniform(mask_shape)
+            hidden = u < self.rate
+            # Always hide the channel with the smallest draw and show the
+            # channel with the largest draw
+            hidden = tf.logical_or(
+                hidden, u <= tf.reduce_min(u, axis=-1, keepdims=True)
+            )
+            hidden = tf.logical_and(
+                hidden, u < tf.reduce_max(u, axis=-1, keepdims=True)
+            )
+            mask = tf.cast(hidden, inputs.dtype)
+            masked_inputs = inputs * (1 - mask) / (1 - self.rate)
+            return masked_inputs, mask
+        return inputs, tf.ones(mask_shape, dtype=inputs.dtype)
+
+
 class LogLikelihoodLossLayer(layers.Layer):
     """Layer to calculate the negative log-likelihood.
 
@@ -1178,9 +1229,26 @@ class LogLikelihoodLossLayer(layers.Layer):
 
     def call(self, inputs: List[tf.Tensor]) -> tf.Tensor:
         """
-        The method takes the data, mean vector and covariance matrix.
+        The method takes the data, mean vector and covariance matrix, and
+        optionally a channel mask of shape (batch_size, 1, n_channels).
+
+        If a mask is passed, the log-likelihood is the marginal log-likelihood
+        of the masked channels only, rescaled by n_channels / n_masked so it
+        stays on the same scale as the full log-likelihood.
         """
-        x, mu, sigma = inputs
+        if len(inputs) == 4:
+            x, mu, sigma, mask = inputs
+        else:
+            x, mu, sigma = inputs
+            mask = None
+
+        if mask is not None:
+            # Block covariance: masked channels keep their covariance, the
+            # others become independent unit-variance channels with zero error
+            outer_mask = tf.expand_dims(mask, -1) * tf.expand_dims(mask, -2)
+            sigma = sigma * outer_mask + tf.linalg.diag(1 - mask)
+            x = (x - mu) * mask
+            mu = tf.zeros_like(x)
 
         # Multivariate normal distribution
         mvn = tfp.distributions.MultivariateNormalTriL(
@@ -1191,6 +1259,13 @@ class LogLikelihoodLossLayer(layers.Layer):
 
         # Calculate the log-likelihood
         ll_loss = mvn.log_prob(x)
+
+        if mask is not None:
+            # Remove the constant from the unmasked unit-variance channels
+            n_channels = tf.cast(tf.shape(mask)[-1], ll_loss.dtype)
+            n_masked = tf.reduce_sum(mask, axis=-1)
+            ll_loss += 0.5 * (n_channels - n_masked) * np.log(2 * np.pi)
+            ll_loss *= n_channels / n_masked
 
         if self.calculation == "sum":
             # Sum over time dimension and average over the batch dimension
