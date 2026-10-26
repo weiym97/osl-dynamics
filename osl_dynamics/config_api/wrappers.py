@@ -668,7 +668,8 @@ def train_dynemo(
         init_kwargs=None,
         fit_kwargs=None,
         save_inf_params=True,
-        calculate_free_energy=True
+        calculate_free_energy=True,
+        nfindr_kwargs=None,
 ):
     """Train `DyNeMo <https://osl-dynamics.readthedocs.io/en/latest/autoapi\
     /osl_dynamics/models/dynemo/index.html>`_.
@@ -676,10 +677,12 @@ def train_dynemo(
     This function will:
 
     1. Build a :code:`dynemo.Model` object.
-    2. Initialize the parameters of the model using
+    2. If :code:`nfindr_kwargs` is passed, initialise the mode covariances
+       with :code:`Model.nfindr_initialization`.
+    3. Initialize the parameters of the model using
        :code:`Model.random_subset_initialization`.
-    3. Perform full training.
-    4. Save the inferred parameters (mode mixing coefficients, means and
+    4. Perform full training.
+    5. Save the inferred parameters (mode mixing coefficients, means and
        covariances) if :code:`save_inf_params=True`.
 
     This function will create two directories:
@@ -725,6 +728,11 @@ def train_dynemo(
         Should we save the inferred parameters?
     calculate_free_energy: bool, optional
         Should we calculate free energy on training set?
+    nfindr_kwargs : dict, optional
+        Keyword arguments to pass to :code:`Model.nfindr_initialization`,
+        e.g. :code:`{'window_length': 20}`. Only used when the covariances
+        are learnt and no :code:`initial_covariances` are given, so it never
+        overrides covariances that were fixed or set explicitly.
     """
 
     init_kwargs = {} if init_kwargs is None else init_kwargs
@@ -786,6 +794,18 @@ def train_dynemo(
 
     # Set regularisers
     model.set_regularizers(data)
+
+    # Initialise the covariances with N-FINDR. The random subset
+    # initialisation below keeps them, because reset() restores them.
+    if (
+        nfindr_kwargs is not None
+        and config.learn_covariances
+        and config.initial_covariances is None
+    ):
+        _logger.info(f"Using nfindr_kwargs: {nfindr_kwargs}")
+        nfindr_covs = model.nfindr_initialization(data, **nfindr_kwargs)
+        os.makedirs(inf_params_dir, exist_ok=True)
+        save(f"{inf_params_dir}/nfindr_covs.npy", nfindr_covs)
 
     # Initialisation
     default_init_kwargs = {"n_init": 5, "n_epochs": 2, "take": 1}

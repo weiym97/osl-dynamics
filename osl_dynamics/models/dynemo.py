@@ -449,6 +449,57 @@ class Model(VariationalInferenceModelBase):
                 self.config.diagonal_covariances,
             )
 
+    def nfindr_initialization(
+        self, training_data, window_length=20, n_restarts=10, random_seed=None
+    ):
+        """Initialise the mode covariances with N-FINDR.
+
+        See :code:`osl_dynamics.inference.initializers.nfindr_covariances`.
+        The covariances also become the initial value used when the model is
+        reset, so a subsequent :code:`random_subset_initialization` keeps them
+        and only re-initialises the other weights.
+
+        Parameters
+        ----------
+        training_data : osl_dynamics.data.Data or list of np.ndarray
+            Training data. For a Data object only the sessions in
+            :code:`training_data.keep` are used.
+        window_length : int, optional
+            Number of samples in each window.
+        n_restarts : int, optional
+            Number of random starts for N-FINDR.
+        random_seed : int, optional
+            Seed for the N-FINDR starts.
+
+        Returns
+        -------
+        covariances : np.ndarray
+            Initial covariances. Shape is (n_modes, n_channels, n_channels).
+        """
+        from osl_dynamics.inference.initializers import nfindr_covariances
+
+        if self.config.learn_means:
+            _logger.warning(
+                "nfindr_initialization assumes zero means; the means are not "
+                "initialised."
+            )
+        if hasattr(training_data, "time_series"):
+            time_series = training_data.time_series(prepared=True, concatenate=False)
+            if isinstance(time_series, np.ndarray):
+                time_series = [time_series]
+            time_series = [time_series[i] for i in training_data.keep]
+        else:
+            time_series = training_data
+        covariances = nfindr_covariances(
+            time_series,
+            self.config.n_modes,
+            window_length=window_length,
+            n_restarts=n_restarts,
+            random_seed=random_seed,
+        )
+        self.set_covariances(covariances, update_initializer=True)
+        return covariances
+
     def sample_alpha(self, n_samples, theta_norm=None):
         """Uses the model RNN to sample mode mixing factors, :code:`alpha`.
 
