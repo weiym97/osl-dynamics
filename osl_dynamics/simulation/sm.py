@@ -5,7 +5,7 @@ from typing import List, Optional, Union
 import numpy as np
 from scipy.special import softmax
 
-from osl_dynamics.simulation.obs_mod import MVN, MSess_MVN
+from osl_dynamics.simulation.obs_mod import MVN, MDyn_MVN, MSess_MVN
 from osl_dynamics.simulation.base import Simulation
 
 
@@ -102,6 +102,9 @@ class MixedSine_MVN(Simulation):
         Number of channels.
     observation_error : float, optional
         Standard deviation of the error added to the generated data.
+    mix_precisions : bool, optional
+        Should we mix the mode precisions (inverse covariances) instead of
+        the covariances?
     """
 
     def __init__(
@@ -117,6 +120,7 @@ class MixedSine_MVN(Simulation):
         n_modes: Optional[int] = None,
         n_channels: Optional[int] = None,
         observation_error: float = 0.0,
+        mix_precisions: bool = False,
     ) -> None:
         # Observation model
         self.obs_mod = MVN(
@@ -126,6 +130,7 @@ class MixedSine_MVN(Simulation):
             n_modes=n_modes,
             n_channels=n_channels,
             observation_error=observation_error,
+            mix_precisions=mix_precisions,
         )
 
         self.n_modes = self.obs_mod.n_modes
@@ -163,6 +168,143 @@ class MixedSine_MVN(Simulation):
         self.obs_mod.means = (self.obs_mod.means - mu[np.newaxis, ...]) / sigma[
             np.newaxis, ...
         ]
+        self.obs_mod.covariances /= np.outer(sigma, sigma)[np.newaxis, ...]
+
+
+class MDyn_MixedSine_MVN(Simulation):
+    """Simulates two sets of sinusoidal alphas with a multivariate normal observation model.
+
+    Multi-dynamic version of :code:`MixedSine_MVN`. Two mode time courses,
+    :code:`alpha` and :code:`beta`, are simulated independently. By default,
+    :code:`beta` uses the same sinusoid settings as :code:`alpha` (with
+    different random phases).
+
+    Parameters
+    ----------
+    n_samples : int
+        Number of samples to draw from the model.
+    relative_activation : np.ndarray or list
+        Average value for each sine wave. Shape must be (n_modes,).
+    amplitudes : np.ndarray or list
+        Amplitude of each sinusoid. Shape must be (n_modes,).
+    frequencies : np.ndarray or list
+        Frequency of each sinusoid. Shape must be (n_modes,).
+    sampling_frequency : float
+        Sampling frequency.
+    means : np.ndarray or str
+        Mean vector for each mode, shape should be (n_modes, n_channels).
+        Either a numpy array or :code:`'zero'` or :code:`'random'`.
+    covariances : np.ndarray or str
+        Covariance matrix for each mode, shape should be (n_modes, n_channels,
+        n_channels). Either a numpy array or :code:`'random'`.
+    n_covariances_act : int, optional
+        Number of iterations to add activations to covariance matrices.
+    n_modes : int, optional
+        Number of modes.
+    n_channels : int, optional
+        Number of channels.
+    observation_error : float, optional
+        Standard deviation of the error added to the generated data.
+    mix_precisions : bool, optional
+        If :code:`True`, the means are mixed with :code:`alpha` and the mode
+        precisions (inverse covariances) with :code:`beta`. Otherwise, the
+        means and standard deviations are mixed with :code:`alpha` and the
+        correlations with :code:`beta`.
+    beta_relative_activation : np.ndarray or list, optional
+        :code:`relative_activation` for :code:`beta`.
+    beta_amplitudes : np.ndarray or list, optional
+        :code:`amplitudes` for :code:`beta`.
+    beta_frequencies : np.ndarray or list, optional
+        :code:`frequencies` for :code:`beta`.
+    """
+
+    def __init__(
+        self,
+        n_samples: int,
+        relative_activation: Union[np.ndarray, List[float]],
+        amplitudes: Union[np.ndarray, List[float]],
+        frequencies: Union[np.ndarray, List[float]],
+        sampling_frequency: float,
+        means: Union[np.ndarray, str],
+        covariances: Union[np.ndarray, str],
+        n_covariances_act: int = 1,
+        n_modes: Optional[int] = None,
+        n_channels: Optional[int] = None,
+        observation_error: float = 0.0,
+        mix_precisions: bool = False,
+        beta_relative_activation: Optional[Union[np.ndarray, List[float]]] = None,
+        beta_amplitudes: Optional[Union[np.ndarray, List[float]]] = None,
+        beta_frequencies: Optional[Union[np.ndarray, List[float]]] = None,
+    ) -> None:
+        # Observation model
+        self.obs_mod = MDyn_MVN(
+            means=means,
+            covariances=covariances,
+            n_covariances_act=n_covariances_act,
+            n_modes=n_modes,
+            n_channels=n_channels,
+            observation_error=observation_error,
+            mix_precisions=mix_precisions,
+        )
+
+        self.n_modes = self.obs_mod.n_modes
+        self.n_channels = self.obs_mod.n_channels
+
+        # Soft mixed mode time courses for alpha and beta
+        self.alpha_sm = MixedSine(
+            n_modes=self.n_modes,
+            relative_activation=relative_activation,
+            amplitudes=amplitudes,
+            frequencies=frequencies,
+            sampling_frequency=sampling_frequency,
+        )
+        self.beta_sm = MixedSine(
+            n_modes=self.n_modes,
+            relative_activation=(
+                relative_activation
+                if beta_relative_activation is None
+                else beta_relative_activation
+            ),
+            amplitudes=amplitudes if beta_amplitudes is None else beta_amplitudes,
+            frequencies=frequencies if beta_frequencies is None else beta_frequencies,
+            sampling_frequency=sampling_frequency,
+        )
+
+        super().__init__(n_samples=n_samples)
+
+        # Simulate data
+        alpha = self.alpha_sm.generate_modes(self.n_samples)
+        beta = self.beta_sm.generate_modes(self.n_samples)
+        self.mode_time_course = np.array([alpha, beta])
+        self.time_series = self.obs_mod.simulate_data(self.mode_time_course)
+
+    def __getattr__(self, attr: str):
+        if attr == "obs_mod":
+            raise AttributeError(f"No attribute called {attr}.")
+        if attr in dir(self.obs_mod):
+            return getattr(self.obs_mod, attr)
+        else:
+            raise AttributeError(f"No attribute called {attr}.")
+
+    def get_instantaneous_covariances(self) -> np.ndarray:
+        """Get the ground truth covariances at each time point.
+
+        Returns
+        -------
+        inst_covs : np.ndarray
+            Instantaneous covariances.
+            Shape is (n_samples, n_channels, n_channels).
+        """
+        return self.obs_mod.get_instantaneous_covariances(self.mode_time_course)
+
+    def standardize(self) -> None:
+        mu = np.mean(self.time_series, axis=0).astype(np.float64)
+        sigma = np.std(self.time_series, axis=0).astype(np.float64)
+        super().standardize()
+        self.obs_mod.means = (self.obs_mod.means - mu[np.newaxis, ...]) / sigma[
+            np.newaxis, ...
+        ]
+        self.obs_mod.stds /= sigma[np.newaxis, ...]
         self.obs_mod.covariances /= np.outer(sigma, sigma)[np.newaxis, ...]
 
 

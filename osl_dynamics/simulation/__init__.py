@@ -41,6 +41,7 @@ These combine a state model with an observation model:
 - :py:class:`HSMM_MVN` — HSMM + MVN.
 - :py:class:`MixedHSMM_MVN` — HSMM with overlapping states + MVN.
 - :py:class:`MixedSine_MVN` — Sinusoidal mixing + MVN.
+- :py:class:`MDyn_MixedSine_MVN` — Two sinusoidal mixing time courses + MVN.
 
 Variants
 --------
@@ -80,4 +81,9 @@ from osl_dynamics.simulation.hmm import (
     HMM_Dirichlet,
 )
 from osl_dynamics.simulation.hsmm import HSMM, HSMM_MVN, MixedHSMM_MVN
-from osl_dynamics.simulation.sm import MixedSine, MixedSine_MVN, MSess_MixedSine_MVN
+from osl_dynamics.simulation.sm import (
+    MixedSine,
+    MixedSine_MVN,
+    MDyn_MixedSine_MVN,
+    MSess_MixedSine_MVN,
+)

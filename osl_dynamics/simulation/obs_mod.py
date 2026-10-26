@@ -26,6 +26,9 @@ class MVN:
         Number of iterations to add activations to covariance matrices.
     observation_error : float, optional
         Standard deviation of the error added to the generated data.
+    mix_precisions : bool, optional
+        Should we mix the mode precisions (inverse covariances) instead of
+        the covariances?
     """
 
     def __init__(
@@ -36,9 +39,11 @@ class MVN:
         n_channels: Optional[int] = None,
         n_covariances_act: int = 1,
         observation_error: float = 0.0,
+        mix_precisions: bool = False,
     ) -> None:
         self.n_covariances_act = n_covariances_act
         self.observation_error = observation_error
+        self.mix_precisions = mix_precisions
 
         # Both the means and covariances were passed as numpy arrays
         if isinstance(means, np.ndarray) and isinstance(covariances, np.ndarray):
@@ -140,6 +145,25 @@ class MVN:
 
         return covariances
 
+    def mix_covariances(self, alpha: np.ndarray) -> np.ndarray:
+        """Covariance for a mixture of modes.
+
+        Parameters
+        ----------
+        alpha : np.ndarray
+            Mixing coefficients. Shape must be (n_modes,).
+
+        Returns
+        -------
+        sigma : np.ndarray
+            Covariance. Shape is (n_channels, n_channels).
+        """
+        alpha = alpha[:, np.newaxis, np.newaxis]
+        if self.mix_precisions:
+            precisions = np.linalg.inv(self.covariances)
+            return np.linalg.inv(np.sum(precisions * alpha, axis=0))
+        return np.sum(self.covariances * alpha, axis=0)
+
     def simulate_data(self, state_time_course: np.ndarray) -> np.ndarray:
         """Simulate time series data.
 
@@ -163,10 +187,7 @@ class MVN:
         for alpha in np.unique(state_time_course, axis=0):
             # Mean and covariance for this combination of modes
             mu = np.sum(self.means * alpha[:, np.newaxis], axis=0)
-            sigma = np.sum(
-                self.covariances * alpha[:, np.newaxis, np.newaxis],
-                axis=0,
-            )
+            sigma = self.mix_covariances(alpha)
 
             # Generate data for the time points that this combination of
             # modes is active
@@ -207,10 +228,7 @@ class MVN:
         # Loop through all unique combinations of modes
         for alpha in np.unique(state_time_course, axis=0):
             # Covariance for this combination of modes
-            sigma = np.sum(
-                self.covariances * alpha[:, np.newaxis, np.newaxis],
-                axis=0,
-            )
+            sigma = self.mix_covariances(alpha)
             inst_covs[np.all(state_time_course == alpha, axis=1)] = sigma
 
         return inst_covs.astype(np.float32)
@@ -237,6 +255,10 @@ class MDyn_MVN(MVN):
         Number of iterations to add activations to covariance matrices.
     observation_error : float, optional
         Standard deviation of the error added to the generated data.
+    mix_precisions : bool, optional
+        If :code:`True`, the means are mixed with the first time course and
+        the mode precisions (inverse covariances) with the second, instead of
+        the standard deviations and correlations.
     """
 
     def __init__(
@@ -247,6 +269,7 @@ class MDyn_MVN(MVN):
         n_channels: Optional[int] = None,
         n_covariances_act: int = 1,
         observation_error: float = 0.0,
+        mix_precisions: bool = False,
     ) -> None:
         super().__init__(
             means=means,
@@ -255,6 +278,7 @@ class MDyn_MVN(MVN):
             n_channels=n_channels,
             n_covariances_act=n_covariances_act,
             observation_error=observation_error,
+            mix_precisions=mix_precisions,
         )
 
         # Get the stds and corrs from self.covariance
@@ -294,11 +318,15 @@ class MDyn_MVN(MVN):
 
             # Mean, standard deviation, corr for this combination of time courses
             mu = np.sum(self.means * alpha[:, np.newaxis], axis=0)
-            G = np.diag(np.sum(self.stds * alpha[:, np.newaxis], axis=0))
-            F = np.sum(self.corrs * beta[:, np.newaxis, np.newaxis], axis=0)
+            if self.mix_precisions:
+                # The precision follows beta
+                sigma = self.mix_covariances(beta)
+            else:
+                G = np.diag(np.sum(self.stds * alpha[:, np.newaxis], axis=0))
+                F = np.sum(self.corrs * beta[:, np.newaxis, np.newaxis], axis=0)
 
-            # Calculate covariance matrix from the standard deviation and corr
-            sigma = G @ F @ G
+                # Calculate covariance matrix from the standard deviation and corr
+                sigma = G @ F @ G
 
             # Generate data for the time points that this combination of states
             # is active
@@ -351,12 +379,15 @@ class MDyn_MVN(MVN):
             alpha = time_courses[:, 0]
             beta = time_courses[:, 1]
 
-            # Mean, standard deviation, corr for this combination of time courses
-            G = np.diag(np.sum(self.stds * alpha[:, np.newaxis], axis=0))
-            F = np.sum(self.corrs * beta[:, np.newaxis, np.newaxis], axis=0)
+            if self.mix_precisions:
+                sigma = self.mix_covariances(beta)
+            else:
+                # Standard deviation, corr for this combination of time courses
+                G = np.diag(np.sum(self.stds * alpha[:, np.newaxis], axis=0))
+                F = np.sum(self.corrs * beta[:, np.newaxis, np.newaxis], axis=0)
 
-            # Calculate covariance matrix from the standard deviation and corr
-            sigma = G @ F @ G
+                # Calculate covariance matrix from the standard deviation and corr
+                sigma = G @ F @ G
 
             inst_covs[np.all(state_time_courses == time_courses, axis=(1, 2))] = sigma
 
