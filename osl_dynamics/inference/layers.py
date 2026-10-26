@@ -1219,18 +1219,22 @@ class LogLikelihoodLossLayer(layers.Layer):
     ----------
     calculation : str
         Operation for reducing the time dimension. Either 'mean' or 'sum'.
+    precision : bool, optional
+        Is a precision matrix passed instead of a covariance matrix?
     kwargs : keyword arguments, optional
         Keyword arguments to pass to the base class.
     """
 
-    def __init__(self, calculation: str, **kwargs) -> None:
+    def __init__(self, calculation: str, precision: bool = False, **kwargs) -> None:
         super().__init__(**kwargs)
         self.calculation = calculation
+        self.precision = precision
 
     def call(self, inputs: List[tf.Tensor]) -> tf.Tensor:
         """
-        The method takes the data, mean vector and covariance matrix, and
-        optionally a channel mask of shape (batch_size, 1, n_channels).
+        The method takes the data, mean vector and covariance matrix (or
+        precision matrix if :code:`precision=True`), and optionally a channel
+        mask of shape (batch_size, 1, n_channels).
 
         If a mask is passed, the log-likelihood is the marginal log-likelihood
         of the masked channels only, rescaled by n_channels / n_masked so it
@@ -1242,6 +1246,11 @@ class LogLikelihoodLossLayer(layers.Layer):
             x, mu, sigma = inputs
             mask = None
 
+        if self.precision and mask is not None:
+            # The marginal of the masked channels needs their covariance
+            sigma = tf.linalg.inv(sigma)
+        precision = self.precision and mask is None
+
         if mask is not None:
             # Block covariance: masked channels keep their covariance, the
             # others become independent unit-variance channels with zero error
@@ -1250,15 +1259,27 @@ class LogLikelihoodLossLayer(layers.Layer):
             x = (x - mu) * mask
             mu = tf.zeros_like(x)
 
-        # Multivariate normal distribution
-        mvn = tfp.distributions.MultivariateNormalTriL(
-            loc=mu,
-            scale_tril=tf.linalg.cholesky(sigma),
-            allow_nan_stats=False,
-        )
+        if precision:
+            # Log-likelihood with the precision matrix P = LL^T:
+            # log|L| - 0.5 * |L^T (x - mu)|^2 - 0.5 * n_channels * log(2pi)
+            L = tf.linalg.cholesky(sigma)
+            z = tf.linalg.matvec(L, x - mu, adjoint_a=True)
+            n_channels = tf.cast(tf.shape(x)[-1], x.dtype)
+            ll_loss = (
+                tf.reduce_sum(tf.math.log(tf.linalg.diag_part(L)), axis=-1)
+                - 0.5 * tf.reduce_sum(tf.square(z), axis=-1)
+                - 0.5 * n_channels * np.log(2 * np.pi)
+            )
+        else:
+            # Multivariate normal distribution
+            mvn = tfp.distributions.MultivariateNormalTriL(
+                loc=mu,
+                scale_tril=tf.linalg.cholesky(sigma),
+                allow_nan_stats=False,
+            )
 
-        # Calculate the log-likelihood
-        ll_loss = mvn.log_prob(x)
+            # Calculate the log-likelihood
+            ll_loss = mvn.log_prob(x)
 
         if mask is not None:
             # Remove the constant from the unmasked unit-variance channels

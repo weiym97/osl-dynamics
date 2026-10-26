@@ -14,6 +14,35 @@ from osl_dynamics.inference.initializers import (
 )
 
 
+def invert_matrices(matrices: np.ndarray, diagonal: bool = False) -> np.ndarray:
+    """Invert covariance matrices to get precision matrices (or vice versa).
+
+    Parameters
+    ----------
+    matrices : np.ndarray or str
+        Matrices with shape (n, m, m), or their diagonals with shape (n, m).
+        Can be a path to a numpy file. If :code:`None`, :code:`None` is
+        returned.
+    diagonal : bool, optional
+        Should we only invert the diagonal (ignoring off-diagonal elements)?
+        If so, the inverted diagonals are returned with shape (n, m).
+
+    Returns
+    -------
+    inverses : np.ndarray
+        Inverse matrices (or diagonals).
+    """
+    if matrices is None:
+        return None
+    if isinstance(matrices, str):
+        matrices = np.load(matrices)
+    if diagonal and matrices.ndim == 3:
+        matrices = np.diagonal(matrices, axis1=1, axis2=2)
+    if matrices.ndim == 2:
+        return 1 / matrices
+    return np.linalg.inv(matrices)
+
+
 def get_observation_model_parameter(
     model: tf.keras.Model, layer_name: str
 ) -> np.ndarray:
@@ -34,6 +63,7 @@ def get_observation_model_parameter(
     available_layers = [
         "means",
         "covs",
+        "precs",
         "stds",
         "corrs",
         "group_means",
@@ -70,11 +100,12 @@ def set_observation_model_parameter(
         Whether to update the initializer of the layer.
     diagonal_covariances : bool, optional
         Whether the covariances are diagonal.
-        Ignored if :code:`layer_name` is not :code:`"covs"`.
+        Ignored if :code:`layer_name` is not :code:`"covs"` or :code:`"precs"`.
     """
     available_layers = [
         "means",
         "covs",
+        "precs",
         "stds",
         "corrs",
         "group_means",
@@ -88,7 +119,9 @@ def set_observation_model_parameter(
 
     obs_parameter = obs_parameter.astype(np.float32)
 
-    if layer_name == "stds" or (layer_name == "covs" and diagonal_covariances):
+    if layer_name == "stds" or (
+        layer_name in ["covs", "precs"] and diagonal_covariances
+    ):
         if obs_parameter.ndim == 3:
             # Only keep the diagonal as a vector
             obs_parameter = np.diagonal(obs_parameter, axis1=1, axis2=2)

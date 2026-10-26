@@ -21,6 +21,7 @@ import osl_dynamics.data.tf as dtf
 from osl_dynamics.inference.layers import (
     TFConcatLayer,
     CorrelationMatricesLayer,
+    CovarianceMatricesLayer,
     DiagonalMatricesLayer,
     InferenceRNNLayer,
     KLDivergenceLayer,
@@ -56,7 +57,8 @@ class Config(BaseModelConfig, VariationalInferenceModelConfig):
     n_modes : int
         Number of modes.
     n_corr_modes : int
-        Number of modes for correlation.
+        Number of modes for correlation (or precision if
+        :code:`mix_precisions=True`).
         If :code:`None`, then set to :code:`n_modes`.
     n_channels : int
         Number of channels.
@@ -119,6 +121,24 @@ class Config(BaseModelConfig, VariationalInferenceModelConfig):
         Regularizer for the standard deviation vectors.
     corrs_regularizer : tf.keras.regularizers.Regularizer
         Regularizer for the correlation matrices.
+
+    mix_precisions : bool
+        Should we replace the standard deviations and correlations with full
+        mode precision matrices? If :code:`True`, the mean is mixed with
+        :code:`alpha` and the precision matrix with :code:`beta`:
+        :code:`P_t = Sum_j beta_jt P_j`, where :code:`P_j` is the inverse of
+        the covariance of mode :code:`j`. The stds and corrs arguments are then
+        not used and :code:`pca_components` is not supported. Defaults to
+        :code:`False`.
+    learn_covariances : bool
+        Should we make the mode covariances trainable?
+        Only used if :code:`mix_precisions=True`.
+    initial_covariances : np.ndarray
+        Initialisation for the mode covariances.
+        Only used if :code:`mix_precisions=True`.
+    covariances_epsilon : float
+        Error added to the mode precisions for numerical stability.
+        Only used if :code:`mix_precisions=True`.
 
     do_kl_annealing : bool
         Should we use KL annealing during training?
@@ -199,6 +219,10 @@ class Config(BaseModelConfig, VariationalInferenceModelConfig):
     means_regularizer: tf.keras.regularizers.Regularizer = None
     stds_regularizer: tf.keras.regularizers.Regularizer = None
     corrs_regularizer: tf.keras.regularizers.Regularizer = None
+    mix_precisions: bool = False
+    learn_covariances: bool = None
+    initial_covariances: np.ndarray = None
+    covariances_epsilon: float = None
     multiple_dynamics: bool = True
 
     pca_components: np.ndarray = None
@@ -225,28 +249,44 @@ class Config(BaseModelConfig, VariationalInferenceModelConfig):
             raise ValueError("Please pass model_n_units.")
 
     def validate_observation_model_parameters(self) -> None:
-        if (
-            self.learn_means is None
-            or self.learn_stds is None
-            or self.learn_corrs is None
-        ):
-            raise ValueError("learn_means, learn_stds and learn_corrs must be passed.")
+        if self.mix_precisions:
+            if self.learn_means is None or self.learn_covariances is None:
+                raise ValueError("learn_means and learn_covariances must be passed.")
 
-        if self.stds_epsilon is None:
-            if self.learn_stds:
-                self.stds_epsilon = 1e-6
-            else:
-                self.stds_epsilon = 0.0
+            if self.covariances_epsilon is None:
+                if self.learn_covariances:
+                    self.covariances_epsilon = 1e-6
+                else:
+                    self.covariances_epsilon = 0.0
+        else:
+            if (
+                self.learn_means is None
+                or self.learn_stds is None
+                or self.learn_corrs is None
+            ):
+                raise ValueError(
+                    "learn_means, learn_stds and learn_corrs must be passed."
+                )
 
-        if self.corrs_epsilon is None:
-            if self.learn_corrs:
-                self.corrs_epsilon = 1e-6
-            else:
-                self.corrs_epsilon = 0.0
+            if self.stds_epsilon is None:
+                if self.learn_stds:
+                    self.stds_epsilon = 1e-6
+                else:
+                    self.stds_epsilon = 0.0
+
+            if self.corrs_epsilon is None:
+                if self.learn_corrs:
+                    self.corrs_epsilon = 1e-6
+                else:
+                    self.corrs_epsilon = 0.0
 
         if self.pca_components is None:
             self.pca_components = np.eye(self.n_channels)
         self.pca_components = self.pca_components.astype(np.float32)
+        if self.mix_precisions and not np.array_equal(
+            self.pca_components, np.eye(self.n_channels)
+        ):
+            raise ValueError("pca_components is not supported with mix_precisions.")
 
     def validate_dimension_parameters(self) -> None:
         super().validate_dimension_parameters()
@@ -316,24 +356,34 @@ class Model(VariationalInferenceModelBase):
             config.means_regularizer,
             name="means",
         )
-        stds_layer = DiagonalMatricesLayer(
-            config.n_modes,
-            config.n_channels,
-            config.learn_stds,
-            config.initial_stds,
-            config.stds_epsilon,
-            config.stds_regularizer,
-            name="stds",
-        )
-        corrs_layer = CorrelationMatricesLayer(
-            config.n_corr_modes,
-            config.n_channels,
-            config.learn_corrs,
-            config.initial_corrs,
-            config.corrs_epsilon,
-            config.corrs_regularizer,
-            name="corrs",
-        )
+        if config.mix_precisions:
+            precs_layer = CovarianceMatricesLayer(
+                config.n_corr_modes,
+                config.n_channels,
+                config.learn_covariances,
+                obs_mod.invert_matrices(config.initial_covariances),
+                config.covariances_epsilon,
+                name="precs",
+            )
+        else:
+            stds_layer = DiagonalMatricesLayer(
+                config.n_modes,
+                config.n_channels,
+                config.learn_stds,
+                config.initial_stds,
+                config.stds_epsilon,
+                config.stds_regularizer,
+                name="stds",
+            )
+            corrs_layer = CorrelationMatricesLayer(
+                config.n_corr_modes,
+                config.n_channels,
+                config.learn_corrs,
+                config.initial_corrs,
+                config.corrs_epsilon,
+                config.corrs_regularizer,
+                name="corrs",
+            )
 
         class PCATransformLayer(tf.keras.layers.Layer):
             def __init__(self, pca_components, **kwargs):
@@ -373,8 +423,11 @@ class Model(VariationalInferenceModelBase):
         mix_means_layer = MixVectorsLayer(name="mix_means")
         mix_stds_layer = MixMatricesLayer(name="mix_stds")
         mix_corrs_layer = MixMatricesLayer(name="mix_corrs")
+        mix_precs_layer = MixMatricesLayer(name="mix_precs")
         matmul_layer = TFMatMulLayer(name="cov")
-        ll_loss_layer = LogLikelihoodLossLayer(config.loss_calc, name="ll_loss")
+        ll_loss_layer = LogLikelihoodLossLayer(
+            config.loss_calc, config.mix_precisions, name="ll_loss"
+        )
         theta_layer = TFConcatLayer(axis=2, name="theta")
         theta_drop_layer = tf.keras.layers.Dropout(
             config.model_dropout,
@@ -429,13 +482,19 @@ class Model(VariationalInferenceModelBase):
 
         # Observation model
         mu = means_layer(data)
-        E = stds_layer(data)
-        R = corrs_layer(data)
-        pca_mu, pca_E, pca_R = pca_layer([mu, E, R])
-        m = mix_means_layer([alpha, pca_mu])
-        G = mix_stds_layer([alpha, pca_E])
-        F = mix_corrs_layer([beta, pca_R])
-        C = matmul_layer([G, F, G])
+        if config.mix_precisions:
+            # The mean follows alpha and the precision follows beta
+            P = precs_layer(data)
+            m = mix_means_layer([alpha, mu])
+            C = mix_precs_layer([beta, P])
+        else:
+            E = stds_layer(data)
+            R = corrs_layer(data)
+            pca_mu, pca_E, pca_R = pca_layer([mu, E, R])
+            m = mix_means_layer([alpha, pca_mu])
+            G = mix_stds_layer([alpha, pca_E])
+            F = mix_corrs_layer([beta, pca_R])
+            C = matmul_layer([G, F, G])
         ll_loss = ll_loss_layer([data, m, C])
 
         # Decoder
@@ -496,6 +555,28 @@ class Model(VariationalInferenceModelBase):
         """
         return obs_mod.get_observation_model_parameter(self.model, "corrs")
 
+    def get_precisions(self) -> np.ndarray:
+        """Get the mode precisions (if :code:`mix_precisions=True`).
+
+        Returns
+        -------
+        precisions : np.ndarray
+            Mode precisions.
+            Shape (n_corr_modes, n_channels, n_channels).
+        """
+        return obs_mod.get_observation_model_parameter(self.model, "precs")
+
+    def get_covariances(self) -> np.ndarray:
+        """Get the mode covariances (if :code:`mix_precisions=True`).
+
+        Returns
+        -------
+        covariances : np.ndarray
+            Mode covariances.
+            Shape (n_corr_modes, n_channels, n_channels).
+        """
+        return obs_mod.invert_matrices(self.get_precisions())
+
     def get_means_stds_corrs(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Get the mode means, standard deviations, correlations.
 
@@ -517,8 +598,14 @@ class Model(VariationalInferenceModelBase):
 
     def get_observation_model_parameters(
         self,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Wrapper for :code:`get_means_stds_corrs`."""
+    ) -> Tuple[np.ndarray, ...]:
+        """Wrapper for :code:`get_means_stds_corrs`.
+
+        If :code:`mix_precisions=True`, the means and covariances are
+        returned instead.
+        """
+        if self.config.mix_precisions:
+            return self.get_means(), self.get_covariances()
         return self.get_means_stds_corrs()
 
     def set_means(self, means: np.ndarray, update_initializer: bool = True) -> None:
@@ -577,6 +664,27 @@ class Model(VariationalInferenceModelBase):
             update_initializer=update_initializer,
         )
 
+    def set_covariances(
+        self, covariances: np.ndarray, update_initializer: bool = True
+    ) -> None:
+        """Set the mode covariances (if :code:`mix_precisions=True`).
+
+        Parameters
+        ----------
+        covariances : np.ndarray
+            Mode covariances.
+            Shape is (n_corr_modes, n_channels, n_channels).
+        update_initializer : bool
+            Do we want to use the passed parameters when we re-initialize
+            the model?
+        """
+        obs_mod.set_observation_model_parameter(
+            self.model,
+            obs_mod.invert_matrices(covariances),
+            layer_name="precs",
+            update_initializer=update_initializer,
+        )
+
     def set_means_stds_corrs(
         self,
         means: np.ndarray,
@@ -591,10 +699,24 @@ class Model(VariationalInferenceModelBase):
 
     def set_observation_model_parameters(
         self,
-        observation_model_parameters: Tuple[np.ndarray, np.ndarray, np.ndarray],
+        observation_model_parameters: Tuple[np.ndarray, ...],
         update_initializer: bool = True,
     ) -> None:
-        """Wrapper for set_means_stds_corrs."""
+        """Wrapper for set_means_stds_corrs.
+
+        If :code:`mix_precisions=True`, the means and covariances are set
+        instead.
+        """
+        if self.config.mix_precisions:
+            self.set_means(
+                observation_model_parameters[0],
+                update_initializer=update_initializer,
+            )
+            self.set_covariances(
+                observation_model_parameters[1],
+                update_initializer=update_initializer,
+            )
+            return
         self.set_means_stds_corrs(
             observation_model_parameters[0],
             observation_model_parameters[1],
@@ -629,6 +751,11 @@ class Model(VariationalInferenceModelBase):
 
         if self.config.learn_means:
             obs_mod.set_means_regularizer(self.model, range_, scale_factor)
+
+        if self.config.mix_precisions:
+            if self.config.learn_covariances:
+                _logger.warning("No regularizer is set for the mode precisions.")
+            return
 
         if self.config.learn_stds:
             obs_mod.set_stds_regularizer(

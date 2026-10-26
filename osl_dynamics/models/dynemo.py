@@ -115,6 +115,14 @@ class Config(BaseModelConfig, VariationalInferenceModelConfig):
         Error added to mode covariances for numerical stability.
     diagonal_covariances : bool
         Should we learn diagonal mode covariances?
+    mix_precisions : bool
+        Should we mix the mode precision matrices instead of the covariances?
+        If :code:`True`, the precision matrix at each time point is
+        :code:`P_t = Sum_j alpha_jt P_j`, where :code:`P_j` is the inverse
+        of the covariance of mode :code:`j`. Mode covariances are still passed
+        and returned (e.g. :code:`initial_covariances`,
+        :code:`get_covariances`), but :code:`covariances_epsilon` is added to
+        the precisions. Defaults to :code:`False`.
     means_regularizer : tf.keras.regularizers.Regularizer
         Regularizer for mean vectors.
     covariances_regularizer : tf.keras.regularizers.Regularizer
@@ -195,6 +203,7 @@ class Config(BaseModelConfig, VariationalInferenceModelConfig):
     initial_means: np.ndarray = None
     initial_covariances: np.ndarray = None
     diagonal_covariances: bool = False
+    mix_precisions: bool = False
     covariances_epsilon: float = None
     means_regularizer: tf.keras.regularizers.Regularizer = None
     covariances_regularizer: tf.keras.regularizers.Regularizer = None
@@ -288,29 +297,40 @@ class Model(VariationalInferenceModelBase):
             config.means_regularizer,
             name="means",
         )
+        # If we mix precisions, the layer learns the mode precisions
+        if config.mix_precisions:
+            covs_name = "precs"
+            initial_covs = obs_mod.invert_matrices(
+                config.initial_covariances, config.diagonal_covariances
+            )
+        else:
+            covs_name = "covs"
+            initial_covs = config.initial_covariances
         if config.diagonal_covariances:
             covs_layer = DiagonalMatricesLayer(
                 config.n_modes,
                 config.n_channels,
                 config.learn_covariances,
-                config.initial_covariances,
+                initial_covs,
                 config.covariances_epsilon,
                 config.covariances_regularizer,
-                name="covs",
+                name=covs_name,
             )
         else:
             covs_layer = CovarianceMatricesLayer(
                 config.n_modes,
                 config.n_channels,
                 config.learn_covariances,
-                config.initial_covariances,
+                initial_covs,
                 config.covariances_epsilon,
                 config.covariances_regularizer,
-                name="covs",
+                name=covs_name,
             )
         mix_means_layer = MixVectorsLayer(name="mix_means")
-        mix_covs_layer = MixMatricesLayer(name="mix_covs")
-        ll_loss_layer = LogLikelihoodLossLayer(config.loss_calc, name="ll_loss")
+        mix_covs_layer = MixMatricesLayer(name="mix_" + covs_name)
+        ll_loss_layer = LogLikelihoodLossLayer(
+            config.loss_calc, config.mix_precisions, name="ll_loss"
+        )
         theta_drop_layer = tf.keras.layers.Dropout(
             config.model_dropout,
             name="theta_drop",
@@ -393,7 +413,21 @@ class Model(VariationalInferenceModelBase):
         covariances : np.ndarary
             Mode covariances.
         """
+        if self.config.mix_precisions:
+            return obs_mod.invert_matrices(self.get_precisions())
         return obs_mod.get_observation_model_parameter(self.model, "covs")
+
+    def get_precisions(self) -> np.ndarray:
+        """Get the mode precisions (inverse covariances).
+
+        Returns
+        -------
+        precisions : np.ndarary
+            Mode precisions.
+        """
+        if self.config.mix_precisions:
+            return obs_mod.get_observation_model_parameter(self.model, "precs")
+        return obs_mod.invert_matrices(self.get_covariances())
 
     def get_means_covariances(self) -> Tuple[np.ndarray, np.ndarray]:
         """Get the mode means and covariances.
@@ -444,10 +478,17 @@ class Model(VariationalInferenceModelBase):
             Do we want to use the passed covariances when we re-initialize
             the model?
         """
+        if self.config.mix_precisions:
+            covariances = obs_mod.invert_matrices(
+                covariances, self.config.diagonal_covariances
+            )
+            layer_name = "precs"
+        else:
+            layer_name = "covs"
         obs_mod.set_observation_model_parameter(
             self.model,
             covariances,
-            layer_name="covs",
+            layer_name=layer_name,
             update_initializer=update_initializer,
             diagonal_covariances=self.config.diagonal_covariances,
         )
@@ -505,7 +546,9 @@ class Model(VariationalInferenceModelBase):
         if self.config.learn_means:
             obs_mod.set_means_regularizer(self.model, range_, scale_factor)
 
-        if self.config.learn_covariances:
+        if self.config.learn_covariances and self.config.mix_precisions:
+            _logger.warning("No regularizer is set for the mode precisions.")
+        elif self.config.learn_covariances:
             obs_mod.set_covariances_regularizer(
                 self.model,
                 range_,
