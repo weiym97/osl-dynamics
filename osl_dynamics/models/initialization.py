@@ -19,6 +19,9 @@ The candidate generators are:
 :func:`nfindr_covariances` estimates starting covariances for a soft
 mixture of modes (used by DyNeMo's :code:`nfindr_initialization`).
 
+:meth:`InitializationMixin.means_regression_initialization` is for models
+that learn means: it trains a copy of the model without means first.
+
 Models customise the loop through hooks:
 
 - :meth:`InitializationMixin._initialization_context`: settings that only
@@ -29,6 +32,7 @@ Models customise the loop through hooks:
   assignment for the random state time course initialization.
 """
 
+import dataclasses
 import logging
 from contextlib import contextmanager
 from typing import Callable, List, Optional, Tuple, Union
@@ -614,6 +618,130 @@ class InitializationMixin:
             return self._run_multistart(candidates, n_epochs, **kwargs)
 
 
+    def means_regression_initialization(
+        self,
+        training_data,
+        n_epochs: Optional[int] = None,
+        n_init: Optional[int] = None,
+        take: Optional[float] = None,
+        n_no_means_epochs: Optional[int] = None,
+        **kwargs,
+    ) -> dict:
+        """Initialization for models that learn the means.
+
+        When the means are learnt, the mode time courses can copy
+        fluctuations in the data into the mean while the KL divergence is
+        down-weighted early in training, which leads to poor solutions.
+        Instead, a copy of the model without means (:code:`learn_means=False`)
+        is initialized with :code:`random_subset_initialization` and trained,
+        so the mode time courses are inferred from the second-order
+        statistics only. Its weights are copied into this model and the
+        (group) means are set by regressing the data onto the inferred mode
+        time courses (ridge regression). For models with multiple dynamics,
+        the means follow a time course that the model without means does not
+        learn, so the means are instead estimated from the means of short
+        windows with :func:`nfindr_means`. The KL annealing factors are set
+        to one, so training can continue without KL annealing.
+
+        The regularizers and deviation parameter initializers (in DIVE) of
+        the model without means are set from the training data.
+
+        Parameters
+        ----------
+        training_data : tf.data.Dataset or osl_dynamics.data.Data
+            Dataset to use for training.
+        n_epochs : int, optional
+            Number of epochs for each random subset initialization.
+            By default we use the value passed in the config.
+        n_init : int, optional
+            Number of random subset initializations.
+            By default we use the value passed in the config.
+        take : float, optional
+            Fraction of total batches to take in the random subset
+            initialization. By default we use the value passed in the config.
+        n_no_means_epochs : int, optional
+            Number of epochs to train the model without means.
+            By default we use :code:`n_epochs` in the config.
+        kwargs : keyword arguments, optional
+            Keyword arguments for the fit method. Variational models also
+            accept :code:`n_kl_annealing_epochs` for the random subset
+            initialization.
+
+        Returns
+        -------
+        history : dict
+            The training history of the model without means.
+        """
+        if not getattr(self.config, "learn_means", False):
+            raise ValueError("means_regression_initialization needs learn_means=True.")
+
+        # Train a copy of the model without means
+        _logger.info("Training the model without means")
+        no_means = type(self)(
+            dataclasses.replace(self.config, learn_means=False, initial_means=None)
+        )
+        for method in ("set_regularizers", "set_dev_parameters_initializer"):
+            if hasattr(no_means, method):
+                getattr(no_means, method)(training_data)
+        no_means.random_subset_initialization(
+            training_data, n_epochs, n_init, take, **kwargs
+        )
+        kwargs.pop("n_kl_annealing_epochs", None)
+        if n_no_means_epochs is not None:
+            kwargs["epochs"] = n_no_means_epochs
+        history = no_means.fit(training_data, **kwargs)
+
+        # Copy the weights of layers with the same name and shapes
+        layer_names = [layer.name for layer in self.model.layers]
+        for layer in no_means.model.layers:
+            if layer.name not in layer_names:
+                continue
+            target = self.model.get_layer(layer.name)
+            weights = layer.get_weights()
+            if [w.shape for w in weights] == [w.shape for w in target.get_weights()]:
+                target.set_weights(weights)
+
+        datasets = self.make_dataset(training_data, shuffle=False)
+        if not isinstance(datasets, list):
+            datasets = [datasets]
+        x = [
+            np.concatenate(
+                [
+                    batch["data"].numpy().reshape(-1, self.config.n_channels)
+                    for batch in dataset
+                ]
+            )
+            for dataset in datasets
+        ]
+        if self.config.multiple_dynamics:
+            # Corners of the simplex of window means
+            means = nfindr_means(
+                x,
+                self.config.n_modes,
+                random_seed=np.random.randint(2**31 - 1),
+            )
+        else:
+            # Regress the data onto the mode time courses
+            alpha = no_means.get_alpha(training_data, concatenate=True)
+            x = np.concatenate(x)
+            if len(x) != len(alpha):
+                raise ValueError("Could not match the data to the mode time courses.")
+            # Ridge regression: if the modes overlap a lot, the means shrink
+            # towards the average of the data rather than blowing up
+            gram = alpha.T @ alpha
+            ridge = 1e-2 * np.trace(gram) / len(gram) * np.eye(len(gram))
+            means = np.linalg.solve(gram + ridge, alpha.T @ x)
+        set_means = getattr(self, "set_group_means", None) or self.set_means
+        set_means(means, update_initializer=True)
+
+        if self.config.do_kl_annealing:
+            for name in ("kl_loss", "means_dev_mag", "covs_dev_mag"):
+                if name in layer_names:
+                    self.model.get_layer(name).annealing_factor.assign(1.0)
+
+        return history
+
+
 def nfindr_covariances(
     time_series: Union[np.ndarray, List[np.ndarray]],
     n_modes: int,
@@ -670,8 +798,6 @@ def nfindr_covariances(
     M. E. Winter, "N-FINDR: an algorithm for fast autonomous spectral
     end-member determination in hyperspectral data", Proc. SPIE 3753 (1999).
     """
-    from scipy.optimize import nnls
-
     if isinstance(time_series, np.ndarray) and time_series.ndim == 2:
         time_series = [time_series]
     n_channels = time_series[0].shape[-1]
@@ -685,6 +811,103 @@ def nfindr_covariances(
         w = x[: n_windows * window_length].reshape(n_windows, window_length, n_channels)
         S.append(np.einsum("wti,wtj->wij", w, w)[:, iu[0], iu[1]] / window_length)
     S = np.concatenate(S)
+    A = _nfindr_coordinates(S, n_modes, n_restarts, random_seed)
+
+    # Least-squares covariances from all windows
+    D = np.linalg.lstsq(A, S, rcond=None)[0]
+    covariances = np.zeros([n_modes, n_channels, n_channels])
+    covariances[:, iu[0], iu[1]] = D
+    covariances += np.triu(covariances, 1).transpose(0, 2, 1)
+
+    # Positive definite with an eigenvalue floor
+    eigvals, eigvecs = np.linalg.eigh(covariances)
+    eigvals = np.maximum(
+        eigvals, eigenvalue_floor * eigvals.mean(axis=-1, keepdims=True)
+    )
+    covariances = np.einsum("kij,kj,klj->kil", eigvecs, eigvals, eigvecs)
+
+    return covariances.astype(np.float32)
+
+
+def nfindr_means(
+    time_series: Union[np.ndarray, List[np.ndarray]],
+    n_modes: int,
+    window_length: int = 25,
+    n_restarts: int = 10,
+    random_seed: Optional[int] = None,
+) -> np.ndarray:
+    """Estimate mode means for a soft mixture with N-FINDR.
+
+    Under :code:`m_t = sum_k alpha_tk mu_k`, the mean of a window is a
+    sum-to-one mixture of the mode means, so the window means lie in a
+    simplex whose vertices are the mode means. Each session's average is
+    removed first, so that offsets shared by all modes of a session do not
+    spread out the simplex, and the average of the data is added back to
+    the mode means. See :func:`nfindr_covariances` for the method.
+
+    Parameters
+    ----------
+    time_series : list of np.ndarray or np.ndarray
+        Time series for each session. Each array has shape
+        (n_samples, n_channels).
+    n_modes : int
+        Number of modes.
+    window_length : int, optional
+        Number of samples in each window.
+    n_restarts : int, optional
+        Number of random starts for N-FINDR.
+    random_seed : int, optional
+        Seed for the N-FINDR starts.
+
+    Returns
+    -------
+    means : np.ndarray
+        Mode means. Shape is (n_modes, n_channels).
+    """
+    if isinstance(time_series, np.ndarray) and time_series.ndim == 2:
+        time_series = [time_series]
+    n_channels = time_series[0].shape[-1]
+
+    # Window means relative to the session average
+    W = []
+    for x in time_series:
+        x = np.asarray(x, dtype=np.float64)
+        n_windows = x.shape[0] // window_length
+        w = x[: n_windows * window_length].reshape(n_windows, window_length, n_channels)
+        W.append(w.mean(axis=1) - x.mean(axis=0))
+    W = np.concatenate(W)
+    A = _nfindr_coordinates(W, n_modes, n_restarts, random_seed)
+
+    # Least-squares means from all windows
+    means = np.linalg.lstsq(A, W, rcond=None)[0]
+    means += np.mean(np.concatenate(time_series), axis=0)
+    return means.astype(np.float32)
+
+
+def _nfindr_coordinates(
+    S: np.ndarray, n_modes: int, n_restarts: int, random_seed: Optional[int]
+) -> np.ndarray:
+    """Coordinates of feature vectors in the simplex found by N-FINDR.
+
+    Parameters
+    ----------
+    S : np.ndarray
+        Feature vector for each window. Shape is (n_windows, n_features).
+    n_modes : int
+        Number of vertices.
+    n_restarts : int
+        Number of random starts for N-FINDR.
+    random_seed : int
+        Seed for the N-FINDR starts.
+
+    Returns
+    -------
+    A : np.ndarray
+        Non-negative, sum-to-one coordinates of each window.
+        Shape is (n_windows, n_modes).
+    """
+    from scipy.optimize import nnls
+
     if len(S) < n_modes:
         raise ValueError("Fewer windows than modes, use a shorter window_length.")
 
@@ -730,18 +953,4 @@ def nfindr_covariances(
         target[0] *= weight
         A[i] = nnls(vertices, target)[0]
     A /= A.sum(axis=1, keepdims=True)
-
-    # Least-squares covariances from all windows
-    D = np.linalg.lstsq(A, S, rcond=None)[0]
-    covariances = np.zeros([n_modes, n_channels, n_channels])
-    covariances[:, iu[0], iu[1]] = D
-    covariances += np.triu(covariances, 1).transpose(0, 2, 1)
-
-    # Positive definite with an eigenvalue floor
-    eigvals, eigvecs = np.linalg.eigh(covariances)
-    eigvals = np.maximum(
-        eigvals, eigenvalue_floor * eigvals.mean(axis=-1, keepdims=True)
-    )
-    covariances = np.einsum("kij,kj,klj->kil", eigvecs, eigvals, eigvecs)
-
-    return covariances.astype(np.float32)
+    return A
