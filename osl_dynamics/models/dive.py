@@ -38,6 +38,7 @@ from osl_dynamics.inference.layers import (
     LearnableTensorLayer,
     BatchSizeLayer,
     TFAddLayer,
+    TFConcatLayer,
     TFConstantLayer,
     TFGatherLayer,
     TFBroadcastToLayer,
@@ -118,6 +119,18 @@ class Config(BaseModelConfig, VariationalInferenceModelConfig):
         Regularizer for group mean vectors.
     covariances_regularizer : tf.keras.regularizers.Regularizer
         Regularizer for group covariance matrices.
+    mix_precisions : bool
+        Should we learn and mix mode precision matrices (inverse covariances)
+        instead of covariances? If :code:`True`, the session deviations are
+        added to the Cholesky factors of the precisions, the precision at each
+        time point is :code:`P_t = Sum_j alpha_jt P_j^s` and the layers named
+        :code:`covs` hold precisions. Mode covariances are still passed and
+        returned (e.g. :code:`initial_covariances`,
+        :code:`get_session_means_covariances`). Defaults to :code:`False`.
+    multiple_dynamics : bool
+        Should we use separate mode time courses for the means
+        (:code:`alpha`) and the covariances or precisions (:code:`beta`)?
+        Defaults to :code:`False`.
 
     do_kl_annealing : bool
         Should we use KL annealing during training?
@@ -222,6 +235,8 @@ class Config(BaseModelConfig, VariationalInferenceModelConfig):
     covariances_epsilon: float = None
     means_regularizer: tf.keras.regularizers.Regularizer = None
     covariances_regularizer: tf.keras.regularizers.Regularizer = None
+    mix_precisions: bool = False
+    multiple_dynamics: bool = False
 
     # Parameters specific to embedding model
     n_sessions: int = None
@@ -408,13 +423,42 @@ class Model(VariationalInferenceModelBase):
         )
         alpha = alpha_layer(theta)
 
+        if config.multiple_dynamics:
+            # Second mode time course for the covariances/precisions
+            fc_inf_mu_layer = tf.keras.layers.Dense(config.n_modes, name="fc_inf_mu")
+            fc_inf_mu = fc_inf_mu_layer(inf_rnn)
+
+            fc_inf_sigma_layer = tf.keras.layers.Dense(
+                config.n_modes, activation="softplus", name="fc_inf_sigma"
+            )
+            fc_inf_sigma = fc_inf_sigma_layer(inf_rnn)
+
+            fc_theta_layer = SampleNormalDistributionLayer(
+                config.theta_std_epsilon,
+                name="fc_theta",
+            )
+            fc_theta = fc_theta_layer([fc_inf_mu, fc_inf_sigma])
+
+            beta_layer = SoftmaxLayer(
+                config.initial_alpha_temperature,
+                config.learn_alpha_temperature,
+                name="beta",
+            )
+            beta = beta_layer(fc_theta)
+        else:
+            beta = alpha
+
         # -------- Temporal prior -------- #
 
         theta_drop_layer = tf.keras.layers.Dropout(
             config.model_dropout,
             name="theta_drop",
         )
-        theta_drop = theta_drop_layer(theta)
+        if config.multiple_dynamics:
+            concat_theta_layer = TFConcatLayer(axis=2, name="concat_theta")
+            theta_drop = theta_drop_layer(concat_theta_layer([theta, fc_theta]))
+        else:
+            theta_drop = theta_drop_layer(theta)
 
         mod_rnn_layer = ModelRNNLayer(
             config.model_rnn,
@@ -441,6 +485,22 @@ class Model(VariationalInferenceModelBase):
         )
         kl_div = kl_div_layer([inf_mu, inf_sigma, mod_mu, mod_sigma])
 
+        if config.multiple_dynamics:
+            fc_mod_mu_layer = tf.keras.layers.Dense(config.n_modes, name="fc_mod_mu")
+            fc_mod_mu = fc_mod_mu_layer(mod_rnn)
+
+            fc_mod_sigma_layer = tf.keras.layers.Dense(
+                config.n_modes, activation="softplus", name="fc_mod_sigma"
+            )
+            fc_mod_sigma = fc_mod_sigma_layer(mod_rnn)
+
+            fc_kl_div_layer = KLDivergenceLayer(
+                config.theta_std_epsilon, config.loss_calc, name="fc_kl_div"
+            )
+            fc_kl_div = fc_kl_div_layer(
+                [fc_inf_mu, fc_inf_sigma, fc_mod_mu, fc_mod_sigma]
+            )
+
         # -------- Observation model -------- #
 
         group_means_layer = VectorsLayer(
@@ -457,7 +517,11 @@ class Model(VariationalInferenceModelBase):
             config.n_modes,
             config.n_channels,
             config.learn_covariances,
-            config.initial_covariances,
+            (
+                obs_mod.invert_matrices(config.initial_covariances)
+                if config.mix_precisions
+                else config.initial_covariances
+            ),
             config.covariances_epsilon,
             config.covariances_regularizer,
             name="group_covs",
@@ -683,10 +747,20 @@ class Model(VariationalInferenceModelBase):
         mix_session_means_covs_layer = MixSessionSpecificParametersLayer(
             name="mix_session_means_covs"
         )
-        m, C = mix_session_means_covs_layer([alpha, mu, D])
+        if config.multiple_dynamics:
+            # The means follow alpha and the covariances/precisions follow beta
+            mix_session_covs_layer = MixSessionSpecificParametersLayer(
+                name="mix_session_covs"
+            )
+            m, _ = mix_session_means_covs_layer([alpha, mu, D])
+            _, C = mix_session_covs_layer([beta, mu, D])
+        else:
+            m, C = mix_session_means_covs_layer([alpha, mu, D])
 
         # Get the conditional likelihood
-        ll_loss_layer = LogLikelihoodLossLayer(config.loss_calc, name="ll_loss")
+        ll_loss_layer = LogLikelihoodLossLayer(
+            config.loss_calc, config.mix_precisions, name="ll_loss"
+        )
         ll_loss = ll_loss_layer([data, m, C])
 
         # -------- KL losses -------- #
@@ -745,14 +819,23 @@ class Model(VariationalInferenceModelBase):
 
         # Total KL loss
         kl_loss_layer = KLLossLayer(config.do_kl_annealing, name="kl_loss")
-        kl_loss = kl_loss_layer(
-            [kl_div, means_dev_mag_kl_loss, covs_dev_mag_kl_loss],
-        )
+        kl_divs = [kl_div, means_dev_mag_kl_loss, covs_dev_mag_kl_loss]
+        if config.multiple_dynamics:
+            kl_divs.append(fc_kl_div)
+        kl_loss = kl_loss_layer(kl_divs)
 
         # -------- Create model -------- #
 
         inputs = [data, session_id]
-        outputs = {"ll_loss": ll_loss, "kl_loss": kl_loss, "theta": theta}
+        if config.multiple_dynamics:
+            outputs = {
+                "ll_loss": ll_loss,
+                "kl_loss": kl_loss,
+                "power_theta": theta,
+                "fc_theta": fc_theta,
+            }
+        else:
+            outputs = {"ll_loss": ll_loss, "kl_loss": kl_loss, "theta": theta}
         name = config.model_name
         self.model = tf.keras.Model(inputs=inputs, outputs=outputs, name=name)
 
@@ -777,7 +860,10 @@ class Model(VariationalInferenceModelBase):
         covariances : np.ndarray
             Group covariances. Shape is (n_modes, n_channels, n_channels).
         """
-        return obs_mod.get_observation_model_parameter(self.model, "group_covs")
+        covariances = obs_mod.get_observation_model_parameter(self.model, "group_covs")
+        if self.config.mix_precisions:
+            return obs_mod.invert_matrices(covariances)
+        return covariances
 
     def get_group_means_covariances(self) -> Tuple[np.ndarray, np.ndarray]:
         """Get the group level mode means and covariances.
@@ -840,12 +926,15 @@ class Model(VariationalInferenceModelBase):
             Mode covariances for each session.
             Shape is (n_sessions, n_modes, n_channels, n_channels).
         """
-        return obs_mod.get_session_means_covariances(
+        means, covariances = obs_mod.get_session_means_covariances(
             self.model,
             self.config.learn_means,
             self.config.learn_covariances,
             self.config.session_labels,
         )
+        if self.config.mix_precisions:
+            return means, obs_mod.invert_matrices(covariances)
+        return means, covariances
 
     def set_regularizers(
         self, training_dataset: Union[tf.data.Dataset, "data.Data"]
@@ -886,13 +975,16 @@ class Model(VariationalInferenceModelBase):
 
         if self.config.learn_covariances:
             # Group covariances
-            obs_mod.set_covariances_regularizer(
-                self.model,
-                range_,
-                self.config.covariances_epsilon,
-                scale_factor,
-                layer_name="group_covs",
-            )
+            if self.config.mix_precisions:
+                _logger.warning("No regularizer is set for the group precisions.")
+            else:
+                obs_mod.set_covariances_regularizer(
+                    self.model,
+                    range_,
+                    self.config.covariances_epsilon,
+                    scale_factor,
+                    layer_name="group_covs",
+                )
 
             # KL divergence for the deviation
             layer = self.model.get_layer("covs_dev_mag_kl_loss")
@@ -927,6 +1019,7 @@ class Model(VariationalInferenceModelBase):
             training_dataset,
             self.config.learn_means,
             self.config.learn_covariances,
+            self.config.mix_precisions,
         )
         self.reset()
 
@@ -978,6 +1071,8 @@ class Model(VariationalInferenceModelBase):
             Do we want to use the passed group covariances when we re-initialize
             the model?
         """
+        if self.config.mix_precisions:
+            group_covariances = obs_mod.invert_matrices(group_covariances)
         obs_mod.set_observation_model_parameter(
             self.model,
             group_covariances,

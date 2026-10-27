@@ -78,6 +78,13 @@ class Config(BaseModelConfig, MarkovStateInferenceModelConfig):
         Regularizer for group mean vectors.
     covariances_regularizer : tf.keras.regularizers.Regularizer
         Regularizer for group covariance matrices.
+    embed_precisions : bool
+        Should we learn state precision matrices (inverse covariances)
+        instead of covariances? If :code:`True`, the session deviations are
+        added to the Cholesky factors of the precisions, and the layers named
+        :code:`covs` hold precisions. State covariances are still passed and
+        returned (e.g. :code:`initial_covariances`,
+        :code:`get_session_means_covariances`). Defaults to :code:`False`.
 
     n_sessions : int
         Number of sessions whose observation model parameters can vary.
@@ -188,6 +195,7 @@ class Config(BaseModelConfig, MarkovStateInferenceModelConfig):
     covariances_epsilon: float = None
     means_regularizer: tf.keras.regularizers.Regularizer = None
     covariances_regularizer: tf.keras.regularizers.Regularizer = None
+    embed_precisions: bool = False
 
     dev_n_layers: int = 0
     dev_n_units: int = None
@@ -374,7 +382,11 @@ class Model(MarkovStateInferenceModelBase):
             config.n_states,
             config.n_channels,
             config.learn_covariances,
-            config.initial_covariances,
+            (
+                obs_mod.invert_matrices(config.initial_covariances)
+                if config.embed_precisions
+                else config.initial_covariances
+            ),
             config.covariances_epsilon,
             config.covariances_regularizer,
             name="group_covs",
@@ -603,7 +615,9 @@ class Model(MarkovStateInferenceModelBase):
 
         # -------- Log-likelihood losses -------- #
 
-        ll_layer = SeparateLogLikelihoodLayer(config.n_states, name="ll")
+        ll_layer = SeparateLogLikelihoodLayer(
+            config.n_states, config.embed_precisions, name="ll"
+        )
         ll = ll_layer([data, mu, D])
 
         # -------- Hidden state inference -------- #
@@ -788,7 +802,10 @@ class Model(MarkovStateInferenceModelBase):
         covariances : np.ndarray
             Group covariances. Shape is (n_states, n_channels, n_channels).
         """
-        return obs_mod.get_observation_model_parameter(self.model, "group_covs")
+        covariances = obs_mod.get_observation_model_parameter(self.model, "group_covs")
+        if self.config.embed_precisions:
+            return obs_mod.invert_matrices(covariances)
+        return covariances
 
     def get_covariances(self) -> np.ndarray:
         """Wrapper for :code:`get_group_covariances`."""
@@ -831,12 +848,15 @@ class Model(MarkovStateInferenceModelBase):
             Session covariances.
             Shape is (n_sessions, n_states, n_channels, n_channels).
         """
-        return obs_mod.get_session_means_covariances(
+        means, covariances = obs_mod.get_session_means_covariances(
             self.model,
             self.config.learn_means,
             self.config.learn_covariances,
             self.config.session_labels,
         )
+        if self.config.embed_precisions:
+            return means, obs_mod.invert_matrices(covariances)
+        return means, covariances
 
     def get_embedding_weights(self) -> dict:
         """Get the weights of the embedding layers.
@@ -902,6 +922,8 @@ class Model(MarkovStateInferenceModelBase):
             Do we want to use the passed group covariances when we re-initialize
             the model?
         """
+        if self.config.embed_precisions:
+            group_covariances = obs_mod.invert_matrices(group_covariances)
         obs_mod.set_observation_model_parameter(
             self.model,
             group_covariances,
@@ -1008,13 +1030,16 @@ class Model(MarkovStateInferenceModelBase):
 
         if self.config.learn_covariances:
             # Group covariances
-            obs_mod.set_covariances_regularizer(
-                self.model,
-                range_,
-                self.config.covariances_epsilon,
-                scale_factor,
-                layer_name="group_covs",
-            )
+            if self.config.embed_precisions:
+                _logger.warning("No regularizer is set for the group precisions.")
+            else:
+                obs_mod.set_covariances_regularizer(
+                    self.model,
+                    range_,
+                    self.config.covariances_epsilon,
+                    scale_factor,
+                    layer_name="group_covs",
+                )
 
             # KL divergence for the deviation
             layer = self.model.get_layer("covs_dev_mag_kl_loss")
@@ -1050,6 +1075,7 @@ class Model(MarkovStateInferenceModelBase):
             training_dataset,
             self.config.learn_means,
             self.config.learn_covariances,
+            self.config.embed_precisions,
         )
         self.reset()
 

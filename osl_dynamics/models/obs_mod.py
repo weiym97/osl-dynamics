@@ -151,6 +151,7 @@ def set_dev_parameters_initializer(
     training_dataset: tf.data.Dataset,
     learn_means: bool,
     learn_covariances: bool,
+    precisions: bool = False,
 ) -> None:
     """Set the deviance parameters initializer based on training data.
 
@@ -164,6 +165,9 @@ def set_dev_parameters_initializer(
         Whether the mean is learnt.
     learn_covariances : bool
         Whether the covariances are learnt.
+    precisions : bool, optional
+        Are the deviations added to the precisions instead of the
+        covariances?
     """
     time_series = []
     for d in training_dataset:
@@ -196,6 +200,8 @@ def set_dev_parameters_initializer(
 
     if learn_covariances:
         static_cov = np.array([np.cov(t, rowvar=False) for t in time_series])
+        if precisions:
+            static_cov = np.linalg.inv(static_cov)
         static_cov_chol = np.linalg.cholesky(static_cov)[
             :,
             np.tril_indices(n_channels)[0],

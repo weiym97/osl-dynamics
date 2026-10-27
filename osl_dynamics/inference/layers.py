@@ -45,6 +45,36 @@ def add_epsilon(A: tf.Tensor, epsilon: float, diag: bool = False) -> tf.Tensor:
     return A + epsilon * I
 
 
+def precision_log_prob(x: tf.Tensor, mu: tf.Tensor, precision: tf.Tensor) -> tf.Tensor:
+    """Multivariate normal log-density with a precision matrix.
+
+    With the precision matrix :code:`P = LL^T`, the log-density is
+    :code:`log|L| - 0.5 * |L^T (x - mu)|^2 - 0.5 * n_channels * log(2pi)`.
+
+    Parameters
+    ----------
+    x : tf.Tensor
+        Data. Shape is (..., n_channels).
+    mu : tf.Tensor
+        Mean. Shape is (..., n_channels).
+    precision : tf.Tensor
+        Precision matrix. Shape is (..., n_channels, n_channels).
+
+    Returns
+    -------
+    log_prob : tf.Tensor
+        Log-density. Shape is (...).
+    """
+    L = tf.linalg.cholesky(precision)
+    z = tf.linalg.matvec(L, x - mu, adjoint_a=True)
+    n_channels = tf.cast(tf.shape(x)[-1], x.dtype)
+    return (
+        tf.reduce_sum(tf.math.log(tf.linalg.diag_part(L)), axis=-1)
+        - 0.5 * tf.reduce_sum(tf.square(z), axis=-1)
+        - 0.5 * n_channels * np.log(2 * np.pi)
+    )
+
+
 class TFConcatLayer(layers.Layer):
     """Wrapper for `tf.concat \
     <https://www.tensorflow.org/api_docs/python/tf/concat>`_.
@@ -1260,16 +1290,7 @@ class LogLikelihoodLossLayer(layers.Layer):
             mu = tf.zeros_like(x)
 
         if precision:
-            # Log-likelihood with the precision matrix P = LL^T:
-            # log|L| - 0.5 * |L^T (x - mu)|^2 - 0.5 * n_channels * log(2pi)
-            L = tf.linalg.cholesky(sigma)
-            z = tf.linalg.matvec(L, x - mu, adjoint_a=True)
-            n_channels = tf.cast(tf.shape(x)[-1], x.dtype)
-            ll_loss = (
-                tf.reduce_sum(tf.math.log(tf.linalg.diag_part(L)), axis=-1)
-                - 0.5 * tf.reduce_sum(tf.square(z), axis=-1)
-                - 0.5 * n_channels * np.log(2 * np.pi)
-            )
+            ll_loss = precision_log_prob(x, mu, sigma)
         else:
             # Multivariate normal distribution
             mvn = tfp.distributions.MultivariateNormalTriL(
@@ -2300,13 +2321,16 @@ class SeparateLogLikelihoodLayer(layers.Layer):
     ----------
     n_states : int
         Number of states.
+    precision : bool, optional
+        Are precision matrices passed instead of covariance matrices?
     kwargs : keyword arguments, optional
         Keyword arguments to pass to the keras.layers.Layer.
     """
 
-    def __init__(self, n_states: int, **kwargs) -> None:
+    def __init__(self, n_states: int, precision: bool = False, **kwargs) -> None:
         super().__init__(**kwargs)
         self.n_states = n_states
+        self.precision = precision
 
     def call(self, inputs: List[tf.Tensor], **kwargs) -> tf.Tensor:
         x, mu, sigma = inputs
@@ -2321,12 +2345,20 @@ class SeparateLogLikelihoodLayer(layers.Layer):
         # Calculate log-likelihood for each state
         log_likelihood = tf.TensorArray(tf.float32, size=self.n_states)
         for state in range(self.n_states):
-            mvn = tfp.distributions.MultivariateNormalTriL(
-                loc=tf.gather(mu, state, axis=-2),
-                scale_tril=tf.linalg.cholesky(tf.gather(sigma, state, axis=-3)),
-                allow_nan_stats=False,
-            )
-            log_likelihood = log_likelihood.write(state, mvn.log_prob(x))
+            if self.precision:
+                log_prob = precision_log_prob(
+                    x,
+                    tf.gather(mu, state, axis=-2),
+                    tf.gather(sigma, state, axis=-3),
+                )
+            else:
+                mvn = tfp.distributions.MultivariateNormalTriL(
+                    loc=tf.gather(mu, state, axis=-2),
+                    scale_tril=tf.linalg.cholesky(tf.gather(sigma, state, axis=-3)),
+                    allow_nan_stats=False,
+                )
+                log_prob = mvn.log_prob(x)
+            log_likelihood = log_likelihood.write(state, log_prob)
         log_likelihood = tf.transpose(log_likelihood.stack(), perm=[1, 2, 0])
 
         return log_likelihood  # shape = (None, sequence_length, n_states)
