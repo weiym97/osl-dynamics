@@ -1,5 +1,6 @@
 """Helpful functions related to observation models."""
 
+from contextlib import contextmanager
 from typing import Tuple
 
 import numpy as np
@@ -12,6 +13,42 @@ from osl_dynamics.inference.initializers import (
     WeightInitializer,
     RandomWeightInitializer,
 )
+
+
+@contextmanager
+def static_kl_scale_factor(model: tf.keras.Model, scale_factor: float):
+    """Temporarily set the scale factor of the static KL divergences.
+
+    In models with session embeddings (HIVE, DIVE), the KL divergences of
+    the session deviation magnitudes are scaled by a factor that
+    :code:`set_regularizers` sets from the training data. A model loaded
+    from disk does not have it (the layers hold the placeholder :code:`-1`),
+    so its losses would be wrong. This sets the factor while losses are
+    calculated and restores it afterwards.
+
+    Parameters
+    ----------
+    model : osl_dynamics.models.*.Model.model
+        The model.
+    scale_factor : float
+        Scale factor, e.g. from :code:`get_static_loss_scaling_factor`.
+    """
+    layers = [
+        model.get_layer(name)
+        for name in ("means_dev_mag_kl_loss", "covs_dev_mag_kl_loss")
+    ]
+    layers = [layer for layer in layers if hasattr(layer, "scale_factor")]
+    original = [layer.scale_factor for layer in layers]
+    try:
+        for layer in layers:
+            layer.scale_factor = scale_factor
+        # The factor is a constant in the traced prediction function
+        model.predict_function = None
+        yield
+    finally:
+        for layer, value in zip(layers, original):
+            layer.scale_factor = value
+        model.predict_function = None
 
 
 def invert_matrices(matrices: np.ndarray, diagonal: bool = False) -> np.ndarray:

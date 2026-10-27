@@ -988,6 +988,30 @@ class Model(MarkovStateInferenceModelBase):
             observation_model_parameters, update_initializer
         )
 
+    def free_energy(self, dataset) -> float:
+        """Calculates the variational free energy of a dataset.
+
+        The KL divergence of the session deviation magnitudes is scaled by
+        the size of :code:`dataset` (so it is also correct for a model
+        loaded from disk).
+
+        Parameters
+        ----------
+        dataset : tf.data.Dataset or osl_dynamics.data.Data
+            Dataset to calculate the variational free energy for.
+
+        Returns
+        -------
+        free_energy : float
+            Variational free energy for the dataset.
+        """
+        dataset = self.make_dataset(dataset, concatenate=True)
+        n_sequences, _ = dtf.get_n_sequences_and_range(dataset)
+        with obs_mod.static_kl_scale_factor(
+            self.model, self.get_static_loss_scaling_factor(n_sequences)
+        ):
+            return super().free_energy(dataset)
+
     def set_regularizers(
         self, training_dataset: Union[tf.data.Dataset, "data.Data"]
     ) -> None:

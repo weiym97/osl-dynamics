@@ -938,6 +938,32 @@ class Model(VariationalInferenceModelBase):
             return means, obs_mod.invert_matrices(covariances)
         return means, covariances
 
+    def losses(self, dataset, **kwargs) -> Tuple[float, float]:
+        """Calculates the log-likelihood and KL loss for a dataset.
+
+        The KL loss includes the KL divergence of the session deviation
+        magnitudes, scaled by the size of :code:`dataset` (so it is also
+        correct for a model loaded from disk).
+
+        Parameters
+        ----------
+        dataset : tf.data.Dataset or osl_dynamics.data.Data
+            Dataset to calculate losses for.
+
+        Returns
+        -------
+        ll_loss : float
+            Negative log-likelihood loss.
+        kl_loss : float
+            KL divergence loss.
+        """
+        dataset = self.make_dataset(dataset, concatenate=True)
+        n_sequences, _ = dtf.get_n_sequences_and_range(dataset)
+        with obs_mod.static_kl_scale_factor(
+            self.model, self.get_static_loss_scaling_factor(n_sequences)
+        ):
+            return super().losses(dataset, **kwargs)
+
     def set_regularizers(
         self, training_dataset: Union[tf.data.Dataset, "data.Data"]
     ) -> None:
