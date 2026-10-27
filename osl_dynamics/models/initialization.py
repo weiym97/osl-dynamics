@@ -16,8 +16,9 @@ The candidate generators are:
 - :code:`random_state_time_course`: each state's window is the data
   assigned to it by a sampled state time course.
 
-:func:`nfindr_covariances` estimates starting covariances for a soft
-mixture of modes (used by DyNeMo's :code:`nfindr_initialization`).
+:func:`nfindr_covariances` estimates starting covariances (or precisions)
+for a soft mixture of modes, used by
+:meth:`InitializationMixin.nfindr_initialization`.
 
 :meth:`InitializationMixin.means_regression_initialization` is for models
 that learn means: it trains a copy of the model without means first.
@@ -617,6 +618,124 @@ class InitializationMixin:
         with self._initialization_context(**context_kwargs):
             return self._run_multistart(candidates, n_epochs, **kwargs)
 
+    def nfindr_initialization(
+        self,
+        training_data,
+        n_epochs: Optional[int] = None,
+        n_init: Optional[int] = None,
+        take: Optional[float] = None,
+        window_length: Optional[int] = None,
+        n_restarts: int = 10,
+        **kwargs,
+    ) -> Optional[dict]:
+        """N-FINDR initialization.
+
+        For a soft mixture of modes, the second moment of a short window of
+        data is a sum-to-one mixture of the mode covariances (if the model
+        mixes precisions, the window precision is roughly a mixture of the
+        mode precisions), so the windows lie in a simplex whose vertices are
+        the mode matrices. The (group) mode matrices are set to the vertices
+        found with N-FINDR (see :func:`nfindr_covariances`) and the model is
+        then trained for a few epochs with different random subsets of the
+        training dataset, each starting from these matrices. The best model
+        is kept.
+
+        Assumes zero-mean data (the means are not initialized). For models
+        that learn the means, use :code:`means_regression_initialization`
+        with :code:`init_method='nfindr'` in the config, which uses this
+        method for its model without means. If the covariances are not
+        learnt or :code:`initial_covariances` were passed, the covariances
+        are left as they are and this is the same as
+        :code:`random_subset_initialization`.
+
+        Parameters
+        ----------
+        training_data : tf.data.Dataset or osl_dynamics.data.Data
+            Dataset to use for training. The windows are cut from the
+            sequences the model is trained on, so for a Data object only
+            the sessions in :code:`training_data.keep` are used.
+        n_epochs : int, optional
+            Number of epochs to train the model.
+            By default we use the value passed in the config.
+        n_init : int, optional
+            Number of initializations.
+            By default we use the value passed in the config.
+        take : float, optional
+            Fraction of total batches to take.
+            By default we use the value passed in the config.
+        window_length : int, optional
+            Number of samples in each window. Shorter windows are closer to
+            a single mode but noisier. Should be at most the sequence
+            length. Defaults to 20, or to the number of channels (at least
+            20) if the model mixes precisions.
+        n_restarts : int, optional
+            Number of random starts for N-FINDR.
+        kwargs : keyword arguments, optional
+            Keyword arguments for the fit method. Variational models also
+            accept :code:`n_kl_annealing_epochs`.
+
+        Returns
+        -------
+        history : dict
+            The training history of the best initialization.
+        """
+        precisions = getattr(self.config, "mix_precisions", False)
+        set_covariances = getattr(self, "set_group_covariances", None) or getattr(
+            self, "set_covariances", None
+        )
+        if set_covariances is None or (
+            self.config.model_name == "M-DyNeMo" and not precisions
+        ):
+            raise NotImplementedError(
+                f"{self.config.model_name} does not support N-FINDR initialization."
+            )
+        if (
+            not self.config.learn_covariances
+            or self.config.initial_covariances is not None
+        ):
+            _logger.warning(
+                "The covariances are fixed or were passed, so they are not "
+                "initialized with N-FINDR. Using random subset initialization."
+            )
+            return self.random_subset_initialization(
+                training_data, n_epochs, n_init, take, **kwargs
+            )
+        if getattr(self.config, "learn_means", False):
+            _logger.warning(
+                "N-FINDR initialization assumes zero-mean data. The means are "
+                "not initialized."
+            )
+        if window_length is None:
+            window_length = max(20, self.config.n_channels) if precisions else 20
+            window_length = min(window_length, self.config.sequence_length)
+
+        _logger.info("Setting covariances with N-FINDR")
+        dataset = self.make_dataset(training_data, shuffle=False, concatenate=True)
+        sequences = [x for batch in dataset for x in batch["data"].numpy()]
+        covariances = nfindr_covariances(
+            sequences,
+            getattr(self.config, "n_corr_modes", None) or self.config.n_modes,
+            window_length=window_length,
+            n_restarts=n_restarts,
+            precisions=precisions,
+            random_seed=np.random.randint(2**31 - 1),
+        )
+        set_covariances(covariances, update_initializer=True)
+
+        # reset() returns to the N-FINDR covariances, so the candidates only
+        # differ in the other weights and the subset of data
+        def make_candidates(dataset, n_init):
+            return [(str(n), None) for n in range(n_init)]
+
+        return self._multistart(
+            "N-FINDR",
+            training_data,
+            make_candidates,
+            n_epochs,
+            n_init,
+            take,
+            kwargs,
+        )
 
     def means_regression_initialization(
         self,
@@ -633,9 +752,9 @@ class InitializationMixin:
         fluctuations in the data into the mean while the KL divergence is
         down-weighted early in training, which leads to poor solutions.
         Instead, a copy of the model without means (:code:`learn_means=False`)
-        is initialized with :code:`random_subset_initialization` and trained,
-        so the mode time courses are inferred from the second-order
-        statistics only. Its weights are copied into this model and the
+        is initialized with the config's :code:`init_method` (e.g.
+        :code:`'random_subset'` or :code:`'nfindr'`) and trained, so the mode
+        time courses are inferred from the second-order statistics only. Its weights are copied into this model and the
         (group) means are set by regressing the data onto the inferred mode
         time courses (ridge regression). For models with multiple dynamics,
         the means follow a time course that the model without means does not
@@ -651,21 +770,21 @@ class InitializationMixin:
         training_data : tf.data.Dataset or osl_dynamics.data.Data
             Dataset to use for training.
         n_epochs : int, optional
-            Number of epochs for each random subset initialization.
-            By default we use the value passed in the config.
+            Number of epochs for each initialization of the model without
+            means. By default we use the value passed in the config.
         n_init : int, optional
-            Number of random subset initializations.
+            Number of initializations of the model without means.
             By default we use the value passed in the config.
         take : float, optional
-            Fraction of total batches to take in the random subset
-            initialization. By default we use the value passed in the config.
+            Fraction of total batches to take in the initialization of the
+            model without means. By default we use the value passed in the
+            config.
         n_no_means_epochs : int, optional
             Number of epochs to train the model without means.
             By default we use :code:`n_epochs` in the config.
         kwargs : keyword arguments, optional
             Keyword arguments for the fit method. Variational models also
-            accept :code:`n_kl_annealing_epochs` for the random subset
-            initialization.
+            accept :code:`n_kl_annealing_epochs` for the initialization.
 
         Returns
         -------
@@ -683,8 +802,11 @@ class InitializationMixin:
         for method in ("set_regularizers", "set_dev_parameters_initializer"):
             if hasattr(no_means, method):
                 getattr(no_means, method)(training_data)
-        no_means.random_subset_initialization(
-            training_data, n_epochs, n_init, take, **kwargs
+        method = no_means.config.init_method
+        if method in (None, "means_regression"):
+            method = "random_subset"
+        no_means.initialization(
+            training_data, n_epochs, n_init, take, method=method, **kwargs
         )
         kwargs.pop("n_kl_annealing_epochs", None)
         if n_no_means_epochs is not None:
@@ -749,6 +871,8 @@ def nfindr_covariances(
     n_restarts: int = 10,
     eigenvalue_floor: float = 1e-2,
     random_seed: Optional[int] = None,
+    precisions: bool = False,
+    shrinkage: float = 0.1,
 ) -> np.ndarray:
     """Estimate mode covariances for a soft mixture with N-FINDR.
 
@@ -767,6 +891,15 @@ def nfindr_covariances(
        to those vertices and fits the covariances to all windows by least
        squares.
     5. Floors the eigenvalues so each covariance is positive definite.
+
+    If the modes mix precisions (:code:`P_t = sum_k alpha_tk P_k`), steps
+    1-5 use regularised window precisions,
+    :code:`inv((1 - shrinkage) S_w + shrinkage tr(S_w) / n_channels I)`,
+    which are roughly linear in the mode precisions. Because the inverse of
+    a short-window covariance is noisy, the mode precisions are then refitted
+    to the window second moments by maximum likelihood with the coordinates
+    fixed (:code:`sum_w -log det P_w + tr(S_w P_w)`, which is convex in the
+    mode precisions).
 
     Note, if no window is close to pure for a mode, the vertex found for it
     is a mixture; the covariances are then a denoised estimate of the purest
@@ -787,6 +920,11 @@ def nfindr_covariances(
         Eigenvalues are floored at this fraction of their mean.
     random_seed : int, optional
         Seed for the N-FINDR starts.
+    precisions : bool, optional
+        Do the modes mix precisions instead of covariances?
+    shrinkage : float, optional
+        Shrinkage of the window covariances towards a multiple of the
+        identity before they are inverted (only if :code:`precisions=True`).
 
     Returns
     -------
@@ -803,30 +941,98 @@ def nfindr_covariances(
     n_channels = time_series[0].shape[-1]
     iu = np.triu_indices(n_channels)
 
-    # Window second moments (upper triangles)
+    # Window second moments
     S = []
     for x in time_series:
         x = np.asarray(x, dtype=np.float64)
         n_windows = x.shape[0] // window_length
         w = x[: n_windows * window_length].reshape(n_windows, window_length, n_channels)
-        S.append(np.einsum("wti,wtj->wij", w, w)[:, iu[0], iu[1]] / window_length)
+        S.append(np.einsum("wti,wtj->wij", w, w) / window_length)
     S = np.concatenate(S)
-    A = _nfindr_coordinates(S, n_modes, n_restarts, random_seed)
 
-    # Least-squares covariances from all windows
-    D = np.linalg.lstsq(A, S, rcond=None)[0]
-    covariances = np.zeros([n_modes, n_channels, n_channels])
-    covariances[:, iu[0], iu[1]] = D
-    covariances += np.triu(covariances, 1).transpose(0, 2, 1)
+    # Features of each window (upper triangles)
+    if precisions:
+        scale = np.trace(S, axis1=1, axis2=2)[:, None, None] / n_channels
+        F = np.linalg.inv((1 - shrinkage) * S + shrinkage * scale * np.eye(n_channels))
+    else:
+        F = S
+    F = F[:, iu[0], iu[1]]
+    A = _nfindr_coordinates(F, n_modes, n_restarts, random_seed)
+
+    # Least-squares mode matrices from all windows
+    D = np.linalg.lstsq(A, F, rcond=None)[0]
+    matrices = np.zeros([n_modes, n_channels, n_channels])
+    matrices[:, iu[0], iu[1]] = D
+    matrices += np.triu(matrices, 1).transpose(0, 2, 1)
 
     # Positive definite with an eigenvalue floor
-    eigvals, eigvecs = np.linalg.eigh(covariances)
+    eigvals, eigvecs = np.linalg.eigh(matrices)
     eigvals = np.maximum(
         eigvals, eigenvalue_floor * eigvals.mean(axis=-1, keepdims=True)
     )
-    covariances = np.einsum("kij,kj,klj->kil", eigvecs, eigvals, eigvecs)
+    matrices = np.einsum("kij,kj,klj->kil", eigvecs, eigvals, eigvecs)
 
-    return covariances.astype(np.float32)
+    if precisions:
+        matrices = np.linalg.inv(
+            _refit_precisions(S, A, matrices, np.random.default_rng(random_seed))
+        )
+    return matrices.astype(np.float32)
+
+
+def _refit_precisions(
+    S: np.ndarray,
+    A: np.ndarray,
+    precisions: np.ndarray,
+    rng: np.random.Generator,
+    n_iter: int = 400,
+    learning_rate: float = 0.02,
+    max_windows: int = 20000,
+) -> np.ndarray:
+    """Maximum likelihood mode precisions given the window coordinates.
+
+    Minimises :code:`sum_w -log det P_w + tr(S_w P_w)` with
+    :code:`P_w = sum_k a_wk P_k`, using Adam on the Cholesky factors of the
+    :code:`P_k`.
+
+    Parameters
+    ----------
+    S : np.ndarray
+        Window second moments. Shape is (n_windows, n_channels, n_channels).
+    A : np.ndarray
+        Window coordinates. Shape is (n_windows, n_modes).
+    precisions : np.ndarray
+        Starting mode precisions. Shape is (n_modes, n_channels, n_channels).
+    rng : np.random.Generator
+        Used to subsample the windows if there are more than
+        :code:`max_windows`.
+    n_iter : int, optional
+        Number of Adam iterations.
+    learning_rate : float, optional
+        Learning rate, relative to the average size of the Cholesky factors.
+    max_windows : int, optional
+        Maximum number of windows to use.
+
+    Returns
+    -------
+    precisions : np.ndarray
+        Mode precisions. Shape is (n_modes, n_channels, n_channels).
+    """
+    if len(S) > max_windows:
+        keep = rng.choice(len(S), max_windows, replace=False)
+        S, A = S[keep], A[keep]
+    L = np.linalg.cholesky(precisions)
+    lower = np.tril(np.ones(L.shape[-2:]))
+    step = learning_rate * np.abs(L).mean(axis=(1, 2), keepdims=True)
+    AS = np.einsum("wk,wij->kij", A, S)
+    m, v = np.zeros_like(L), np.zeros_like(L)
+    for i in range(1, n_iter + 1):
+        P = np.einsum("wk,kij->wij", A, L @ L.transpose(0, 2, 1))
+        grad = (AS - np.einsum("wk,wij->kij", A, np.linalg.inv(P))) / len(S)
+        grad = 2 * (grad @ L) * lower
+        m = 0.9 * m + 0.1 * grad
+        v = 0.999 * v + 0.001 * grad**2
+        L = L - step * (m / (1 - 0.9**i)) / (np.sqrt(v / (1 - 0.999**i)) + 1e-12)
+    return L @ L.transpose(0, 2, 1)
 
 
 def nfindr_means(

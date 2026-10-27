@@ -144,6 +144,8 @@ class Config(BaseModelConfig, VariationalInferenceModelConfig):
 
     init_method : str
         Initialization method to use. Defaults to 'random_subset'.
+        Use 'nfindr' to start the group covariances (or precisions) from the
+        corners of the data (:code:`Model.nfindr_initialization`).
     n_init : int
         Number of initializations. Defaults to 5.
     n_init_epochs : int
