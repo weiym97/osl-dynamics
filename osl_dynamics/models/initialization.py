@@ -120,6 +120,21 @@ class InitializationMixin:
         return hasattr(self, "set_covariances")
 
     @property
+    def _supports_nfindr(self) -> bool:
+        """Can this model start its mode matrices from N-FINDR?
+
+        Only for soft mixtures of modes (not hard states), and in M-DyNeMo
+        only if it mixes full precision matrices.
+        """
+        if self.config.n_modes is None:
+            return False
+        if self.config.model_name == "M-DyNeMo" and not getattr(
+            self.config, "mix_precisions", False
+        ):
+            return False
+        return hasattr(self, "set_group_covariances") or hasattr(self, "set_covariances")
+
+    @property
     def _min_window_samples(self) -> int:
         """Fewest samples a window needs for its features to be meaningful.
 
@@ -679,16 +694,12 @@ class InitializationMixin:
         history : dict
             The training history of the best initialization.
         """
-        precisions = getattr(self.config, "mix_precisions", False)
-        set_covariances = getattr(self, "set_group_covariances", None) or getattr(
-            self, "set_covariances", None
-        )
-        if set_covariances is None or (
-            self.config.model_name == "M-DyNeMo" and not precisions
-        ):
+        if not self._supports_nfindr:
             raise NotImplementedError(
                 f"{self.config.model_name} does not support N-FINDR initialization."
             )
+        precisions = getattr(self.config, "mix_precisions", False)
+        set_covariances = getattr(self, "set_group_covariances", None) or self.set_covariances
         if (
             not self.config.learn_covariances
             or self.config.initial_covariances is not None
@@ -752,9 +763,12 @@ class InitializationMixin:
         fluctuations in the data into the mean while the KL divergence is
         down-weighted early in training, which leads to poor solutions.
         Instead, a copy of the model without means (:code:`learn_means=False`)
-        is initialized with the config's :code:`init_method` (e.g.
-        :code:`'random_subset'` or :code:`'nfindr'`) and trained, so the mode
-        time courses are inferred from the second-order statistics only. Its weights are copied into this model and the
+        is initialized and trained, so the mode time courses are inferred
+        from the second-order statistics only. It is initialized with the
+        config's :code:`init_method`, or, if that is
+        :code:`'means_regression'` (e.g. when this method is used by
+        :code:`train`), with :code:`nfindr_initialization` if the model
+        supports it and :code:`random_subset_initialization` otherwise. Its weights are copied into this model and the
         (group) means are set by regressing the data onto the inferred mode
         time courses (ridge regression). For models with multiple dynamics,
         the means follow a time course that the model without means does not
@@ -804,7 +818,7 @@ class InitializationMixin:
                 getattr(no_means, method)(training_data)
         method = no_means.config.init_method
         if method in (None, "means_regression"):
-            method = "random_subset"
+            method = "nfindr" if no_means._supports_nfindr else "random_subset"
         no_means.initialization(
             training_data, n_epochs, n_init, take, method=method, **kwargs
         )
