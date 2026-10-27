@@ -48,7 +48,8 @@ Variants
 - ``MDyn_`` prefix — Multi-time-scale dynamics (separate HMMs for power and
   connectivity): :py:class:`MDyn_HMM_MVN`.
 - ``MSess_`` prefix — Multi-session data with session-specific parameters:
-  :py:class:`MSess_HMM_MVN`, :py:class:`MSess_MixedSine_MVN`.
+  :py:class:`MSess_HMM_MVN`, :py:class:`MSess_MixedSine_MVN`,
+  :py:class:`MSess_MDyn_MixedSine_MVN`.
 - :py:class:`HierarchicalHMM_MVN` — Two-level hierarchical HMM where a
   top-level HMM selects which bottom-level HMM is active.
 
@@ -86,4 +87,5 @@ from osl_dynamics.simulation.sm import (
     MixedSine_MVN,
     MDyn_MixedSine_MVN,
     MSess_MixedSine_MVN,
+    MSess_MDyn_MixedSine_MVN,
 )

@@ -355,6 +355,11 @@ class MSess_MixedSine_MVN(Simulation):
         Scale of variability between groups.
     observation_error : float, optional
         Standard deviation of the error added to the generated data.
+    mix_precisions : bool, optional
+        Should we mix the mode precisions (inverse covariances) instead of
+        the covariances? If the session covariances are generated, the
+        session deviations are then added to the Cholesky factors of the
+        precisions.
     """
 
     def __init__(
@@ -376,6 +381,7 @@ class MSess_MixedSine_MVN(Simulation):
         n_groups: Optional[int] = None,
         between_group_scale: Optional[float] = None,
         observation_error: float = 0.0,
+        mix_precisions: bool = False,
     ) -> None:
         # Observation model
         self.obs_mod = MSess_MVN(
@@ -391,6 +397,7 @@ class MSess_MixedSine_MVN(Simulation):
             n_groups=n_groups,
             between_group_scale=between_group_scale,
             observation_error=observation_error,
+            mix_precisions=mix_precisions,
         )
 
         self.n_modes = self.obs_mod.n_modes
@@ -418,6 +425,169 @@ class MSess_MixedSine_MVN(Simulation):
         # Simulate data
         self.time_series = self.obs_mod.simulate_multi_session_data(
             self.mode_time_course
+        )
+
+    def __getattr__(self, attr: str):
+        if attr == "obs_mod":
+            raise AttributeError(f"No attribute called {attr}.")
+        if attr in dir(self.obs_mod):
+            return getattr(self.obs_mod, attr)
+        else:
+            raise AttributeError(f"No attribute called {attr}.")
+
+    def standardize(self) -> None:
+        means = np.mean(self.time_series, axis=1).astype(np.float64)
+        standard_deviations = np.std(self.time_series, axis=1).astype(np.float64)
+        super().standardize(axis=1)
+        self.obs_mod.session_means = (
+            self.obs_mod.session_means - means[:, None, :]
+        ) / standard_deviations[:, None, :]
+        self.obs_mod.session_covariances /= np.expand_dims(
+            standard_deviations[:, :, None] @ standard_deviations[:, None, :],
+            axis=1,
+        )
+
+
+class MSess_MDyn_MixedSine_MVN(Simulation):
+    """Simulates two sets of sinusoidal alphas with a multivariate normal observation model for each session.
+
+    Multi-session version of :code:`MDyn_MixedSine_MVN`. The session means
+    are mixed with :code:`alpha` and the session covariances (or precisions)
+    with :code:`beta`. For each session, :code:`alpha` and :code:`beta` are
+    simulated independently.
+
+    Parameters
+    ----------
+    n_samples : int
+        Number of samples per session to draw from the model.
+    relative_activation : np.ndarray or list
+        Average value for each sine wave. Shape must be (n_modes,).
+    amplitudes : np.ndarray or list
+        Amplitude of each sinusoid. Shape must be (n_modes,).
+    frequencies : np.ndarray or list
+        Frequency of each sinusoid. Shape must be (n_modes,).
+    sampling_frequency : float
+        Sampling frequency.
+    session_means : np.ndarray or str
+        Session mean vector for each mode, shape should be (n_sessions, n_modes,
+        n_channels). Either a numpy array or :code:`'zero'` or
+        :code:`'random'`.
+    session_covariances : np.ndarray or str
+        Session covariance matrix for each mode, shape should be
+        (n_sessions, n_modes, n_channels, n_channels). Either a numpy array
+        or :code:`'random'`.
+    n_covariances_act : int, optional
+        Number of iterations to add activations to covariance matrices.
+    n_modes : int, optional
+        Number of modes.
+    n_channels : int, optional
+        Number of channels.
+    n_sessions : int, optional
+        Number of sessions.
+    embeddings_dim : int, optional
+        Number of dimensions for embedding vectors.
+    spatial_embeddings_dim : int, optional
+        Number of dimensions for spatial embedding vectors.
+    embeddings_scale : float, optional
+        Scale of variability between session observation parameters.
+    n_groups : int, optional
+        Number of groups when session means or covariances are
+        :code:`'random'`.
+    between_group_scale : float, optional
+        Scale of variability between groups.
+    observation_error : float, optional
+        Standard deviation of the error added to the generated data.
+    mix_precisions : bool, optional
+        Should we mix the mode precisions (inverse covariances) instead of
+        the covariances? If the session covariances are generated, the
+        session deviations are then added to the Cholesky factors of the
+        precisions.
+    beta_relative_activation : np.ndarray or list, optional
+        :code:`relative_activation` for :code:`beta`.
+    beta_amplitudes : np.ndarray or list, optional
+        :code:`amplitudes` for :code:`beta`.
+    beta_frequencies : np.ndarray or list, optional
+        :code:`frequencies` for :code:`beta`.
+    """
+
+    def __init__(
+        self,
+        n_samples: int,
+        relative_activation: Union[np.ndarray, List[float]],
+        amplitudes: Union[np.ndarray, List[float]],
+        frequencies: Union[np.ndarray, List[float]],
+        sampling_frequency: float,
+        session_means: Union[np.ndarray, str],
+        session_covariances: Union[np.ndarray, str],
+        n_covariances_act: int = 1,
+        n_modes: Optional[int] = None,
+        n_channels: Optional[int] = None,
+        n_sessions: Optional[int] = None,
+        embeddings_dim: Optional[int] = None,
+        spatial_embeddings_dim: Optional[int] = None,
+        embeddings_scale: Optional[float] = None,
+        n_groups: Optional[int] = None,
+        between_group_scale: Optional[float] = None,
+        observation_error: float = 0.0,
+        mix_precisions: bool = False,
+        beta_relative_activation: Optional[Union[np.ndarray, List[float]]] = None,
+        beta_amplitudes: Optional[Union[np.ndarray, List[float]]] = None,
+        beta_frequencies: Optional[Union[np.ndarray, List[float]]] = None,
+    ) -> None:
+        # Observation model
+        self.obs_mod = MSess_MVN(
+            session_means=session_means,
+            session_covariances=session_covariances,
+            n_covariances_act=n_covariances_act,
+            n_modes=n_modes,
+            n_channels=n_channels,
+            n_sessions=n_sessions,
+            embeddings_dim=embeddings_dim,
+            spatial_embeddings_dim=spatial_embeddings_dim,
+            embeddings_scale=embeddings_scale,
+            n_groups=n_groups,
+            between_group_scale=between_group_scale,
+            observation_error=observation_error,
+            mix_precisions=mix_precisions,
+        )
+
+        self.n_modes = self.obs_mod.n_modes
+        self.n_channels = self.obs_mod.n_channels
+        self.n_sessions = self.obs_mod.n_sessions
+
+        super().__init__(n_samples=n_samples)
+
+        # Simulate alpha and beta for all sessions
+        beta_kwargs = dict(
+            relative_activation=(
+                relative_activation
+                if beta_relative_activation is None
+                else beta_relative_activation
+            ),
+            amplitudes=amplitudes if beta_amplitudes is None else beta_amplitudes,
+            frequencies=frequencies if beta_frequencies is None else beta_frequencies,
+        )
+        alpha, beta = [], []
+        for _ in range(self.n_sessions):
+            alpha_sm = MixedSine(
+                n_modes=self.n_modes,
+                relative_activation=relative_activation,
+                amplitudes=amplitudes,
+                frequencies=frequencies,
+                sampling_frequency=sampling_frequency,
+            )
+            beta_sm = MixedSine(
+                n_modes=self.n_modes,
+                sampling_frequency=sampling_frequency,
+                **beta_kwargs,
+            )
+            alpha.append(alpha_sm.generate_modes(self.n_samples))
+            beta.append(beta_sm.generate_modes(self.n_samples))
+        self.mode_time_course = np.array([alpha, beta])
+
+        # Simulate data
+        self.time_series = self.obs_mod.simulate_multi_session_data(
+            self.mode_time_course[0], self.mode_time_course[1]
         )
 
     def __getattr__(self, attr: str):

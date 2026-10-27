@@ -658,6 +658,11 @@ class MSess_HMM_MVN(Simulation):
         Standard deviation when generating session-specific stay probability.
     observation_error : float, optional
         Standard deviation of the error added to the generated data.
+    mix_precisions : bool, optional
+        Should we mix the mode precisions (inverse covariances) instead of
+        the covariances? If the session covariances are generated, the
+        session deviations are then added to the Cholesky factors of the
+        precisions instead of the covariances.
     """
 
     def __init__(
@@ -680,6 +685,7 @@ class MSess_HMM_MVN(Simulation):
         tc_std: float = 0.0,
         stay_prob: Optional[float] = None,
         observation_error: float = 0.0,
+        mix_precisions: bool = False,
     ) -> None:
         if n_states is None:
             n_states = n_modes
@@ -699,6 +705,7 @@ class MSess_HMM_MVN(Simulation):
             n_groups=n_groups,
             between_group_scale=between_group_scale,
             observation_error=observation_error,
+            mix_precisions=mix_precisions,
         )
 
         self.n_states = self.obs_mod.n_modes

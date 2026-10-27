@@ -145,24 +145,31 @@ class MVN:
 
         return covariances
 
-    def mix_covariances(self, alpha: np.ndarray) -> np.ndarray:
+    def mix_covariances(
+        self, alpha: np.ndarray, covariances: Optional[np.ndarray] = None
+    ) -> np.ndarray:
         """Covariance for a mixture of modes.
 
         Parameters
         ----------
         alpha : np.ndarray
             Mixing coefficients. Shape must be (n_modes,).
+        covariances : np.ndarray, optional
+            Mode covariances. Shape must be (n_modes, n_channels, n_channels).
+            Defaults to :code:`self.covariances`.
 
         Returns
         -------
         sigma : np.ndarray
             Covariance. Shape is (n_channels, n_channels).
         """
+        if covariances is None:
+            covariances = self.covariances
         alpha = alpha[:, np.newaxis, np.newaxis]
         if self.mix_precisions:
-            precisions = np.linalg.inv(self.covariances)
+            precisions = np.linalg.inv(covariances)
             return np.linalg.inv(np.sum(precisions * alpha, axis=0))
-        return np.sum(self.covariances * alpha, axis=0)
+        return np.sum(covariances * alpha, axis=0)
 
     def simulate_data(self, state_time_course: np.ndarray) -> np.ndarray:
         """Simulate time series data.
@@ -432,6 +439,11 @@ class MSess_MVN(MVN):
         embeddings.
     observation_error : float, optional
         Standard deviation of the error added to the generated data.
+    mix_precisions : bool, optional
+        Should we mix the mode precisions (inverse covariances) instead of
+        the covariances? If the session covariances are generated, the
+        session deviations are then added to the Cholesky factors of the
+        precisions instead of the covariances.
     """
 
     def __init__(
@@ -449,9 +461,11 @@ class MSess_MVN(MVN):
         n_groups: Optional[int] = None,
         between_group_scale: Optional[float] = None,
         observation_error: float = 0.0,
+        mix_precisions: bool = False,
     ) -> None:
         self.n_covariances_act = n_covariances_act
         self.observation_error = observation_error
+        self.mix_precisions = mix_precisions
         self.embeddings_dim = embeddings_dim
         self.spatial_embeddings_dim = spatial_embeddings_dim
         self.embeddings_scale = embeddings_scale
@@ -565,6 +579,12 @@ class MSess_MVN(MVN):
 
             self.group_covariances = super().create_covariances(session_covariances)
             self.session_covariances = self.create_session_covariances()
+
+        if mix_precisions and not isinstance(session_covariances, np.ndarray):
+            # The matrices generated above (with the deviations added to their
+            # Cholesky factors) are the precisions
+            self.group_covariances = np.linalg.inv(self.group_covariances)
+            self.session_covariances = np.linalg.inv(self.session_covariances)
 
     def validate_embedding_parameters(
         self, embedding_vectors: Optional[np.ndarray]
@@ -746,7 +766,10 @@ class MSess_MVN(MVN):
         return session_covariances
 
     def simulate_session_data(
-        self, session: int, mode_time_course: np.ndarray
+        self,
+        session: int,
+        mode_time_course: np.ndarray,
+        cov_time_course: Optional[np.ndarray] = None,
     ) -> np.ndarray:
         """Simulate single session data.
 
@@ -756,6 +779,10 @@ class MSess_MVN(MVN):
             Session number.
         mode_time_course : np.ndarray
             Mode time course. Shape is (n_samples, n_modes).
+        cov_time_course : np.ndarray, optional
+            Mode time course for mixing the covariances (or precisions).
+            Shape is (n_samples, n_modes). Defaults to
+            :code:`mode_time_course`.
 
         Returns
         -------
@@ -766,22 +793,23 @@ class MSess_MVN(MVN):
         n_samples = mode_time_course.shape[0]
         data = np.zeros((n_samples, self.n_channels))
 
+        if cov_time_course is None:
+            cov_time_course = mode_time_course
+        time_courses = np.concatenate([mode_time_course, cov_time_course], axis=1)
+
         # Loop through all unique combinations of modes
-        for alpha in np.unique(mode_time_course, axis=0):
+        for tc in np.unique(time_courses, axis=0):
+            alpha, beta = np.split(tc, [mode_time_course.shape[1]])
+
             # Mean and covariance for this combination of modes
             mu = np.sum(self.session_means[session] * alpha[:, None], axis=0)
-            sigma = np.sum(
-                self.session_covariances[session] * alpha[:, None, None], axis=0
-            )
+            sigma = self.mix_covariances(beta, self.session_covariances[session])
 
             # Generate data for the time points that this combination of
             # modes is active
-            data[np.all(mode_time_course == alpha, axis=1)] = (
-                np.random.multivariate_normal(
-                    mu,
-                    sigma,
-                    size=np.count_nonzero(np.all(mode_time_course == alpha, axis=1)),
-                )
+            active = np.all(time_courses == tc, axis=1)
+            data[active] = np.random.multivariate_normal(
+                mu, sigma, size=np.count_nonzero(active)
             )
 
         # Add an error to the data at all time points
@@ -814,9 +842,7 @@ class MSess_MVN(MVN):
         # Loop through all unique combinations of modes
         for alpha in np.unique(mode_time_course, axis=0):
             # Covariance for this combination of modes
-            sigma = np.sum(
-                self.session_covariances[session] * alpha[:, None, None], axis=0
-            )
+            sigma = self.mix_covariances(alpha, self.session_covariances[session])
             inst_covs[np.all(mode_time_course == alpha, axis=1)] = sigma
 
         return inst_covs.astype(np.float32)
@@ -847,7 +873,11 @@ class MSess_MVN(MVN):
             )
         return np.array(inst_covs)
 
-    def simulate_multi_session_data(self, mode_time_courses: np.ndarray) -> np.ndarray:
+    def simulate_multi_session_data(
+        self,
+        mode_time_courses: np.ndarray,
+        cov_time_courses: Optional[np.ndarray] = None,
+    ) -> np.ndarray:
         """Simulates data.
 
         Parameters
@@ -855,6 +885,10 @@ class MSess_MVN(MVN):
         mode_time_courses : np.ndarray
             It contains n_sessions time courses.
             Shape is (n_sessions, n_samples, n_modes).
+        cov_time_courses : np.ndarray, optional
+            Time courses for mixing the covariances (or precisions).
+            Shape is (n_sessions, n_samples, n_modes). Defaults to
+            :code:`mode_time_courses`.
 
         Returns
         -------
@@ -862,9 +896,15 @@ class MSess_MVN(MVN):
             Simulated data for sessions.
             Shape is (n_sessions, n_samples, n_channels).
         """
+        if cov_time_courses is None:
+            cov_time_courses = mode_time_courses
         data = []
         for session in range(self.n_sessions):
-            data.append(self.simulate_session_data(session, mode_time_courses[session]))
+            data.append(
+                self.simulate_session_data(
+                    session, mode_time_courses[session], cov_time_courses[session]
+                )
+            )
         return np.array(data)
 
 
