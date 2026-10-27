@@ -19,6 +19,7 @@ import tensorflow as tf
 from osl_dynamics import data
 import osl_dynamics.data.tf as dtf
 from osl_dynamics.inference.layers import (
+    CoordinatedDropoutLayer,
     TFConcatLayer,
     CorrelationMatricesLayer,
     CovarianceMatricesLayer,
@@ -81,6 +82,13 @@ class Config(BaseModelConfig, VariationalInferenceModelConfig):
         Dropout rate.
     inference_regularizer : str
         Regularizer.
+    coordinated_dropout : float
+        Probability of hiding each channel from the inference network
+        during training. The log-likelihood is then computed only on the
+        hidden channels, so a mode time course is never used to reconstruct
+        the channels it was inferred from. This stops the mode time course
+        copying channel-specific fluctuations into the mean when
+        :code:`learn_means=True`. It only affects training. Defaults to 0 (off).
 
     model_rnn : str
         RNN to use, either :code:`'gru'` or :code:`'lstm'`.
@@ -199,6 +207,7 @@ class Config(BaseModelConfig, VariationalInferenceModelConfig):
     inference_activation: str = None
     inference_dropout: float = 0.0
     inference_regularizer: str = None
+    coordinated_dropout: float = 0.0
 
     # Model network parameters
     model_rnn: str = "lstm"
@@ -250,6 +259,9 @@ class Config(BaseModelConfig, VariationalInferenceModelConfig):
 
         if self.model_n_units is None:
             raise ValueError("Please pass model_n_units.")
+
+        if not 0 <= self.coordinated_dropout < 1:
+            raise ValueError("coordinated_dropout must be in [0, 1).")
 
     def validate_observation_model_parameters(self) -> None:
         if self.mix_precisions:
@@ -472,7 +484,14 @@ class Model(VariationalInferenceModelBase):
         data = tf.keras.layers.Input(
             shape=(config.sequence_length, config.n_channels), name="data"
         )
-        data_drop = data_drop_layer(data)
+        if config.coordinated_dropout > 0:
+            coordinated_dropout_layer = CoordinatedDropoutLayer(
+                config.coordinated_dropout, name="coordinated_dropout"
+            )
+            inf_data, ll_mask = coordinated_dropout_layer(data)
+        else:
+            inf_data, ll_mask = data, None
+        data_drop = data_drop_layer(inf_data)
         inf_rnn = inf_rnn_layer(data_drop)
         power_inf_mu = power_inf_mu_layer(inf_rnn)
         power_inf_sigma = power_inf_sigma_layer(inf_rnn)
@@ -498,7 +517,10 @@ class Model(VariationalInferenceModelBase):
             G = mix_stds_layer([alpha, pca_E])
             F = mix_corrs_layer([beta, pca_R])
             C = matmul_layer([G, F, G])
-        ll_loss = ll_loss_layer([data, m, C])
+        if ll_mask is None:
+            ll_loss = ll_loss_layer([data, m, C])
+        else:
+            ll_loss = ll_loss_layer([data, m, C, ll_mask])
 
         # Decoder
         theta = theta_layer([power_theta, fc_theta])
