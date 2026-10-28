@@ -132,6 +132,35 @@ def test_dynemo_log_likelihood_matches_reference():
     npt.assert_allclose(result, expected, rtol=1e-10)
 
 
+def test_dynemo_log_likelihood_mixes_precisions():
+    rng = np.random.default_rng(4)
+    n_samples, n_channels, n_modes = 300, 4, 3
+    x = rng.normal(size=(n_samples, n_channels)).astype(np.float32)
+    alpha = rng.dirichlet(np.ones(n_modes), size=n_samples)
+    means = rng.normal(size=(n_modes, n_channels))
+    covs = random_covs(rng, n_modes, n_channels)
+
+    ops = get_model_ops(
+        "dynemo",
+        {
+            "n_modes": n_modes,
+            "learn_means": True,
+            "learn_covariances": True,
+            "mix_precisions": True,
+        },
+    )
+    result = ops.log_likelihood(Data([x]), [alpha], {"means": means, "covs": covs})
+
+    precisions = np.einsum("tk,kij->tij", alpha, np.linalg.inv(covs))
+    expected = np.mean(
+        [
+            multivariate_normal.logpdf(x[t], alpha[t] @ means, np.linalg.inv(P))
+            for t, P in enumerate(precisions)
+        ]
+    )
+    npt.assert_allclose(result, expected, rtol=1e-6)
+
+
 @pytest.mark.parametrize("learn_means", [False, True])
 def test_static_matches_reference(learn_means):
     rng = np.random.default_rng(4)
@@ -287,6 +316,34 @@ def test_dynemo_mle_recovers_parameters():
     )
     npt.assert_allclose(mle["covs"], covs, atol=0.15)
     assert np.abs(mle["covs"] - covs).max() < np.abs(weighted["covs"] - covs).max()
+
+
+def test_dynemo_mle_recovers_mixed_precisions():
+    rng = np.random.default_rng(9)
+    n_samples, n_channels = 20000, 2
+    covs = np.array([[[1.0, -0.5], [-0.5, 1.0]], [[2.0, 1.0], [1.0, 2.0]]])
+    t = np.arange(n_samples) / 100
+    alpha = np.stack([np.sin(np.pi * t) ** 2, np.cos(np.pi * t) ** 2], axis=1)
+    precisions = np.einsum("tk,kij->tij", alpha, np.linalg.inv(covs))
+    x = np.array(
+        [
+            rng.multivariate_normal(np.zeros(n_channels), np.linalg.inv(P))
+            for P in precisions
+        ]
+    )
+
+    config = {
+        "n_modes": 2,
+        "learn_means": False,
+        "learn_covariances": True,
+        "mix_precisions": True,
+        "sequence_length": 100,
+        "batch_size": 32,
+        "learning_rate": 0.01,
+        "n_epochs": 20,
+    }
+    mle = get_model_ops("dynemo", config).infer_spatial(Data([x]), [alpha])
+    npt.assert_allclose(np.linalg.inv(mle["covs"]), np.linalg.inv(covs), atol=0.15)
 
 
 # --------------------------------------------------------------------------

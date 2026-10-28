@@ -163,6 +163,34 @@ def batched_gaussian_log_likelihood(
     return -0.5 * (n_channels * np.log(2 * np.pi) + log_det + np.sum(z**2, axis=-1))
 
 
+def batched_precision_log_likelihood(
+    x: np.ndarray, means: np.ndarray, precisions: np.ndarray
+) -> np.ndarray:
+    """Log-likelihood of each sample under its own multivariate normal,
+    parameterised by a precision matrix.
+
+    Parameters
+    ----------
+    x : np.ndarray
+        Data. Shape must be (n_samples, n_channels).
+    means : np.ndarray
+        Mean for each sample. Shape must be (n_samples, n_channels).
+    precisions : np.ndarray
+        Precision matrix for each sample. Shape must be
+        (n_samples, n_channels, n_channels).
+
+    Returns
+    -------
+    log_likelihood : np.ndarray
+        Log-likelihood of each sample. Shape is (n_samples,).
+    """
+    n_channels = x.shape[-1]
+    cholesky = np.linalg.cholesky(precisions)
+    z = np.einsum("...ji,...j->...i", cholesky, x - means)
+    log_det = 2 * np.sum(np.log(np.diagonal(cholesky, axis1=-2, axis2=-1)), axis=-1)
+    return -0.5 * (n_channels * np.log(2 * np.pi) - log_det + np.sum(z**2, axis=-1))
+
+
 def _chunks(n_samples: int, n_channels: int) -> List[slice]:
     """Slices of time points so each chunk of covariances is about 100 MB."""
     chunk_size = max(int(1e8 // (8 * n_channels**2)), 1)
@@ -247,6 +275,7 @@ def fit_observation_model(
     batch_size: int,
     learning_rate: float,
     n_epochs: int,
+    precisions: bool = False,
 ) -> list:
     """Maximum likelihood estimate of an observation model with fixed time
     courses.
@@ -267,8 +296,8 @@ def fit_observation_model(
         (e.g. :code:`VectorsLayer`, :code:`CovarianceMatricesLayer`).
     mix : callable
         Function :code:`mix(params, time_courses)` that returns the mean and
-        covariance at each time point, where :code:`params` are the outputs
-        of the layers.
+        covariance (or precision if :code:`precisions=True`) at each time
+        point, where :code:`params` are the outputs of the layers.
     sequence_length : int
         Length of each sequence.
     batch_size : int
@@ -277,6 +306,8 @@ def fit_observation_model(
         Learning rate.
     n_epochs : int
         Number of epochs.
+    precisions : bool, optional
+        Does :code:`mix` return precision matrices?
 
     Returns
     -------
@@ -285,6 +316,8 @@ def fit_observation_model(
     """
     import tensorflow as tf
     import tensorflow_probability as tfp
+
+    from osl_dynamics.inference.layers import precision_log_prob
 
     # Split into sequences, dropping the remainder
     n_sequences = x.shape[0] // sequence_length
@@ -312,13 +345,17 @@ def fit_observation_model(
     def train_step(x_batch, tc_batch):
         with tf.GradientTape() as tape:
             params = [layer(x_batch) for layer in obs_layers]
-            mu, sigma = mix(params, tc_batch)
-            mvn = tfp.distributions.MultivariateNormalTriL(
-                loc=mu,
-                scale_tril=tf.linalg.cholesky(sigma),
-                allow_nan_stats=False,
-            )
-            loss = -tf.reduce_mean(mvn.log_prob(x_batch))
+            mu, matrix = mix(params, tc_batch)
+            if precisions:
+                log_prob = precision_log_prob(x_batch, mu, matrix)
+            else:
+                mvn = tfp.distributions.MultivariateNormalTriL(
+                    loc=mu,
+                    scale_tril=tf.linalg.cholesky(matrix),
+                    allow_nan_stats=False,
+                )
+                log_prob = mvn.log_prob(x_batch)
+            loss = -tf.reduce_mean(log_prob)
         gradients = tape.gradient(loss, variables)
         optimizer.apply_gradients(zip(gradients, variables))
         return loss
@@ -772,6 +809,11 @@ class DyNeMoOps(ModelOps):
       This is a closed-form approximation.
     - :code:`"sample"`: assign each time point to the mode with the largest
       :code:`alpha` and calculate the sample covariance of each mode.
+
+    With :code:`mix_precisions=True` in :code:`config_kwargs`, the precision
+    at each time point is :math:`P_t = \\sum_j \\alpha_{jt} D_j^{-1}`: the
+    :code:`"mle"` estimate and the log-likelihood mix the precisions. The
+    spatial parameters are still the covariances :math:`D_j`.
     """
 
     name = "dynemo"
@@ -850,10 +892,16 @@ class DyNeMoOps(ModelOps):
             MixMatricesLayer,
             MixVectorsLayer,
         )
+        from osl_dynamics.models.obs_mod import invert_matrices
 
         n_modes, n_channels = alpha.shape[1], x.shape[1]
         initial_means = means if config.learn_means else np.zeros_like(means)
-        initial_covs = covs
+        # With mix_precisions=True, the layer learns the precisions
+        initial_covs = (
+            invert_matrices(covs, config.diagonal_covariances)
+            if config.mix_precisions
+            else covs
+        )
 
         def build_layers():
             covs_layer = (
@@ -888,7 +936,10 @@ class DyNeMoOps(ModelOps):
             batch_size=config.batch_size,
             learning_rate=config.learning_rate,
             n_epochs=config.n_epochs,
+            precisions=config.mix_precisions,
         )
+        if config.mix_precisions:
+            covs = invert_matrices(covs, config.diagonal_covariances)
         _clear_session()
         return {"means": means, "covs": covs}
 
@@ -900,14 +951,19 @@ class DyNeMoOps(ModelOps):
         _check_n_sessions(ts, alpha)
 
         means, covs = spatial["means"], spatial["covs"]
+        mix_precisions = self.config_kwargs.get("mix_precisions", False)
+        matrices = np.linalg.inv(covs) if mix_precisions else covs
         total = 0.0
         n_samples = 0
         for x, a in zip(ts, alpha):
             x = x[: a.shape[0]]
             for chunk in _chunks(a.shape[0], x.shape[1]):
                 m = a[chunk] @ means
-                C = np.einsum("tk,kij->tij", a[chunk], covs)
-                total += np.sum(batched_gaussian_log_likelihood(x[chunk], m, C))
+                D = np.einsum("tk,kij->tij", a[chunk], matrices)
+                if mix_precisions:
+                    total += np.sum(batched_precision_log_likelihood(x[chunk], m, D))
+                else:
+                    total += np.sum(batched_gaussian_log_likelihood(x[chunk], m, D))
             n_samples += a.shape[0]
         return float(total / n_samples)
 
