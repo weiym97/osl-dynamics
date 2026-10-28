@@ -90,8 +90,6 @@ def subset_data(
     kwargs = {
         "sampling_frequency": data.sampling_frequency,
         "load_memmaps": data.load_memmaps,
-        "buffer_size": data.buffer_size,
-        "use_tfrecord": data.use_tfrecord,
         "n_jobs": data.n_jobs,
     }
     if store_dir is not None:
