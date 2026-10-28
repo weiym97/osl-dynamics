@@ -68,7 +68,7 @@ def repeat(
         Metrics of the trained model. Empty for a static model.
     """
     ops = _get_ops(model, config_kwargs, init_kwargs, fit_kwargs)
-    if ops.n_states == 1:
+    if ops.is_static:
         spatial = fit_static(data, ops.learn_means)
         _save_spatial(spatial, output_dir, "inf_params")
         return {}
@@ -146,7 +146,7 @@ def split_half(
         _logger.info(f"Split-half: training on half {i}")
         partition_dir = None if output_dir is None else f"{output_dir}/partition_{i}"
         with _subset(data, rows, None, partition_dir) as half:
-            if ops.n_states == 1:
+            if ops.is_static:
                 spatial = fit_static(half, ops.learn_means)
             else:
                 trained_model = ops.train(half)

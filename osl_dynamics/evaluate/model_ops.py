@@ -16,7 +16,8 @@ Spatial parameters are a dict of arrays (e.g. :code:`{"means": ...,
 
 Models with one state/mode are a static model (a single multivariate
 normal). They are handled by :py:func:`fit_static` and
-:py:func:`static_log_likelihood` for every model.
+:py:func:`static_log_likelihood` for every model without session-specific
+parameters (HIVE and DIVE have them).
 """
 
 import logging
@@ -477,6 +478,9 @@ class ModelOps:
     spatial_method : str, optional
         How to estimate the spatial parameters given the time courses.
         See the subclass for the options.
+    best_of : int, optional
+        Number of times :code:`fit` trains the model. The run with the
+        lowest :py:meth:`selection_score` on the training data is kept.
     """
 
     name = None
@@ -484,6 +488,9 @@ class ModelOps:
     default_init_kwargs = {}
     spatial_methods = ()
     default_spatial_method = None
+    #: Does the model have session-specific parameters? Such a model is not
+    #: static with one state/mode.
+    session_specific = False
 
     def __init__(
         self,
@@ -491,6 +498,7 @@ class ModelOps:
         init_kwargs: Optional[dict] = None,
         fit_kwargs: Optional[dict] = None,
         spatial_method: Optional[str] = None,
+        best_of: int = 1,
     ) -> None:
         self.config_kwargs = override_dict_defaults(
             self.default_config_kwargs, dict(config_kwargs)
@@ -511,10 +519,19 @@ class ModelOps:
         if self.n_states is None:
             raise ValueError("config_kwargs must contain n_states or n_modes.")
 
+        if best_of < 1:
+            raise ValueError("best_of must be at least 1.")
+        self.best_of = best_of
+
     @property
     def n_states(self) -> Optional[int]:
         """Number of states/modes."""
         return self.config_kwargs.get("n_states", self.config_kwargs.get("n_modes"))
+
+    @property
+    def is_static(self) -> bool:
+        """Is the model a static model (one multivariate normal)?"""
+        return self.n_states == 1 and not self.session_specific
 
     @property
     def learn_means(self) -> bool:
@@ -550,6 +567,9 @@ class ModelOps:
     def fit(self, data) -> Tuple[Dict[str, np.ndarray], List[np.ndarray]]:
         """Train the model and return its spatial and temporal parameters.
 
+        The model is trained :code:`best_of` times and the run with the
+        lowest :py:meth:`selection_score` is kept.
+
         Parameters
         ----------
         data : osl_dynamics.data.Data
@@ -562,12 +582,39 @@ class ModelOps:
         temporal : list of np.ndarray
             Time courses for each session.
         """
-        model = self.train(data)
-        spatial = self.get_spatial(model)
-        temporal = self.get_temporal(model, data)
-        del model
-        _clear_session()
+        best_score = np.inf
+        for run in range(self.best_of):
+            model = self.train(data)
+            # One run needs no score
+            score = 0.0
+            if self.best_of > 1:
+                score = self.selection_score(model, data)
+                _logger.info(f"Run {run + 1}/{self.best_of}: score={score:.4f}")
+            if score < best_score:
+                best_score = score
+                spatial = self.get_spatial(model)
+                temporal = self.get_temporal(model, data)
+            del model
+            _clear_session()
         return spatial, temporal
+
+    def selection_score(self, model, data) -> float:
+        """Score used to choose between the :code:`best_of` runs of
+        :code:`fit` (lower is better).
+
+        Parameters
+        ----------
+        model : osl-dynamics model
+            Trained model.
+        data : osl_dynamics.data.Data
+            Training data.
+
+        Returns
+        -------
+        score : float
+            Variational free energy.
+        """
+        return float(model.free_energy(data))
 
     def infer_spatial(self, data, temporal: List[np.ndarray]) -> Dict[str, np.ndarray]:
         """Estimate the spatial parameters given fixed time courses.
@@ -635,6 +682,21 @@ class ModelOps:
             Log-likelihood averaged over time points.
         """
         raise NotImplementedError
+
+    def log_likelihood_controls(
+        self, data, temporal, spatial: Dict[str, np.ndarray]
+    ) -> Dict[str, float]:
+        """Log-likelihoods of control models, saved with the BCV result.
+
+        Takes the same arguments as :py:meth:`log_likelihood`. The base class
+        has no controls.
+
+        Returns
+        -------
+        controls : dict
+            Log-likelihood of each control, averaged over time points.
+        """
+        return {}
 
     #: Metric used for naive cross-validation.
     ncv_metric = "free_energy"
@@ -1265,6 +1327,8 @@ class SWCOps(ModelOps):
     def fit(self, data) -> Tuple[Dict[str, np.ndarray], List[np.ndarray]]:
         from osl_dynamics.models import swc
 
+        if self.best_of > 1:
+            raise ValueError("best_of is not supported for SWC.")
         model = swc.Model(self._config(data.n_channels))
         alpha = model.fit(data)
         return self.get_spatial(model), _as_list(alpha)
@@ -1300,6 +1364,727 @@ class SWCOps(ModelOps):
         return {"log_likelihood": self.ncv_score(model, data)}
 
 
+_EMBEDDINGS_LAYER = "session_id_embeddings"
+
+# Layers that turn a session embedding into a deviation, for each parameter
+_DEV_LAYERS = [
+    "{}_spatial_embeddings",
+    "{}_dev_decoder",
+    "{}_dev_map",
+    "norm_{}_dev_map",
+    "{}_dev_mag_mod_beta",
+]
+
+
+def _add_session_ids(data) -> None:
+    """Label each session in the data with its index."""
+    if "session_id" not in [label.name for label in data.session_labels]:
+        data.add_session_labels("session_id", np.arange(data.n_sessions), "categorical")
+
+
+def _session_sequences(
+    ts: List[np.ndarray], time_courses: List[np.ndarray], sequence_length: int
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Cut the data and time courses of each session into sequences.
+
+    The remainder of each session is dropped. Returns the sequences of data,
+    time courses and session indices.
+    """
+    x, tc, ids = [], [], []
+    for i, (t, c) in enumerate(zip(ts, time_courses)):
+        n_sequences = c.shape[0] // sequence_length
+        n_samples = n_sequences * sequence_length
+        shape = (n_sequences, sequence_length, -1)
+        x.append(np.asarray(t[:n_samples], dtype=np.float32).reshape(shape))
+        tc.append(np.asarray(c[:n_samples], dtype=np.float32).reshape(shape))
+        ids.append(np.full((n_sequences, sequence_length), i, dtype=np.int32))
+    return np.concatenate(x), np.concatenate(tc), np.concatenate(ids)
+
+
+def _predict_magnitudes(
+    train_X: Dict[str, np.ndarray],
+    train_Y: Dict[str, np.ndarray],
+    test_X: Dict[str, np.ndarray],
+) -> Dict[str, np.ndarray]:
+    """Predict the deviation magnitudes of channels Y from those of channels X.
+
+    For each state/mode, the magnitudes of the training sessions for
+    channels Y are regressed on their magnitudes for channels X, and the fit
+    is applied to the test sessions' magnitudes for channels X. Negative
+    predictions are set to zero.
+
+    Parameters
+    ----------
+    train_X, train_Y, test_X : dict
+        Magnitudes with keys :code:`"<param>_magnitude"`. Each value has
+        shape (n_sessions, n_states).
+
+    Returns
+    -------
+    magnitudes : dict
+        Predicted magnitudes of the test sessions for channels Y.
+    """
+    predicted = {}
+    for key in train_Y:
+        if not key.endswith("_magnitude"):
+            continue
+        x, y, test = train_X[key], train_Y[key], test_X[key]
+        prediction = np.empty_like(test)
+        for k in range(test.shape[1]):
+            slope, intercept = np.polyfit(x[:, k], y[:, k], 1)
+            prediction[:, k] = intercept + slope * test[:, k]
+        predicted[key] = np.maximum(prediction, 0)
+    return predicted
+
+
+class HIVEOps(ModelOps):
+    """Operations for :py:mod:`HIVE <osl_dynamics.models.hive>`.
+
+    HIVE gives each session its own state means and covariances, generated
+    from a session embedding by a decoder. Bi-cross-validation treats each
+    parameter according to what it is indexed by:
+
+    - **Channel-specific** parameters are learnt on the training sessions,
+      separately for channels X (step 2) and Y (step 1). These are the group
+      means/covariances and the decoder that turns an embedding into a
+      deviation (spatial embeddings, MLP, deviation map, its layer
+      normalisation and the head giving the prior on the deviation
+      magnitudes).
+    - **Session-specific parameters shared by all channels** are inferred
+      from channels X for the test sessions (step 3) and used for channels Y
+      (step 4). These are the state probabilities and the session
+      embeddings. The training sessions' embeddings are fixed in step 2, so
+      the decoders of X and Y share one embedding space.
+    - **Deviation magnitudes** are session- and channel-specific. For
+      channels Y of a test session they are predicted from its magnitudes
+      for channels X, with a regression for each state learnt on the
+      training sessions.
+
+    Spatial parameters are a dict with the group :code:`"means"` and
+    :code:`"covs"`, the :code:`"weights"` of the channel-specific layers
+    and the posterior deviation :code:`"magnitudes"` of the training
+    sessions. Temporal parameters are a dict with the state probabilities
+    (:code:`"gamma"`), the session :code:`"embeddings"` and the deviation
+    :code:`"magnitudes"`.
+
+    Step 2 maximizes HIVE's loss with the state probabilities fixed (Adam,
+    :code:`n_epochs` epochs). Step 3 trains HIVE on channels X of the test
+    sessions with the channel-specific layers fixed. Each test session
+    starts at the mean training embedding and magnitudes.
+
+    With one state, HIVE is not a static model: each session has its own
+    covariance.
+
+    :py:meth:`log_likelihood_controls` gives the log-likelihood with zero
+    deviations (:code:`"log_likelihood_group"`, i.e. the group parameters)
+    and with the embeddings and magnitudes shuffled between the test
+    sessions (:code:`"log_likelihood_shuffled"`). :code:`log_likelihood`
+    minus these is the gain from session-specific parameters.
+
+    Only the :code:`session_id` embedding is supported. The default
+    :code:`config_kwargs` and :code:`init_kwargs` are the same as
+    :py:func:`osl_dynamics.config_api.wrappers.train_hive`.
+    :code:`embeddings_dim` must be passed. The only :code:`spatial_method`
+    is :code:`"mle"`.
+    """
+
+    name = "hive"
+    session_specific = True
+    default_config_kwargs = {
+        "sequence_length": 200,
+        "spatial_embeddings_dim": 2,
+        "dev_n_layers": 5,
+        "dev_n_units": 32,
+        "dev_activation": "tanh",
+        "dev_normalization": "layer",
+        "dev_regularizer": "l1",
+        "dev_regularizer_factor": 10,
+        "batch_size": 128,
+        "learning_rate": 0.005,
+        "lr_decay": 0.1,
+        "n_epochs": 30,
+        "do_kl_annealing": True,
+        "kl_annealing_curve": "tanh",
+        "kl_annealing_sharpness": 10,
+        "n_kl_annealing_epochs": 15,
+    }
+    default_init_kwargs = {"n_init": 10, "n_epochs": 2}
+    spatial_methods = ("mle",)
+    default_spatial_method = "mle"
+
+    # Key of the time courses in the temporal parameters
+    _time_courses = "gamma"
+    # Config option for precision matrices
+    _precisions_option = "embed_precisions"
+    # Config overrides for step 3
+    _temporal_overrides = {"do_kl_annealing": False}
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        if self.config_kwargs.get("session_labels"):
+            raise ValueError(
+                f"Only the session_id embedding is supported for {self.name}."
+            )
+
+    @property
+    def precisions(self) -> bool:
+        """Are the session matrices precisions?"""
+        return bool(self.config_kwargs.get(self._precisions_option, False))
+
+    def _model(self, n_channels: int, n_sessions: int, data=None, **overrides):
+        from osl_dynamics.models import hive
+
+        config = hive.Config(
+            **dict(
+                self.config_kwargs,
+                n_channels=n_channels,
+                n_sessions=n_sessions,
+                **overrides,
+            )
+        )
+        model = hive.Model(config)
+        if data is not None:
+            model.set_regularizers(data)
+        return model
+
+    def _initialize(self, model, data) -> None:
+        if self.n_states == 1:
+            # There is no state time course to sample, so start at the
+            # pooled covariance
+            x = np.concatenate(time_series(data))
+            means, covs = weighted_moments(
+                x,
+                np.ones((x.shape[0], 1)),
+                zero_mean=not model.config.learn_means,
+                eps=model.config.covariances_epsilon,
+            )
+            model.set_group_means_covariances(means, covs)
+        else:
+            model.random_state_time_course_initialization(data, **self.init_kwargs)
+
+    def _params(self, model) -> List[str]:
+        """Parameters with session deviations."""
+        return [
+            param
+            for param, learn in [
+                ("means", model.config.learn_means),
+                ("covs", model.config.learn_covariances),
+            ]
+            if learn
+        ]
+
+    def _channel_layers(self, model) -> List[str]:
+        names = ["group_means", "group_covs"]
+        for param in self._params(model):
+            names += [name.format(param) for name in _DEV_LAYERS]
+        return names
+
+    def _set_channel_weights(self, model, weights: Dict[str, list]) -> None:
+        for name, value in weights.items():
+            model.get_layer(name).set_weights(value)
+
+    def _set_embeddings(self, model, embeddings: np.ndarray) -> None:
+        model.get_layer(_EMBEDDINGS_LAYER).embedding_layer.embeddings.assign(
+            np.asarray(embeddings, dtype=np.float32)
+        )
+
+    def _magnitudes(self, model) -> Dict[str, np.ndarray]:
+        """Posterior shape and mean of each session's deviation magnitudes."""
+        from osl_dynamics.models import obs_mod
+
+        magnitudes = {}
+        for param in self._params(model):
+            alpha, beta = obs_mod.get_dev_mag_parameters(model.model, param)
+            magnitudes[f"{param}_alpha"] = alpha[..., 0]
+            magnitudes[f"{param}_magnitude"] = alpha[..., 0] / beta[..., 0]
+        return magnitudes
+
+    def _set_magnitudes(
+        self, model, param: str, alpha: np.ndarray, magnitude: np.ndarray
+    ) -> None:
+        """Set the posterior of each session's deviation magnitudes to a
+        gamma distribution with this shape and mean."""
+        import tensorflow_probability as tfp
+
+        shape = (model.config.n_sessions, self.n_states)
+        alpha = np.broadcast_to(alpha, shape)
+        beta = alpha / np.broadcast_to(magnitude, shape)
+        for name, value in [("alpha", alpha), ("beta", beta)]:
+            model.get_layer(f"{param}_dev_mag_inf_{name}_input").set_weights(
+                [tfp.math.softplus_inverse(value[..., None].astype(np.float32)).numpy()]
+            )
+
+    def train(self, data, spatial: Optional[Dict] = None):
+        if spatial is not None:
+            raise NotImplementedError(
+                f"Use infer_temporal to train {self.name} with fixed spatial "
+                "parameters."
+            )
+        _add_session_ids(data)
+        model = self._model(data.n_channels, data.n_sessions, data)
+        model.set_dev_parameters_initializer(data)
+        self._initialize(model, data)
+        model.fit(data, **self.fit_kwargs)
+        return model
+
+    def get_spatial(self, model) -> Dict:
+        means, covs = model.get_group_means_covariances()
+        return {
+            "means": means,
+            "covs": covs,
+            "weights": {
+                name: model.get_layer(name).get_weights()
+                for name in self._channel_layers(model)
+            },
+            "magnitudes": self._magnitudes(model),
+        }
+
+    def get_temporal(self, model, data) -> Dict:
+        embeddings = model.get_layer(_EMBEDDINGS_LAYER).embedding_layer.embeddings
+        return {
+            self._time_courses: _as_list(model.get_alpha(data, verbose=0)),
+            "embeddings": embeddings.numpy(),
+            "magnitudes": self._magnitudes(model),
+        }
+
+    def _fixed_time_course_loss(self, model):
+        """Sub-model and loss for training the observation model with fixed
+        state probabilities.
+
+        This is HIVE's loss with Baum-Welch replaced by the fixed state
+        probabilities. The KL and regularization terms are the losses of the
+        sub-model.
+        """
+        import tensorflow as tf
+
+        keras_model = model.model
+        keras_model.get_layer("kl_loss").annealing_factor.assign(1.0)
+        sub_model = tf.keras.Model(
+            inputs=keras_model.inputs,
+            outputs=[
+                keras_model.get_layer("ll").output,
+                keras_model.get_layer("kl_loss").output,
+            ],
+        )
+
+        def loss(outputs, x, gamma):
+            ll, _ = outputs
+            return -tf.reduce_mean(tf.reduce_sum(gamma * ll, axis=-1))
+
+        return sub_model, loss
+
+    def infer_spatial(self, data, temporal: Dict) -> Dict:
+        import tensorflow as tf
+
+        time_courses = _as_list(temporal[self._time_courses])
+        embeddings = temporal["embeddings"]
+        ts = time_series(data)
+        _check_n_sessions(ts, time_courses)
+
+        _add_session_ids(data)
+        model = self._model(data.n_channels, data.n_sessions, data)
+        model.set_dev_parameters_initializer(data)
+
+        # Group parameters start at the weighted moments
+        config = model.config
+        x, tc = _pool(ts, time_courses)
+        means, covs = weighted_moments(
+            x,
+            tc,
+            zero_mean=not config.learn_means,
+            eps=config.covariances_epsilon,
+        )
+        model.set_group_means_covariances(means, covs)
+
+        # Fix the training sessions' embeddings so the decoder of these
+        # channels uses the same embedding space as the model from step 1
+        self._set_embeddings(model, embeddings)
+        model.model.get_layer(_EMBEDDINGS_LAYER).trainable = False
+
+        sub_model, loss_function = self._fixed_time_course_loss(model)
+        variables = sub_model.trainable_variables
+
+        x_seq, tc_seq, id_seq = _session_sequences(
+            ts, time_courses, config.sequence_length
+        )
+        dataset = (
+            tf.data.Dataset.from_tensor_slices(((x_seq, id_seq), tc_seq))
+            .shuffle(x_seq.shape[0])
+            .batch(config.batch_size)
+        )
+        optimizer = tf.keras.optimizers.Adam(learning_rate=config.learning_rate)
+
+        @tf.function
+        def train_step(inputs, tc_batch):
+            with tf.GradientTape() as tape:
+                outputs = sub_model(list(inputs), training=True)
+                loss = loss_function(outputs, inputs[0], tc_batch)
+                if sub_model.losses:
+                    loss += tf.add_n(sub_model.losses)
+            gradients = tape.gradient(loss, variables)
+            optimizer.apply_gradients(
+                [(g, v) for g, v in zip(gradients, variables) if g is not None]
+            )
+            return loss
+
+        for epoch in range(config.n_epochs):
+            optimizer.learning_rate.assign(
+                config.learning_rate * np.exp(-config.lr_decay * epoch)
+            )
+            losses = [float(train_step(i, tc)) for i, tc in dataset]
+            _logger.info(
+                f"Epoch {epoch + 1}/{config.n_epochs}: loss={np.mean(losses):.6f}"
+            )
+
+        spatial = self.get_spatial(model)
+        spatial["embeddings_mean"] = np.mean(embeddings, axis=0)
+        del model, sub_model
+        _clear_session()
+        return spatial
+
+    def infer_temporal(self, data, spatial: Dict) -> Dict:
+        _add_session_ids(data)
+        model = self._model(
+            data.n_channels, data.n_sessions, data, **self._temporal_overrides
+        )
+        self._set_channel_weights(model, spatial["weights"])
+
+        # Start each test session at the average training session
+        self._set_embeddings(
+            model, np.tile(spatial["embeddings_mean"], (data.n_sessions, 1))
+        )
+        magnitudes = spatial["magnitudes"]
+        for param in self._params(model):
+            self._set_magnitudes(
+                model,
+                param,
+                magnitudes[f"{param}_alpha"].mean(axis=0),
+                magnitudes[f"{param}_magnitude"].mean(axis=0),
+            )
+
+        # The initialization methods would overwrite the fixed group
+        # parameters, so the temporal model starts at its initial weights
+        with model.set_trainable(list(spatial["weights"]), False):
+            model.fit(data, **self.fit_kwargs)
+        temporal = self.get_temporal(model, data)
+
+        # The training sessions' magnitudes for these channels are needed to
+        # predict the magnitudes of the other channels in step 4
+        temporal["train_magnitudes"] = magnitudes
+        del model
+        _clear_session()
+        return temporal
+
+    def session_matrices(
+        self,
+        n_channels: int,
+        spatial: Dict,
+        embeddings: np.ndarray,
+        magnitudes: Optional[Dict[str, np.ndarray]],
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Means and matrices of each session, generated from its embedding.
+
+        Parameters
+        ----------
+        n_channels : int
+            Number of channels.
+        spatial : dict
+            Spatial parameters.
+        embeddings : np.ndarray
+            Session embeddings. Shape must be (n_sessions, embeddings_dim).
+        magnitudes : dict
+            Deviation magnitudes with keys :code:`"<param>_magnitude"`,
+            each with shape (n_sessions, n_states). If :code:`None`, the
+            deviations are zero, i.e. every session has the group
+            parameters.
+
+        Returns
+        -------
+        means : np.ndarray
+            Shape is (n_sessions, n_states, n_channels).
+        matrices : np.ndarray
+            Covariances, or precisions if :code:`precisions=True`. Shape is
+            (n_sessions, n_states, n_channels, n_channels).
+        """
+        from osl_dynamics.models import obs_mod
+
+        n_sessions = embeddings.shape[0]
+        model = self._model(n_channels, n_sessions)
+        self._set_channel_weights(model, spatial["weights"])
+        self._set_embeddings(model, embeddings)
+        config = model.config
+
+        params = {}
+        for param, learn in [
+            ("means", config.learn_means),
+            ("covs", config.learn_covariances),
+        ]:
+            group = obs_mod.get_observation_model_parameter(
+                model.model, f"group_{param}"
+            )
+            if learn and magnitudes is not None:
+                dev_map = obs_mod.get_dev_map(model.model, param, config.session_labels)
+                dev = magnitudes[f"{param}_magnitude"][..., None] * dev_map
+            else:
+                size = (
+                    n_channels
+                    if param == "means"
+                    else n_channels * (n_channels + 1) // 2
+                )
+                dev = np.zeros((n_sessions, self.n_states, size), dtype=np.float32)
+            params[param] = model.get_layer(f"session_{param}")([group, dev]).numpy()
+
+        del model
+        _clear_session()
+        return params["means"], params["covs"]
+
+    def session_log_likelihoods(
+        self,
+        data,
+        time_courses: List[np.ndarray],
+        embeddings: np.ndarray,
+        spatial: Dict,
+        magnitudes: Optional[Dict[str, np.ndarray]],
+    ) -> np.ndarray:
+        """Log-likelihood of each session given its time courses, embedding
+        and magnitudes (see :py:meth:`session_matrices`).
+
+        Returns
+        -------
+        log_likelihoods : np.ndarray
+            Log-likelihood summed over time points and the number of time
+            points for each session. Shape is (n_sessions, 2).
+        """
+        gamma = _as_list(time_courses)
+        ts = time_series(data)
+        _check_n_sessions(ts, gamma)
+
+        means, matrices = self.session_matrices(
+            data.n_channels, spatial, embeddings, magnitudes
+        )
+        covs = np.linalg.inv(matrices) if self.precisions else matrices
+        log_likelihoods = []
+        for x, g, m, C in zip(ts, gamma, means, covs):
+            x = np.asarray(x[: g.shape[0]], dtype=np.float64)
+            ll = np.stack(
+                [gaussian_log_likelihood(x, m[k], C[k]) for k in range(g.shape[1])],
+                axis=1,
+            )
+            log_likelihoods.append([np.sum(ll * g), g.shape[0]])
+        return np.array(log_likelihoods)
+
+    def _average_log_likelihood(
+        self, data, temporal: Dict, spatial: Dict, embeddings, magnitudes
+    ) -> float:
+        log_likelihoods = self.session_log_likelihoods(
+            data, temporal[self._time_courses], embeddings, spatial, magnitudes
+        )
+        return float(log_likelihoods[:, 0].sum() / log_likelihoods[:, 1].sum())
+
+    def _predicted_magnitudes(self, temporal: Dict, spatial: Dict) -> Dict:
+        return _predict_magnitudes(
+            temporal["train_magnitudes"], spatial["magnitudes"], temporal["magnitudes"]
+        )
+
+    def log_likelihood(self, data, temporal: Dict, spatial: Dict) -> float:
+        return self._average_log_likelihood(
+            data,
+            temporal,
+            spatial,
+            temporal["embeddings"],
+            self._predicted_magnitudes(temporal, spatial),
+        )
+
+    def log_likelihood_controls(
+        self, data, temporal: Dict, spatial: Dict
+    ) -> Dict[str, float]:
+        """Log-likelihood with zero deviations (:code:`"log_likelihood_group"`)
+        and with the embeddings and magnitudes shuffled between the test
+        sessions (:code:`"log_likelihood_shuffled"`, if there is more than
+        one test session)."""
+        embeddings = temporal["embeddings"]
+        controls = {
+            "log_likelihood_group": self._average_log_likelihood(
+                data, temporal, spatial, embeddings, None
+            )
+        }
+        n_sessions = embeddings.shape[0]
+        if n_sessions > 1:
+            # Each session gets the embedding and magnitudes of another
+            order = np.roll(np.arange(n_sessions), 1)
+            magnitudes = {
+                key: value[order]
+                for key, value in self._predicted_magnitudes(temporal, spatial).items()
+            }
+            controls["log_likelihood_shuffled"] = self._average_log_likelihood(
+                data, temporal, spatial, embeddings[order], magnitudes
+            )
+        return controls
+
+    def temporal_files(self, temporal: Dict) -> Dict[str, object]:
+        return {
+            "alp.pkl": temporal[self._time_courses],
+            "embeddings.npy": temporal["embeddings"],
+        }
+
+
+class DIVEOps(HIVEOps):
+    """Operations for :py:mod:`DIVE <osl_dynamics.models.dive>`.
+
+    The parameters are treated as in :py:class:`HIVEOps`, with the mixing
+    coefficients (:code:`alpha`) in place of the state probabilities. The
+    inference network reads the data, so it is channel-specific too: step 3
+    trains the temporal model (inference and model RNNs) on channels X of
+    the test sessions with the observation model fixed, as
+    :py:class:`DyNeMoOps` does. Step 3 does not use an initialization method,
+    because it would overwrite the fixed group matrices.
+
+    Step 2 maximizes DIVE's loss with :code:`alpha` fixed: the mean and
+    covariance (or precision with :code:`mix_precisions=True`) at each time
+    point mix the session means and matrices.
+
+    Temporal parameters are a dict with the mixing coefficients
+    (:code:`"alpha"`), the session :code:`"embeddings"` and the deviation
+    :code:`"magnitudes"`. The controls are the same as for HIVE.
+
+    The default :code:`config_kwargs` and :code:`init_kwargs` are the
+    settings used to test bi-cross-validation of DIVE on simulated data.
+    :code:`embeddings_dim` defaults to 5.
+    """
+
+    name = "dive"
+    default_config_kwargs = {
+        "sequence_length": 200,
+        "inference_n_units": 128,
+        "inference_normalization": "layer",
+        "model_n_units": 128,
+        "model_normalization": "layer",
+        "learn_alpha_temperature": True,
+        "initial_alpha_temperature": 1.0,
+        "embeddings_dim": 5,
+        "spatial_embeddings_dim": 2,
+        "dev_n_layers": 5,
+        "dev_n_units": 32,
+        "dev_activation": "tanh",
+        "dev_normalization": "layer",
+        "dev_regularizer": "l1",
+        "dev_regularizer_factor": 0.01,
+        "batch_size": 32,
+        "learning_rate": 0.005,
+        "lr_decay": 0.1,
+        "n_epochs": 40,
+        "do_kl_annealing": True,
+        "kl_annealing_curve": "tanh",
+        "kl_annealing_sharpness": 10,
+        "n_kl_annealing_epochs": 20,
+    }
+    default_init_kwargs = {"n_init": 5, "n_epochs": 3, "take": 1}
+
+    _time_courses = "alpha"
+    _precisions_option = "mix_precisions"
+    _temporal_overrides = {}
+
+    def _model(self, n_channels: int, n_sessions: int, data=None, **overrides):
+        from osl_dynamics.models import dive
+
+        config = dive.Config(
+            **dict(
+                self.config_kwargs,
+                n_channels=n_channels,
+                n_sessions=n_sessions,
+                **overrides,
+            )
+        )
+        model = dive.Model(config)
+        if data is not None:
+            model.set_regularizers(data)
+        return model
+
+    def _initialize(self, model, data) -> None:
+        model.random_subset_initialization(data, **self.init_kwargs)
+
+    def _fixed_time_course_loss(self, model):
+        """Sub-model and loss for training the observation model with fixed
+        mixing coefficients.
+
+        This is DIVE's loss with the inference network replaced by the
+        fixed mixing coefficients.
+        """
+        import tensorflow as tf
+        import tensorflow_probability as tfp
+
+        from osl_dynamics.inference.layers import precision_log_prob
+
+        keras_model = model.model
+        kl_layers = [f"{param}_dev_mag_kl_loss" for param in self._params(model)]
+        sub_model = tf.keras.Model(
+            inputs=keras_model.inputs,
+            outputs=[
+                keras_model.get_layer(name).output
+                for name in ["session_means", "session_covs", *kl_layers]
+            ],
+        )
+        precisions = self.precisions
+
+        def loss(outputs, x, alpha):
+            mu, D, *kl_losses = outputs
+            m = tf.einsum("btk,bkm->btm", alpha, mu)
+            C = tf.einsum("btk,bkij->btij", alpha, D)
+            if precisions:
+                ll = precision_log_prob(x, m, C)
+            else:
+                mvn = tfp.distributions.MultivariateNormalTriL(
+                    loc=m,
+                    scale_tril=tf.linalg.cholesky(C),
+                    allow_nan_stats=False,
+                )
+                ll = mvn.log_prob(x)
+            return -tf.reduce_mean(ll) + sum(tf.reduce_sum(kl) for kl in kl_losses)
+
+        return sub_model, loss
+
+    def session_log_likelihoods(
+        self,
+        data,
+        time_courses: List[np.ndarray],
+        embeddings: np.ndarray,
+        spatial: Dict,
+        magnitudes: Optional[Dict[str, np.ndarray]],
+    ) -> np.ndarray:
+        """Log-likelihood of each session given its mixing coefficients,
+        embedding and magnitudes (see :py:meth:`session_matrices`).
+
+        Returns
+        -------
+        log_likelihoods : np.ndarray
+            Log-likelihood summed over time points and the number of time
+            points for each session. Shape is (n_sessions, 2).
+        """
+        alpha = _as_list(time_courses)
+        ts = time_series(data)
+        _check_n_sessions(ts, alpha)
+
+        means, matrices = self.session_matrices(
+            data.n_channels, spatial, embeddings, magnitudes
+        )
+        log_likelihood = (
+            batched_precision_log_likelihood
+            if self.precisions
+            else batched_gaussian_log_likelihood
+        )
+        log_likelihoods = []
+        for x, a, mu, D in zip(ts, alpha, means, matrices):
+            x = np.asarray(x[: a.shape[0]], dtype=np.float64)
+            a = np.asarray(a, dtype=np.float64)
+            total = 0.0
+            for chunk in _chunks(a.shape[0], x.shape[1]):
+                m = a[chunk] @ mu
+                M = np.einsum("tk,kij->tij", a[chunk], D)
+                total += np.sum(log_likelihood(x[chunk], m, M))
+            log_likelihoods.append([total, a.shape[0]])
+        return np.array(log_likelihoods)
+
+
 def _means_layer(n: int, m: int, learn: bool, initial_value: np.ndarray):
     from osl_dynamics.inference.layers import VectorsLayer
 
@@ -1311,6 +2096,8 @@ _MODEL_OPS = {
     "dynemo": DyNeMoOps,
     "mdynemo": MDyNeMoOps,
     "swc": SWCOps,
+    "hive": HIVEOps,
+    "dive": DIVEOps,
 }
 
 
@@ -1320,6 +2107,7 @@ def get_model_ops(
     init_kwargs: Optional[dict] = None,
     fit_kwargs: Optional[dict] = None,
     spatial_method: Optional[str] = None,
+    best_of: int = 1,
 ) -> ModelOps:
     """Get the operations for a model.
 
@@ -1327,7 +2115,7 @@ def get_model_ops(
     ----------
     model : str
         Model name. Options are :code:`"hmm"`, :code:`"dynemo"`,
-        :code:`"mdynemo"` and :code:`"swc"`.
+        :code:`"mdynemo"`, :code:`"swc"`, :code:`"hive"` and :code:`"dive"`.
     config_kwargs : dict
         Keyword arguments for the model's :code:`Config`.
     init_kwargs : dict, optional
@@ -1336,6 +2124,8 @@ def get_model_ops(
         Keyword arguments for the model's :code:`fit` method.
     spatial_method : str, optional
         How to estimate the spatial parameters given the time courses.
+    best_of : int, optional
+        Number of times to train the model in :code:`fit`.
 
     Returns
     -------
@@ -1347,4 +2137,6 @@ def get_model_ops(
         raise NotImplementedError(
             f"{model} is not supported. Options are {', '.join(_MODEL_OPS)}."
         )
-    return _MODEL_OPS[model](config_kwargs, init_kwargs, fit_kwargs, spatial_method)
+    return _MODEL_OPS[model](
+        config_kwargs, init_kwargs, fit_kwargs, spatial_method, best_of
+    )

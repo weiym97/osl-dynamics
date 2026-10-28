@@ -7,9 +7,11 @@ from scipy.stats import multivariate_normal
 
 import reference_wip as ref
 from osl_dynamics.data import Data
-from osl_dynamics.evaluate import BCV
+from osl_dynamics.evaluate import BCV, NCV
 from osl_dynamics.evaluate import cross_validation
 from osl_dynamics.evaluate.model_ops import (
+    ModelOps,
+    _predict_magnitudes,
     fit_static,
     get_model_ops,
     static_log_likelihood,
@@ -498,3 +500,183 @@ def test_rare_states_get_an_identity_covariance(learn_means):
     for state in [0, 2]:
         npt.assert_allclose(result["covs"][state], covs[state], rtol=1e-10)
         npt.assert_allclose(result["means"][state], means[state], rtol=1e-10)
+
+
+# --------------------------------------------------------------------------
+# HIVE and DIVE
+# --------------------------------------------------------------------------
+
+
+def session_model_config(model, n_states, **config_kwargs):
+    """A small HIVE or DIVE config."""
+    return {
+        "n_states" if model == "hive" else "n_modes": n_states,
+        "learn_means": False,
+        "learn_covariances": True,
+        "embeddings_dim": 2,
+        "spatial_embeddings_dim": 2,
+        "dev_n_layers": 1,
+        "dev_n_units": 8,
+        "sequence_length": 50,
+        "batch_size": 16,
+        "learning_rate": 0.01,
+        "n_epochs": 2,
+        "n_kl_annealing_epochs": 1,
+        **config_kwargs,
+    }
+
+
+def untrained_session_model(model, precisions, n_channels=4, n_sessions=3):
+    precisions_option = "embed_precisions" if model == "hive" else "mix_precisions"
+    ops = get_model_ops(
+        model,
+        session_model_config(
+            model, 2, learn_means=True, **{precisions_option: precisions}
+        ),
+    )
+    return ops, ops._model(n_channels, n_sessions)
+
+
+def test_predict_magnitudes_regresses_Y_on_X():
+    train_X = {"covs_magnitude": np.array([[1.0, 0.0], [2.0, 1.0], [3.0, 2.0]])}
+    train_Y = {
+        "covs_magnitude": 2 * train_X["covs_magnitude"] + [1.0, -3.0],
+        "covs_alpha": np.ones((3, 2)),
+    }
+    test_X = {"covs_magnitude": np.array([[4.0, 0.5], [0.0, 3.0]])}
+    predicted = _predict_magnitudes(train_X, train_Y, test_X)
+    assert list(predicted) == ["covs_magnitude"]
+    # Negative predictions are set to zero
+    npt.assert_allclose(predicted["covs_magnitude"], [[9.0, 0.0], [1.0, 3.0]])
+
+
+@pytest.mark.parametrize("model", ["hive", "dive"])
+@pytest.mark.parametrize("precisions", [False, True])
+def test_session_matrices_match_the_model(model, precisions):
+    from osl_dynamics.models import obs_mod
+
+    ops, keras_model = untrained_session_model(model, precisions)
+    spatial = ops.get_spatial(keras_model)
+    embeddings = keras_model.get_layer(
+        "session_id_embeddings"
+    ).embedding_layer.embeddings.numpy()
+    expected = obs_mod.get_session_means_covariances(
+        keras_model.model, True, True, keras_model.config.session_labels
+    )
+    result = ops.session_matrices(4, spatial, embeddings, spatial["magnitudes"])
+    npt.assert_allclose(result[0], expected[0], rtol=1e-5, atol=1e-6)
+    npt.assert_allclose(result[1], expected[1], rtol=1e-5, atol=1e-6)
+
+    # Without deviations, every session has the group parameters
+    means, matrices = ops.session_matrices(4, spatial, embeddings, None)
+    group_matrices = np.linalg.inv(spatial["covs"]) if precisions else spatial["covs"]
+    for s in range(3):
+        npt.assert_allclose(means[s], spatial["means"], rtol=1e-5, atol=1e-6)
+        npt.assert_allclose(matrices[s], group_matrices, rtol=1e-4, atol=1e-5)
+
+
+@pytest.mark.parametrize("model", ["hive", "dive"])
+@pytest.mark.parametrize("precisions", [False, True])
+def test_no_deviations_match_the_hmm_and_dynemo(model, precisions):
+    """Without deviations, the log-likelihood is that of the group model."""
+    rng = np.random.default_rng(10)
+    ops, keras_model = untrained_session_model(model, precisions)
+    spatial = ops.get_spatial(keras_model)
+    x = f32(rng.normal(size=(3, 200, 4)))
+    tc = list(rng.dirichlet(np.ones(2), size=(3, 200)))
+    result = ops.session_log_likelihoods(Data(x), tc, np.zeros((3, 2)), spatial, None)
+    result = result[:, 0].sum() / result[:, 1].sum()
+
+    if model == "hive":
+        group_ops = get_model_ops("hmm", {"n_states": 2, "learn_means": True})
+    else:
+        group_ops = get_model_ops(
+            "dynemo", {"n_modes": 2, "learn_means": True, "mix_precisions": precisions}
+        )
+    expected = group_ops.log_likelihood(
+        Data(x), tc, {"means": spatial["means"], "covs": spatial["covs"]}
+    )
+    npt.assert_allclose(result, expected, rtol=1e-4)
+
+
+def test_best_of_keeps_the_run_with_the_lowest_score():
+    class FakeModel:
+        def __init__(self, run):
+            self.run = run
+
+        def free_energy(self, data):
+            return [3.0, 1.0, 2.0][self.run]
+
+    class FakeOps(ModelOps):
+        name = "fake"
+        spatial_methods = ("mle",)
+        default_spatial_method = "mle"
+        runs = 0
+
+        def train(self, data, spatial=None):
+            self.runs += 1
+            return FakeModel(self.runs - 1)
+
+        def get_spatial(self, model):
+            return {"run": model.run}
+
+        def get_temporal(self, model, data):
+            return [model.run]
+
+    ops = FakeOps({"n_states": 2}, best_of=3)
+    spatial, temporal = ops.fit(None)
+    assert ops.runs == 3
+    assert spatial == {"run": 1}
+    assert temporal == [1]
+
+    with pytest.raises(ValueError):
+        FakeOps({"n_states": 2}, best_of=0)
+
+
+@pytest.mark.parametrize("model", ["hive", "dive"])
+def test_ncv_is_not_supported_for_session_models(model):
+    with pytest.raises(NotImplementedError):
+        NCV(model, session_model_config(model, 2))
+
+
+@pytest.mark.parametrize(
+    "model, n_states, precisions",
+    [("hive", 1, False), ("dive", 2, True)],
+)
+def test_session_model_bcv(model, n_states, precisions, monkeypatch, tmp_path):
+    """HIVE and DIVE run the four steps (even with one state) and save the
+    controls."""
+    import json
+
+    def no_static(*args, **kwargs):
+        raise AssertionError("HIVE and DIVE are not static models.")
+
+    monkeypatch.setattr(cross_validation, "fit_static", no_static)
+
+    _, data = simulated_hmm_data()
+    fold = {
+        "row_train": [0, 1, 2, 3, 4, 5],
+        "row_test": [6, 7],
+        "column_X": [0, 2, 4],
+        "column_Y": [1, 3, 5],
+    }
+    precisions_option = "embed_precisions" if model == "hive" else "mix_precisions"
+    bcv = BCV(
+        model,
+        session_model_config(model, n_states, **{precisions_option: precisions}),
+        init_kwargs={"n_init": 1, "n_epochs": 1},
+    )
+    log_likelihood = bcv.validate(data, fold, output_dir=str(tmp_path))
+
+    with open(tmp_path / "Y_test" / "metrics.json") as file:
+        metrics = json.load(file)
+    assert np.isfinite(log_likelihood)
+    assert metrics["log_likelihood"] == log_likelihood
+    assert set(metrics) == {
+        "log_likelihood",
+        "log_likelihood_group",
+        "log_likelihood_shuffled",
+    }
+    assert np.isfinite(list(metrics.values())).all()
+    assert (tmp_path / "Y_train" / "inf_params" / "weights.pkl").exists()
+    assert (tmp_path / "Y_test" / "inf_params" / "embeddings.npy").exists()

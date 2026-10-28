@@ -55,6 +55,7 @@ def test_normalize_minimal_config():
             "init_kwargs": None,
             "fit_kwargs": None,
             "spatial_method": None,
+            "best_of": None,
             "config_kwargs": {},
         }
     }

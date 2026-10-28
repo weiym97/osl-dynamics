@@ -14,7 +14,9 @@ This subpackage helps choose a model and its number of states/modes with:
   the sessions and compare the states (lower is more reproducible). See
   :py:func:`~osl_dynamics.evaluate.reproducibility.split_half`.
 
-The supported models are the HMM, DyNeMo, M-DyNeMo and SWC.
+The supported models are the HMM, DyNeMo, M-DyNeMo, SWC, HIVE and DIVE.
+HIVE and DIVE support bi-cross-validation, repeated training and split-half
+reproducibility (of the group covariances), but not naive cross-validation.
 
 Command line usage
 ------------------

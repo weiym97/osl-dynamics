@@ -46,13 +46,15 @@ class BCV:
 
     Models with one state/mode are a static model: a multivariate normal is
     fitted to the training sessions and channels Y and evaluated on the test
-    sessions and channels Y.
+    sessions and channels Y. HIVE and DIVE are not static with one state/mode
+    (each session has its own covariance), so they always run the four steps.
 
     Parameters
     ----------
     model : str
         Model to cross-validate. Options are :code:`"hmm"`,
-        :code:`"dynemo"`, :code:`"mdynemo"` and :code:`"swc"`.
+        :code:`"dynemo"`, :code:`"mdynemo"`, :code:`"swc"`, :code:`"hive"`
+        and :code:`"dive"`.
     config_kwargs : dict
         Keyword arguments for the model's :code:`Config`, e.g.
         :code:`n_states` (or :code:`n_modes`), :code:`learn_means` and
@@ -67,6 +69,9 @@ class BCV:
         :code:`"sample"` for the HMM and :code:`"mle"` for DyNeMo.
     save_temporal : bool, optional
         Should we save the time courses? They can be large.
+    best_of : int, optional
+        Number of times to train the model in step 1. The run with the
+        lowest free energy on the training data is kept.
 
     Examples
     --------
@@ -101,9 +106,10 @@ class BCV:
         fit_kwargs: Optional[dict] = None,
         spatial_method: Optional[str] = None,
         save_temporal: bool = True,
+        best_of: int = 1,
     ) -> None:
         self.ops = get_model_ops(
-            model, config_kwargs, init_kwargs, fit_kwargs, spatial_method
+            model, config_kwargs, init_kwargs, fit_kwargs, spatial_method, best_of
         )
         self.save_temporal = save_temporal
 
@@ -134,6 +140,8 @@ class BCV:
         -------
         log_likelihood : float
             Bi-cross-validated log-likelihood averaged over time points.
+            :code:`metrics.json` also contains the log-likelihoods of the
+            model's controls (see :code:`log_likelihood_controls`).
         """
         fold = load_fold(fold, n_sessions=data.n_sessions, n_channels=data.n_channels)
         row_train, row_test = fold["row_train"], fold["row_test"]
@@ -142,7 +150,8 @@ class BCV:
         save_temporal = self.save_temporal if save_temporal is None else save_temporal
         dirs = _step_dirs(output_dir)
 
-        if self.ops.n_states == 1:
+        controls = {}
+        if self.ops.is_static:
             _logger.info("Static model: Y_train")
             with _subset(data, row_train, column_Y, output_dir) as Y_train:
                 spatial_Y = fit_static(Y_train, self.ops.learn_means)
@@ -177,11 +186,17 @@ class BCV:
                 log_likelihood = self.ops.log_likelihood(
                     Y_test, temporal_test, spatial_Y
                 )
+                controls = self.ops.log_likelihood_controls(
+                    Y_test, temporal_test, spatial_Y
+                )
 
         _logger.info(f"Bi-cross-validated log-likelihood: {log_likelihood}")
+        for name, value in controls.items():
+            _logger.info(f"Control {name}: {value}")
         if output_dir is not None:
             _save_json(
-                {"log_likelihood": log_likelihood}, f"{dirs['Y_test']}/metrics.json"
+                {"log_likelihood": log_likelihood, **controls},
+                f"{dirs['Y_test']}/metrics.json",
             )
         return log_likelihood
 
@@ -251,7 +266,9 @@ class NCV:
     ----------
     model : str
         Model to cross-validate. Options are :code:`"hmm"`,
-        :code:`"dynemo"`, :code:`"mdynemo"` and :code:`"swc"`.
+        :code:`"dynemo"`, :code:`"mdynemo"` and :code:`"swc"`. HIVE and
+        DIVE are not supported: they need the test sessions' embeddings,
+        which could only be learnt from the test sessions themselves.
     config_kwargs : dict
         Keyword arguments for the model's :code:`Config`.
     init_kwargs : dict, optional
@@ -271,6 +288,10 @@ class NCV:
         save_model: bool = False,
     ) -> None:
         self.ops = get_model_ops(model, config_kwargs, init_kwargs, fit_kwargs)
+        if self.ops.session_specific:
+            raise NotImplementedError(
+                f"Naive cross-validation is not supported for {self.ops.name}."
+            )
         self.save_model = save_model
 
     def validate(
@@ -298,7 +319,7 @@ class NCV:
             Free energy (or log-likelihood for SWC) of the test sessions.
             :code:`None` for a model with one state/mode, which is skipped.
         """
-        if self.ops.n_states == 1:
+        if self.ops.is_static:
             _logger.info("Naive cross-validation is skipped for one state/mode.")
             return None
 
@@ -387,7 +408,8 @@ def _save_spatial(spatial: Dict[str, np.ndarray], step_dir: Optional[str], name:
         return
     os.makedirs(f"{step_dir}/{name}", exist_ok=True)
     for key, value in spatial.items():
-        save(f"{step_dir}/{name}/{key}.npy", value)
+        ext = "pkl" if isinstance(value, dict) else "npy"
+        save(f"{step_dir}/{name}/{key}.{ext}", value)
 
 
 def _save_temporal(ops, temporal, step_dir: Optional[str]):

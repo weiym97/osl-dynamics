@@ -66,7 +66,13 @@ DEFAULT_MODE_SETTINGS = {
     },
 }
 
-_MODEL_SPEC_KEYS = ["config_kwargs", "init_kwargs", "fit_kwargs", "spatial_method"]
+_MODEL_SPEC_KEYS = [
+    "config_kwargs",
+    "init_kwargs",
+    "fit_kwargs",
+    "spatial_method",
+    "best_of",
+]
 
 # Metrics to plot for each mode: column -> (axis label, which value is best)
 _SUMMARY_PLOTS = {
@@ -101,13 +107,16 @@ def normalize_config(config: Union[str, dict], require_data: bool = True) -> dic
           :py:func:`osl_dynamics.config_api.wrappers.load_data`
           (:code:`inputs`, :code:`kwargs` and :code:`prepare`).
         - :code:`model` (required): a model name (:code:`"hmm"`,
-          :code:`"dynemo"`, :code:`"mdynemo"` or :code:`"swc"`), a list of
-          names, or a dict of names to settings. The settings can contain
-          :code:`config_kwargs`, :code:`init_kwargs`, :code:`fit_kwargs` and
-          :code:`spatial_method` (or :code:`infer_spatial`). Other keys are
-          treated as :code:`config_kwargs`.
+          :code:`"dynemo"`, :code:`"mdynemo"`, :code:`"swc"`, :code:`"hive"`
+          or :code:`"dive"`), a list of names, or a dict of names to
+          settings. The settings can contain :code:`config_kwargs`,
+          :code:`init_kwargs`, :code:`fit_kwargs`, :code:`spatial_method` (or
+          :code:`infer_spatial`) and :code:`best_of` (number of training runs
+          in BCV step 1). Other keys are treated as :code:`config_kwargs`.
+          HIVE and DIVE only support :code:`"bcv"`, :code:`"repeat"` and
+          :code:`"split"` (on the group covariances).
         - :code:`n_states` (required): number of states/modes, or a list.
-          This is :code:`n_modes` for DyNeMo and M-DyNeMo.
+          This is :code:`n_modes` for DyNeMo, M-DyNeMo and DIVE.
         - :code:`modes`: list of modes (:code:`"bcv"`, :code:`"ncv"`,
           :code:`"repeat"` and :code:`"split"`) or a dict of modes to
           settings. Defaults to :code:`["bcv"]`. :code:`mode` is also
@@ -373,9 +382,8 @@ def run_job(
     settings = config["modes"][mode]
     config_kwargs = dict(spec["config_kwargs"])
     config_kwargs.pop("n_channels", None)
-    config_kwargs["n_modes" if model in ["dynemo", "mdynemo"] else "n_states"] = (
-        n_states
-    )
+    n_states_key = "n_modes" if model in ["dynemo", "mdynemo", "dive"] else "n_states"
+    config_kwargs[n_states_key] = n_states
     kwargs = {
         "config_kwargs": config_kwargs,
         "init_kwargs": spec["init_kwargs"],
@@ -395,7 +403,12 @@ def run_job(
     fold = f"{config['save_dir']}/{mode}_partition/fold_indices_{i}.json"
     if mode == "bcv":
         n_temp_save = settings.get("n_temp_save")
-        BCV(model, spatial_method=spec["spatial_method"], **kwargs).validate(
+        BCV(
+            model,
+            spatial_method=spec["spatial_method"],
+            best_of=spec.get("best_of") or 1,
+            **kwargs,
+        ).validate(
             data,
             fold,
             job_dir,

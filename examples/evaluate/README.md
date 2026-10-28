@@ -8,7 +8,7 @@ These examples choose a model and its number of states/modes with `osl_dynamics.
 - **Repeated training** (`repeat`): train on all the data several times.
 - **Split-half reproducibility** (`split`): train on two halves of the sessions and compare the states. Lower is more reproducible.
 
-The supported models are the HMM (`hmm`), DyNeMo (`dynemo`), M-DyNeMo (`mdynemo`) and Sliding Window Correlation (`swc`).
+The supported models are the HMM (`hmm`), DyNeMo (`dynemo`), M-DyNeMo (`mdynemo`), Sliding Window Correlation (`swc`), HIVE (`hive`) and DIVE (`dive`). HIVE and DIVE do not support naive cross-validation.
 
 ### Files
 
