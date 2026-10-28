@@ -152,6 +152,7 @@ try:
         dive,
         dyneste,
         hmm_dirichlet,
+        swc,
     )
 except ImportError as error:
     _package = _missing_tensorflow_package(error)
@@ -170,6 +171,7 @@ models = {
     "HIVE": hive.Model,
     "DIVE": dive.Model,
     "DyNeStE": dyneste.Model,
+    "SWC": swc.Model,
 }
 
 
