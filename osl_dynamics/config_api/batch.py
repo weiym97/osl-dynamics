@@ -765,6 +765,57 @@ class BatchAnalysis:
                      filename=os.path.join(self.analysis_path, f'{model}_naive_free_energy.svg')
                      )
 
+    def plot_naive_evidence(self, demean_index=0, inset_start_index=None):
+        '''
+        Plot the HMM naive cross-validated held-out log evidence (ncv_evidence.json), both raw and demeaned.
+        demean_index and inset_start_index index n_states_list after n_states = 1 is removed,
+        so 0 is n_states = 2. Each fold is demeaned against its own value at the reference n_states.
+        The demeaned plot is saved as hmm_ncv_evidence_demean_K{reference n_states}.svg/.pdf.
+        '''
+        n_states_list = self.config_root['n_states'].copy()
+        # Remove the case where n_states = 1 because no dFC model
+        if 1 in n_states_list:
+            n_states_list.remove(1)
+
+        evidence = {str(int(num)): [] for num in n_states_list}
+        for i in range(len(self.config_list)):
+            # Only the HMM has a held-out evidence
+            model, n_states, mode = self.config_list.iloc[i]
+            if model != 'hmm' or 'ncv' not in mode or int(n_states) == 1:
+                continue
+            save_dir = self.indexparser.parse(i)['save_dir']
+            try:
+                with open(f'{save_dir}/ncv_evidence.json', 'r') as file:
+                    evidence[str(int(n_states))].append(float(json.load(file)[0]))
+            except Exception:
+                print(f'save_dir {save_dir} fails!')
+                # Keep the folds aligned across n_states so demeaning stays paired
+                evidence[str(int(n_states))].append(np.nan)
+
+        temp_keys = list(evidence.keys())
+        temp_values = [evidence[key] for key in temp_keys]
+        for ext in ['svg', 'pdf']:
+            plot_box(data=temp_values,
+                     labels=temp_keys,
+                     mark_best=False,
+                     demean=False,
+                     x_label='N_states',
+                     y_label='Held-out log evidence',
+                     title='Naive cross validation Analysis',
+                     filename=os.path.join(self.analysis_path, f'hmm_ncv_evidence.{ext}')
+                     )
+            plot_box(data=temp_values,
+                     labels=temp_keys,
+                     mark_best=False,
+                     demean=True,
+                     demean_index=demean_index,
+                     inset_start_index=inset_start_index,
+                     x_label='N_states',
+                     y_label='Held-out log evidence',
+                     title='Naive cross validation Analysis',
+                     filename=os.path.join(self.analysis_path, f'hmm_ncv_evidence_demean_K{temp_keys[demean_index]}.{ext}')
+                     )
+
     def plot_split_half_reproducibility(self):
         models = self.config_root['model'].keys()
         n_states_list = self.config_root['n_states'].copy()
