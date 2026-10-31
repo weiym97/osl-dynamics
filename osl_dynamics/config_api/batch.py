@@ -723,7 +723,12 @@ class BatchAnalysis:
                          title='Training loss',
                          filename=os.path.join(self.analysis_path, f'{model}_{metric}.pdf')
                          )
-    def plot_naive_cv(self):
+    def plot_naive_cv(self, demean_index=0, inset_start_index=None):
+        '''
+        Plot the naive cross-validated free energy (log-likelihood for SWC), both raw and demeaned.
+        demean_index and inset_start_index index n_states_list after n_states = 1 is removed,
+        so 0 is n_states = 2. The demeaned plot is saved as *_demean_K{reference n_states}.svg.
+        '''
         models = self.config_root['model'].keys()
         n_states_list = self.config_root['n_states'].copy()
         # Remove the case where n_states = 1 because no dFC model
@@ -750,6 +755,8 @@ class BatchAnalysis:
                             free_energy[model][str(int(n_states))].append(float(json.load(file)[0]))
                 except Exception:
                     print(f'save_dir {save_dir} fails!')
+                    # Keep the folds aligned across n_states so demeaning stays paired
+                    free_energy[model][str(int(n_states))].append(np.nan)
 
         for model in models:
             temp_keys = list(free_energy[model].keys())
@@ -763,6 +770,17 @@ class BatchAnalysis:
                      y_label='Free energy',
                      title= 'Naive cross validation Analysis',
                      filename=os.path.join(self.analysis_path, f'{model}_naive_free_energy.svg')
+                     )
+            plot_box(data=temp_values,
+                     labels=temp_keys,
+                     mark_best=False,
+                     demean=True,
+                     demean_index=demean_index,
+                     inset_start_index=inset_start_index,
+                     x_label=x_label[model],
+                     y_label='Free energy',
+                     title= 'Naive cross validation Analysis',
+                     filename=os.path.join(self.analysis_path, f'{model}_naive_free_energy_demean_K{temp_keys[demean_index]}.svg')
                      )
 
     def plot_naive_evidence(self, demean_index=0, inset_start_index=None):
