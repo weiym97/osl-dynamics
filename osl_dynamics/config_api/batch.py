@@ -1456,6 +1456,111 @@ class BatchAnalysis:
                    image_name=f'{plot_dir}/brain_map/fc_sum_of_degree',
                    input_is_cifti=True)
             '''
+
+    def bcv_state_matching(self, model='hmm', n_state=6, bcv_index=1, repeat_index=1):
+        '''
+        Match the states/modes learnt in one bi-cross-validation fold to the full-data fit (repeat_{repeat_index}).
+        The fold's states are compared with the full-data states on the same channels and subjects:
+        Y_train covariances (column_Y), X_train dual-estimated covariances (column_X),
+        X_train time courses (row_train) and Y_test time courses (row_test).
+        State labels are shared by all four within a fold, so the Hungarian matching is done once,
+        on the Riemannian distance of the Y_train covariances, and applied to every comparison.
+        The matching on the training time courses is also reported, to check both give the same pairing.
+        Results are saved in analysis/state_matching/{model}_state_{n_state}_bcv_{bcv_index}_repeat_{repeat_index}/
+        '''
+        bcv_dir = f'{self.config_path}/{model}_state_{n_state}/bcv_{bcv_index}/'
+        full_dir = f'{self.config_path}/{model}_state_{n_state}/repeat_{repeat_index}/'
+        plot_dir = f'{self.analysis_path}/state_matching/{model}_state_{n_state}_bcv_{bcv_index}_repeat_{repeat_index}/'
+        if not os.path.exists(plot_dir):
+            os.makedirs(plot_dir)
+
+        with open(f'{self.config_path}/bcv_partition/fold_indices_{bcv_index}.json', 'r') as file:
+            indices = json.load(file)
+
+        full_covs = np.load(f'{full_dir}/inf_params/covs.npy')
+        with open(f'{full_dir}/inf_params/alp.pkl', 'rb') as file:
+            full_alpha = pickle.load(file)
+
+        # Rows are full-data states, columns are the fold's states
+        matrices = {}
+
+        # Spatial: compare with the full-data covariances restricted to the same channels
+        split_covs = {'Y': np.load(f'{bcv_dir}/Y_train/inf_params/covs.npy'),
+                      'X': np.load(f'{bcv_dir}/X_train/dual_estimates/covs.npy')}
+        for block in ['Y', 'X']:
+            column = indices[f'column_{block}']
+            full_block = full_covs[:, column][:, :, column]
+            matrices[f'riem_{block}'] = twopair_riemannian_distance(full_block, split_covs[block])
+            # Correlation of the off-diagonal FC entries, which ignores the scale of the covariances
+            iu = np.triu_indices(len(column), k=1)
+            full_fc = cov2corr(full_block)[:, iu[0], iu[1]]
+            split_fc = cov2corr(split_covs[block])[:, iu[0], iu[1]]
+            matrices[f'fc_corr_{block}'] = np.corrcoef(full_fc, split_fc)[:n_state, n_state:]
+
+        # Temporal: compare with the full-data time courses of the same subjects
+        split_alpha, full_alpha_rows = {}, {}
+        for name, alpha_path in [('train', f'{bcv_dir}/X_train/inf_params/alp.pkl'),
+                                 ('test', f'{bcv_dir}/Y_test/inf_params/alp.pkl')]:
+            with open(alpha_path, 'rb') as file:
+                split_alpha[name] = pickle.load(file)
+            # Fold indices are sorted, matching the order of keep_list in training
+            full_alpha_rows[name] = [full_alpha[i] for i in indices[f'row_{name}']]
+            if len(split_alpha[name]) != len(full_alpha_rows[name]) or \
+                    any(a.shape != b.shape for a, b in zip(split_alpha[name], full_alpha_rows[name])):
+                raise ValueError(f'{alpha_path} does not line up with the full-data time courses of row_{name}!')
+            matrices[f'alpha_corr_{name}'] = alpha_correlation(full_alpha_rows[name], split_alpha[name],
+                                                               return_diagonal=False)
+
+        order, _ = hungarian_pair(matrices['riem_Y'], distance=True)
+        order_temporal, _ = hungarian_pair(matrices['alpha_corr_train'], distance=False)
+        perm = order['col']
+
+        metrics = {'full_state': [i + 1 for i in order['row']],
+                   'split_state': [j + 1 for j in perm],
+                   'split_state_temporal_matching': [j + 1 for j in order_temporal['col']],
+                   'matchings_agree': order_temporal['col'] == perm}
+        off_diagonal = ~np.eye(n_state, dtype=bool)
+        for key, matrix in matrices.items():
+            matrix_reorder = matrix[:, perm]
+            metrics[key] = np.diagonal(matrix_reorder).tolist()
+            metrics[f'{key}_mean'] = float(np.mean(np.diagonal(matrix_reorder)))
+            metrics[f'{key}_off_diagonal_mean'] = float(np.mean(matrix_reorder[off_diagonal]))
+
+            if key.startswith('riem'):
+                sns_kwargs = None
+            else:
+                sns_kwargs = {"vmin": -1, "vmax": 1, "center": 0}
+            plot_mode_pairing(matrix_reorder,
+                              {'row': order['row'], 'col': perm},
+                              x_label=f'bcv_{bcv_index} states',
+                              y_label=f'repeat_{repeat_index} states',
+                              title=key,
+                              sns_kwargs=sns_kwargs,
+                              annotate_diagonal=True,
+                              filename=f'{plot_dir}/{key}.svg')
+
+        if model == 'hmm':
+            # Fraction of time points assigned to the matched state
+            inverse_perm = np.argsort(perm)
+            for name in ['train', 'test']:
+                full_stc = np.concatenate(full_alpha_rows[name]).argmax(axis=1)
+                split_stc = inverse_perm[np.concatenate(split_alpha[name]).argmax(axis=1)]
+                metrics[f'state_agreement_{name}'] = float(np.mean(full_stc == split_stc))
+
+        np.savez(f'{plot_dir}/matrices.npz', **matrices)
+        with open(f'{plot_dir}/metrics.json', 'w') as file:
+            json.dump(metrics, file, indent=4)
+
+        print(f'{model}_state_{n_state} bcv_{bcv_index} vs repeat_{repeat_index}: '
+              f'matched split states {metrics["split_state"]}, '
+              f'temporal matching agrees: {metrics["matchings_agree"]}')
+        for key in matrices:
+            print(f'  {key}: matched mean {metrics[f"{key}_mean"]:.3f}, '
+                  f'off-diagonal mean {metrics[f"{key}_off_diagonal_mean"]:.3f}')
+        if model == 'hmm':
+            print(f'  state agreement: train {metrics["state_agreement_train"]:.3f}, '
+                  f'test {metrics["state_agreement_test"]:.3f}')
+        return metrics
             
 
         
