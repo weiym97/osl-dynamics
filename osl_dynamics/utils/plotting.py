@@ -2943,7 +2943,7 @@ def plot_box(
                 #    break
             # Get y-axis limits
             y_min, y_max = ax.get_ylim()
-            dagger_y = y_max * 0.96 if candidate_index == max_median_index else y_max
+            dagger_y = (y_max - 0.04 * (y_max - y_min)) if candidate_index == max_median_index else y_max
             ax.text(candidate_index + 1, dagger_y, '†', **text_kwargs)
 
             # If a simpler model was selected, add p-value slightly below the dagger
@@ -3045,7 +3045,7 @@ def plot_box(
         max_inset_position = len(data) - inset_start_index
         inset_xtick_positions = list(range(1, max_inset_position + 1, xtick_step))
         small_ax.set_xticks(inset_xtick_positions)
-        small_ax.set_xticklabels([str(pos + inset_start_index) for pos in inset_xtick_positions], rotation=45)
+        small_ax.set_xticklabels([str(labels[inset_start_index + pos - 1]) for pos in inset_xtick_positions], rotation=45)
 
         # Set y-axis range for the inset plot
         if inset_y_range is not None:
