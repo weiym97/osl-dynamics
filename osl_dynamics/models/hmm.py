@@ -1077,7 +1077,8 @@ class Model(ModelBase):
         Returns
         -------
         free_energy : float
-            Variational free energy.
+            Variational free energy per sequence, averaged over all sequences
+            in the dataset.
         """
         _logger.info("Getting free energy")
 
@@ -1086,6 +1087,7 @@ class Model(ModelBase):
 
         # Calculate variational free energy for each batch
         free_energy = []
+        n_sequences = 0
         if return_components:
             log_likelihoods, entropies, priors = [],[],[]
         for data in dataset:
@@ -1116,20 +1118,21 @@ class Model(ModelBase):
             entropy = self.get_posterior_entropy(gamma, xi)
             prior = self.get_posterior_expected_prior(gamma, xi)
 
-            # Average free energy for a sequence in this batch
-            seq_fe = (-log_likelihood + entropy - prior) / batch_size
-            free_energy.append(seq_fe)
+            # Free energy summed over the sequences in this batch
+            free_energy.append(-log_likelihood + entropy - prior)
+            n_sequences += batch_size
 
             if return_components:
-                log_likelihoods.append(log_likelihood / batch_size)
-                entropies.append(entropy / batch_size)
-                priors.append(prior / batch_size)
+                log_likelihoods.append(log_likelihood)
+                entropies.append(entropy)
+                priors.append(prior)
 
-        # Return average over batches
+        # Return average over sequences, so a smaller last batch is not over-weighted
         if return_components:
-            return  np.mean(free_energy),np.mean(log_likelihoods),np.mean(entropies),np.mean(priors)
+            return np.sum(free_energy) / n_sequences, np.sum(log_likelihoods) / n_sequences, \
+                np.sum(entropies) / n_sequences, np.sum(priors) / n_sequences
         else:
-            return np.mean(free_energy)
+            return np.sum(free_energy) / n_sequences
 
     def evidence(self, dataset):
         """Calculate the model evidence, :math:`p(x)`, of HMM on a dataset.
@@ -1142,7 +1145,8 @@ class Model(ModelBase):
         Returns
         -------
         evidence : float
-            Model evidence.
+            Model evidence. Log-evidence per sequence, averaged over all
+            sequences in the dataset.
         """
 
         # Helper functions
@@ -1221,6 +1225,7 @@ class Model(ModelBase):
         n_batches = dtf.get_n_batches(dataset)
 
         evidence = 0
+        n_sequences = 0
         for n, data in enumerate(dataset):
             x = data["data"]
             print("Batch {}/{}".format(n + 1, n_batches))
@@ -1243,9 +1248,11 @@ class Model(ModelBase):
                 # Update the batch evidence
                 batch_evidence += predictive_log_likelihood
                 pb_i.add(1)
-            evidence += np.mean(batch_evidence)
+            # Sum over sequences, so a smaller last batch is not over-weighted
+            evidence += np.sum(batch_evidence)
+            n_sequences += len(batch_evidence)
 
-        return evidence / n_batches
+        return evidence / n_sequences
 
     def get_alpha(self, dataset, concatenate=False, remove_edge_effects=False):
         """Get state probabilities.
