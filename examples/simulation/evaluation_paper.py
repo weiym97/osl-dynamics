@@ -92,15 +92,49 @@ def hmm_iid_mean_only(save_dir, n_subjects, n_samples, n_states, n_channels, tr)
         np.savetxt(f'{save_dir}{10001 + i}.txt', data[i])
         np.save(f'{save_dir}truth/{10001 + i}_state_time_course.npy', time_course[i])
 
-def hmm_iid_real(save_dir, n_subjects, n_samples, n_states, n_channels, tr):
+def real_ground_truth(save_dir, model_name, repeat, n_states=6, real_dir='./results_final/real/ICA_50'):
+    '''
+    Save a real-data fit (alphas and covariances) as a simulation ground truth.
+    Only repeat_1 of the ICA_50 fits saved alp.pkl, so here alp.pkl is inferred from the saved
+    model of another repeat, using the same data and preparation as in training.
+    '''
+    from osl_dynamics import models
+    from osl_dynamics.config_api.wrappers import load_data
+
+    repeat_dir = f'{real_dir}/{model_name}_state_{n_states}/repeat_{repeat}'
+    out_dir = f'{save_dir}/{model_name}_ICA_50_ground_truth_{repeat}/'
+    if not os.path.exists(out_dir):
+        os.makedirs(out_dir)
+
+    # Same load_data settings as prepared_config.yaml of the real-data runs
+    data = load_data(
+        inputs='./data/node_timeseries/3T_HCP1200_MSMAll_d50_ts2/',
+        kwargs={'load_memmaps': True, 'store_dir': f'{out_dir}tmp/'},
+        prepare={'select': {'timepoints': [0, 4800]}, 'standardize': {'session_length': 1200}},
+    )
+    model = models.load(f'{repeat_dir}/model')
+    alpha = model.get_alpha(data)
+    data.delete_dir()
+
+    print('Sanity check:')
+    print(f'Length of alpha:{len(alpha)}')
+    print(f'alpha[0] shape: {alpha[0].shape}')
+    print(f'every row sums to 1: {all(np.allclose(a.sum(axis=1), 1, atol=1e-4) for a in alpha)}')
+
+    with open(f'{out_dir}alp.pkl', 'wb') as f:
+        pickle.dump(alpha, f)
+    np.save(f'{out_dir}covs.npy', np.load(f'{repeat_dir}/inf_params/covs.npy'))
+
+def hmm_iid_real(save_dir, n_subjects, n_samples, n_states, n_channels, tr,
+                 ground_truth='hmm_ICA_50_ground_truth', name='hmm_iid_real'):
     import random
     from osl_dynamics.simulation.mvn import MVN
     from osl_dynamics.inference.modes import argmax_time_courses
 
     # Read in the ground-truth covariances and alphas.
-    with open(f"{save_dir}/hmm_ICA_50_ground_truth/alp.pkl", "rb") as f:  # "rb" means read binary mode
+    with open(f"{save_dir}/{ground_truth}/alp.pkl", "rb") as f:  # "rb" means read binary mode
         alpha_truth = pickle.load(f)
-    covariances = np.load(f'{save_dir}/hmm_ICA_50_ground_truth/covs.npy')
+    covariances = np.load(f'{save_dir}/{ground_truth}/covs.npy')
 
     # Step 1: Select 500 subjects for simulation
     random.seed(42)  # Optional: for reproducibility
@@ -113,7 +147,7 @@ def hmm_iid_real(save_dir, n_subjects, n_samples, n_states, n_channels, tr):
     # Step 3: argmax time courses
     alpha = argmax_time_courses(alpha_trimmed)
 
-    save_dir = f'{save_dir}/hmm_iid_real/'
+    save_dir = f'{save_dir}/{name}/'
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
     if not os.path.exists(f'{save_dir}truth/'):
@@ -122,7 +156,7 @@ def hmm_iid_real(save_dir, n_subjects, n_samples, n_states, n_channels, tr):
     print('Sanity check:')
     print(f'Length of alpha:{len(alpha)}')
     print(f'alpha[0] shape: {alpha[0].shape}')
-    print(f'alpha[0][:20]: {alpha[0][:20]}')
+    print(f'every row is one-hot: {all(np.all(a.sum(axis=1) == 1) for a in alpha)}')
 
     np.save(f'{save_dir}/truth/state_covariances.npy', covariances)
 
@@ -278,6 +312,31 @@ def hmm_hrf(save_dir, n_subjects, n_samples, n_states, n_channels, tr):
         np.savetxt(f'{save_dir}{10001 + i}.txt', apply_hrf(data[i], tr))
         np.save(f'{save_dir}truth/{10001 + i}_state_time_course.npy', time_course[i])
 
+def hmm_hrf_noise(save_dir, noise_ratios, n_subjects=500, seed=42):
+    '''
+    Add white measurement noise to the hmm_hrf BOLD data (noise ratio 0 is hmm_hrf itself).
+    For a noise-to-signal variance ratio r, channel c gets independent Gaussian noise with
+    variance r * (variance of channel c in hmm_hrf, pooled over subjects).
+    The same standard-normal draw is used for every r, so the datasets differ only in noise amplitude.
+    truth/ is a link to the hmm_hrf one (state time courses and covariances are unchanged).
+    '''
+    data = np.array([np.loadtxt(f'{save_dir}/hmm_hrf/{10001 + i}.txt') for i in range(n_subjects)])
+    signal_var = data.reshape(-1, data.shape[-1]).var(axis=0)
+
+    for r in noise_ratios:
+        noise_dir = f'{save_dir}/hmm_hrf_noise_{r}/'
+        if not os.path.exists(noise_dir):
+            os.makedirs(noise_dir)
+        if not os.path.exists(f'{noise_dir}truth'):
+            os.symlink('../hmm_hrf/truth', f'{noise_dir}truth')
+        noise_std = np.sqrt(float(r) * signal_var)
+        np.save(f'{noise_dir}noise_std.npy', noise_std)
+
+        for i in range(n_subjects):
+            z = np.random.default_rng([seed, i]).standard_normal(data[i].shape)
+            np.savetxt(f'{noise_dir}{10001 + i}.txt', data[i] + z * noise_std)
+        print(f'hmm_hrf_noise_{r}: wrote {n_subjects} subjects')
+
 
 def dynemo_iid(save_dir, n_subjects, n_samples, n_states, n_channels, tr):
     save_dir = f'{save_dir}/dynemo_iid/'
@@ -374,16 +433,17 @@ def dynemo_iid_final(save_dir, n_subjects, n_samples, n_states, n_channels, tr):
         np.savetxt(f'{save_dir}{10001 + i}.txt', data[i])
         np.save(f'{save_dir}truth/{10001 + i}_mode_time_course.npy', time_course[i])
 
-def dynemo_iid_real(save_dir, n_subjects, n_samples, n_states, n_channels, tr):
+def dynemo_iid_real(save_dir, n_subjects, n_samples, n_states, n_channels, tr,
+                    ground_truth='dynemo_ICA_50_ground_truth', name='dynemo_iid_real'):
     import random
     from osl_dynamics.simulation.mvn import MVN
 
-    with open(f"{save_dir}/dynemo_ICA_50_ground_truth/alp.pkl", "rb") as f:  # "rb" means read binary mode
+    with open(f"{save_dir}/{ground_truth}/alp.pkl", "rb") as f:  # "rb" means read binary mode
         alpha_truth = pickle.load(f)
-    covariances = np.load(f'{save_dir}/dynemo_ICA_50_ground_truth/covs.npy')
+    covariances = np.load(f'{save_dir}/{ground_truth}/covs.npy')
 
 
-    save_dir = f'{save_dir}/dynemo_iid_real/'
+    save_dir = f'{save_dir}/{name}/'
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
     if not os.path.exists(f'{save_dir}truth/'):
@@ -400,7 +460,7 @@ def dynemo_iid_real(save_dir, n_subjects, n_samples, n_states, n_channels, tr):
     print('Sanity check:')
     print(f'Length of alpha:{len(alpha)}')
     print(f'alpha[0] shape: {alpha[0].shape}')
-    print(f'alpha[0][:20]: {alpha[0][:20]}')
+    print(f'every row sums to 1: {all(np.allclose(a.sum(axis=1), 1, atol=1e-4) for a in alpha)}')
 
     np.save(f'{save_dir}truth/state_covariances.npy', covariances)
 
@@ -634,6 +694,10 @@ def main(simulation_list=None):
         hmm_iid(**config)
     if 'hmm_hrf' in simulation_list:
         hmm_hrf(**config)
+    # e.g. hmm_hrf_noise_0.25 hmm_hrf_noise_1.0 hmm_hrf_noise_4.0 (needs hmm_hrf to exist)
+    noise_ratios = [s[len('hmm_hrf_noise_'):] for s in simulation_list if s.startswith('hmm_hrf_noise_')]
+    if noise_ratios:
+        hmm_hrf_noise(save_dir, noise_ratios)
     if 'hmm_iid_mean_only' in simulation_list:
         hmm_iid_mean_only(**config)
     if 'hmm_iid_final' in simulation_list:
@@ -675,4 +739,20 @@ def main(simulation_list=None):
 
     if 'hmm_iid_meg_78' in simulation_list:
         hmm_iid_meg_78(save_dir)
+
+    # Repeats of hmm_iid_real / dynemo_iid_real, using the other real-data fits (repeat_2, repeat_3)
+    for repeat in [2, 3]:
+        if f'hmm_ICA_50_ground_truth_{repeat}' in simulation_list:
+            real_ground_truth(save_dir, 'hmm', repeat)
+        if f'dynemo_ICA_50_ground_truth_{repeat}' in simulation_list:
+            real_ground_truth(save_dir, 'dynemo', repeat)
+        if f'hmm_iid_real_{repeat}' in simulation_list:
+            hmm_iid_real(**config, ground_truth=f'hmm_ICA_50_ground_truth_{repeat}', name=f'hmm_iid_real_{repeat}')
+        if f'dynemo_iid_real_{repeat}' in simulation_list:
+            dynemo_iid_real(**config, ground_truth=f'dynemo_ICA_50_ground_truth_{repeat}', name=f'dynemo_iid_real_{repeat}')
+
+
+if __name__ == '__main__':
+    import sys
+    main(sys.argv[1:])
 
