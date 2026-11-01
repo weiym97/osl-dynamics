@@ -831,6 +831,102 @@ class Model(MarkovStateInferenceModelBase):
         last_xi_seqs    = np.concatenate(
             xi_batches, axis=0)                      # (N_total_seqs, seq_len-1, K, K)
 
+        return self._profumo_gammas_and_kls(
+            last_gamma_seqs, last_xi_seqs, session_lengths, session_n_seqs)
+
+    def infer_alpha(self, dataset, sigmas=None):
+        """E-step only: state probabilities under the current HMM.
+
+        Same windowing and emission log-likelihood (including the
+        second-order ``sigmas`` correction) as ``fit_and_get_alpha``, but a
+        single forward pass with no gradient step and no TPM update.  Used by
+        PROFUMO for subject-only VB updates, where the group HMM is held
+        fixed (stochastic/bigData batches, final per-subject pass).
+
+        Parameters
+        ----------
+        dataset : list of np.ndarray
+            Per-session data arrays, each shaped ``(T_i, n_channels)``.
+        sigmas : list of np.ndarray, optional
+            Per-session posterior covariance cubes, each shaped
+            ``(T_i, n_channels, n_channels)``.
+
+        Returns
+        -------
+        gammas : list of np.ndarray
+            Per-session state probabilities, each shaped ``(T_i, n_states)``.
+        gamma_kls : list of float
+            Per-session ``KL[q(z_{1:T}) || p(z_{1:T} | pi_0, TPM)]``.
+        """
+        seq_len    = self.config.sequence_length
+        n_channels = self.config.n_channels
+        n_states   = self.config.n_states
+
+        session_lengths = [x.shape[0] for x in dataset]
+        session_n_seqs  = [T // seq_len for T in session_lengths]
+        if sum(session_n_seqs) == 0:
+            return ([np.zeros((T, n_states), dtype=np.float32) for T in session_lengths],
+                    [0.0] * len(session_lengths))
+
+        x_all = np.concatenate([
+            x[:n * seq_len].reshape(n, seq_len, n_channels)
+            for x, n in zip(dataset, session_n_seqs)
+        ], axis=0).astype(np.float32)
+        sigma_all = None
+        if sigmas is not None:
+            sigma_all = np.concatenate([
+                s[:n * seq_len].reshape(n, seq_len, n_channels, n_channels)
+                for s, n in zip(sigmas, session_n_seqs)
+            ], axis=0).astype(np.float32)
+
+        if not hasattr(self, "_profumo_infer_step"):
+            _means_layer   = self.model.get_layer("means")
+            _covs_layer    = self.model.get_layer("covs")
+            _ll_layer      = self.model.get_layer("ll")
+            _hid_state_inf = self.model.get_layer("hid_state_inf")
+
+            @tf.function(reduce_retracing=True)
+            def _infer_step(x_batch):
+                mu = _means_layer(x_batch)
+                D  = _covs_layer(x_batch)
+                ll = _ll_layer([x_batch, mu, D])
+                return _hid_state_inf(ll)
+
+            @tf.function(reduce_retracing=True)
+            def _infer_step_sigma(x_batch, sigma_batch):
+                D  = _covs_layer(x_batch)
+                mu = _means_layer(x_batch)
+                ll = _ll_layer([x_batch, mu, D])
+                ll = ll - 0.5 * tf.einsum(
+                    "kmn,bsmn->bsk", tf.linalg.inv(D), sigma_batch)
+                return _hid_state_inf(ll)
+
+            self._profumo_infer_step       = _infer_step
+            self._profumo_infer_step_sigma = _infer_step_sigma
+
+        gamma_batches, xi_batches = [], []
+        batch_size = self.config.batch_size
+        for start in range(0, x_all.shape[0], batch_size):
+            x_batch = tf.constant(x_all[start:start + batch_size])
+            if sigma_all is None:
+                gamma_out, xi_out = self._profumo_infer_step(x_batch)
+            else:
+                gamma_out, xi_out = self._profumo_infer_step_sigma(
+                    x_batch, tf.constant(sigma_all[start:start + batch_size]))
+            gamma_batches.append(gamma_out.numpy())
+            xi_batches.append(xi_out.numpy())
+
+        return self._profumo_gammas_and_kls(
+            np.concatenate(gamma_batches, axis=0),
+            np.concatenate(xi_batches, axis=0),
+            session_lengths, session_n_seqs)
+
+    def _profumo_gammas_and_kls(self, last_gamma_seqs, last_xi_seqs,
+                                session_lengths, session_n_seqs):
+        """Reassemble windowed gamma/xi into per-session gammas and KLs."""
+        seq_len  = self.config.sequence_length
+        n_states = self.config.n_states
+
         # ------------------------------------------------------------------
         # 4. Reassemble per-session gamma arrays.
         #    Trailing remainder rows (T % seq_len) are padded by repeating
