@@ -312,6 +312,80 @@ def hmm_hrf(save_dir, n_subjects, n_samples, n_states, n_channels, tr):
         np.savetxt(f'{save_dir}{10001 + i}.txt', apply_hrf(data[i], tr))
         np.save(f'{save_dir}truth/{10001 + i}_state_time_course.npy', time_course[i])
 
+def ar1_filter(x, phi):
+    '''
+    y_t = phi * y_{t-1} + sqrt(1 - phi^2) * x_t along the time axis (second last), started at y_0 = x_0.
+    For white x this is a stationary AR(1) process with the same (co)variance as x and lag-1 autocorrelation phi.
+    phi = 0 returns x unchanged.
+    '''
+    y = np.empty_like(x)
+    y[..., 0, :] = x[..., 0, :]
+    for t in range(1, x.shape[-2]):
+        y[..., t, :] = phi * y[..., t - 1, :] + np.sqrt(1 - phi ** 2) * x[..., t, :]
+    return y
+
+def hmm_ar1(save_dir, n_subjects, n_samples, n_states, n_channels, tr, ar_coefficients=(), noise_ratios=(),
+            noise_ar_coefficient=0.5, seed=42):
+    '''
+    Two AR(1) variants of hmm_iid, without HRF. Both use x from the hmm_iid generator (fixed seed),
+    so they share the same states, covariances and white state signal x:
+    - hmm_ar1_<phi>: AR(1) dynamics within states, y_t = phi * y_{t-1} + sqrt(1 - phi^2) * x_t,
+      i.e. A_s = phi * I and innovation covariance (1 - phi^2) * Sigma_s. Within a dwell, state s keeps
+      covariance Sigma_s and the lag-1 autocorrelation is phi. The filter restarts at each subject.
+    - hmm_ar1noise_<r>: x plus AR(1) measurement noise (coefficient noise_ar_coefficient), independent across
+      channels and of the states, with variance r * (variance of the channel in x, pooled over subjects).
+      The same noise draw is used for every r, so these datasets differ only in noise amplitude.
+    truth/ is written for the first dataset and linked from the others.
+    '''
+    sim = simulation.HMM_MVN(
+        n_samples=n_samples * n_subjects,
+        n_states=n_states,
+        n_channels=n_channels,
+        trans_prob='uniform',
+        stay_prob=0.9,
+        means='zero',
+        covariances='random',
+        random_seed=seed
+    )
+    data = sim.time_series.reshape(n_subjects, -1, n_channels).astype(np.float64)
+    time_course = sim.state_time_course.reshape(n_subjects, -1, n_states)
+
+    names = [f'hmm_ar1_{phi}' for phi in ar_coefficients] + [f'hmm_ar1noise_{r}' for r in noise_ratios]
+    for name in names:
+        out_dir = f'{save_dir}/{name}/'
+        if not os.path.exists(out_dir):
+            os.makedirs(out_dir)
+        if name == names[0]:
+            if not os.path.exists(f'{out_dir}truth/'):
+                os.makedirs(f'{out_dir}truth/')
+            np.save(f'{out_dir}truth/state_covariances.npy', sim.obs_mod.covariances)
+            np.save(f'{out_dir}truth/tpm.npy', sim.hmm.trans_prob)
+            for i in range(n_subjects):
+                np.save(f'{out_dir}truth/{10001 + i}_state_time_course.npy', time_course[i])
+        elif not os.path.exists(f'{out_dir}truth'):
+            os.symlink(f'../{names[0]}/truth', f'{out_dir}truth')
+
+    for phi in ar_coefficients:
+        y = ar1_filter(data, float(phi))
+        for i in range(n_subjects):
+            np.savetxt(f'{save_dir}/hmm_ar1_{phi}/{10001 + i}.txt', y[i])
+        print(f'hmm_ar1_{phi}: wrote {n_subjects} subjects')
+
+    if noise_ratios:
+        signal_var = data.reshape(-1, n_channels).var(axis=0)
+        z = np.array([np.random.default_rng([seed, i]).standard_normal(data[i].shape) for i in range(n_subjects)])
+        z = ar1_filter(z, noise_ar_coefficient)
+    for r in noise_ratios:
+        noise_dir = f'{save_dir}/hmm_ar1noise_{r}/'
+        # In a subfolder: the data loader reads every .npy/.txt at the top level as a subject
+        if not os.path.exists(f'{noise_dir}noise/'):
+            os.makedirs(f'{noise_dir}noise/')
+        noise_std = np.sqrt(float(r) * signal_var)
+        np.save(f'{noise_dir}noise/noise_std.npy', noise_std)
+        for i in range(n_subjects):
+            np.savetxt(f'{noise_dir}{10001 + i}.txt', data[i] + z[i] * noise_std)
+        print(f'hmm_ar1noise_{r}: wrote {n_subjects} subjects')
+
 def hmm_hrf_noise(save_dir, noise_ratios, n_subjects=500, seed=42):
     '''
     Add white measurement noise to the hmm_hrf BOLD data (noise ratio 0 is hmm_hrf itself).
@@ -329,8 +403,11 @@ def hmm_hrf_noise(save_dir, noise_ratios, n_subjects=500, seed=42):
             os.makedirs(noise_dir)
         if not os.path.exists(f'{noise_dir}truth'):
             os.symlink('../hmm_hrf/truth', f'{noise_dir}truth')
+        # In a subfolder: the data loader reads every .npy/.txt at the top level as a subject
+        if not os.path.exists(f'{noise_dir}noise/'):
+            os.makedirs(f'{noise_dir}noise/')
         noise_std = np.sqrt(float(r) * signal_var)
-        np.save(f'{noise_dir}noise_std.npy', noise_std)
+        np.save(f'{noise_dir}noise/noise_std.npy', noise_std)
 
         for i in range(n_subjects):
             z = np.random.default_rng([seed, i]).standard_normal(data[i].shape)
@@ -698,6 +775,12 @@ def main(simulation_list=None):
     noise_ratios = [s[len('hmm_hrf_noise_'):] for s in simulation_list if s.startswith('hmm_hrf_noise_')]
     if noise_ratios:
         hmm_hrf_noise(save_dir, noise_ratios)
+    # e.g. hmm_ar1_0.5 hmm_ar1_0.8 hmm_ar1_0.95 hmm_ar1noise_0.25 hmm_ar1noise_1.0 hmm_ar1noise_4.0
+    # (one call, so that all of them share the same states, covariances and white signal)
+    ar_coefficients = [s[len('hmm_ar1_'):] for s in simulation_list if s.startswith('hmm_ar1_')]
+    ar_noise_ratios = [s[len('hmm_ar1noise_'):] for s in simulation_list if s.startswith('hmm_ar1noise_')]
+    if ar_coefficients or ar_noise_ratios:
+        hmm_ar1(**config, ar_coefficients=ar_coefficients, noise_ratios=ar_noise_ratios)
     if 'hmm_iid_mean_only' in simulation_list:
         hmm_iid_mean_only(**config)
     if 'hmm_iid_final' in simulation_list:
