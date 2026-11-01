@@ -2924,6 +2924,8 @@ def plot_box(
 
         candidate_index = max_median_index
         p_candidate = None  # store the associated p-value for annotation
+        # p-value of the test best > K for every K below the max-median one (reported in the TXT/JSON summary)
+        p_values = [np.nan] * len(data)
         # If p_value threshold is given, find the smallest number of states
         # that is NOT significantly worse than the best-performing model
         if p_value is not None:
@@ -2935,6 +2937,7 @@ def plot_box(
                 if len(best_data) != len(current_data):
                     continue
                 t_stat, p = ttest_rel(best_data, current_data, alternative='greater')
+                p_values[i] = p
 
                 if p > p_value:
                     candidate_index = i
@@ -2981,15 +2984,21 @@ def plot_box(
                      f"n={ns[best_index_for_report]})")
         if p_candidate is not None and candidate_index != max_median_index:
             lines.append(f"(Selected simpler model index={candidate_index + 1} with p={p_candidate:.2g})")
+        if p_value is not None:
+            lines.append(f"p: one-sided paired t-test across folds that the max-median model "
+                         f"({labels[max_median_index]}) is better than each smaller one")
         lines.append("")
-        lines.append("Label\tN\tMean\t\tStd\t\tMedian")
-        for i, (lbl, n, m, s, med) in enumerate(zip(labels, ns, means, stds, medians)):
+        lines.append("Label\tN\tMean\t\tStd\t\tMedian\t\tp")
+        for i, (lbl, n, m, s, med, pv) in enumerate(zip(labels, ns, means, stds, medians, p_values)):
             lbl_str = str(lbl) if lbl is not None else f"idx {i + 1}"
             flag = "  <-- BEST" if i == best_index_for_report else ""
+            if i == max_median_index and p_value is not None:
+                flag += "  (max median)"
             m_str = f"{m:.6f}" if np.isfinite(m) else "nan"
             s_str = f"{s:.6f}" if np.isfinite(s) else "nan"
             med_str = f"{med:.6f}" if np.isfinite(med) else "nan"
-            lines.append(f"{lbl_str}\t{n}\t{m_str}\t{s_str}\t{med_str}{flag}")
+            p_str = f"{pv:.3g}" if np.isfinite(pv) else "-"
+            lines.append(f"{lbl_str}\t{n}\t{m_str}\t{s_str}\t{med_str}\t{p_str}{flag}")
         txt_summary = "\n".join(lines)
         '''
         per_label = []
@@ -3013,6 +3022,8 @@ def plot_box(
             "criterion": crit,
             "p_value_used": p_value is not None,
             "p_candidate": None if p_candidate is None else float(p_candidate),
+            "max_median_label": labels[max_median_index],
+            "p_values": {str(lbl): float(pv) for lbl, pv in zip(labels, p_values) if np.isfinite(pv)},
             "best": {
                 "index": int(best_index_for_report),
                 "label": best_label,
