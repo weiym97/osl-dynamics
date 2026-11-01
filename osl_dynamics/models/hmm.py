@@ -847,6 +847,12 @@ class Model(MarkovStateInferenceModelBase):
         last_xi_seqs    = np.concatenate(
             xi_batches, axis=0)                      # (N_total_seqs, seq_len-1, K, K)
 
+        if os.environ.get("PROFUMO_HMM_DIAG"):
+            print("[fit_and_get_alpha] diag: TPM diag="
+                  f"{np.round(np.diag(self.get_trans_prob()), 3).tolist()} "
+                  f"pooled occupancy={np.round(last_gamma_seqs.mean(axis=(0, 1)), 3).tolist()}",
+                  flush=True)
+
         return self._profumo_gammas_and_kls(
             last_gamma_seqs, last_xi_seqs, session_lengths, session_n_seqs)
 
