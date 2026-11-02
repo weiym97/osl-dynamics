@@ -693,12 +693,6 @@ class Model(MarkovStateInferenceModelBase):
                 _ll_layer      = self.model.get_layer("ll")
                 _hid_state_inf = self.model.get_layer("hid_state_inf")
                 _ll_loss_layer = self.model.get_layer("ll_loss")
-                # The IW covariance prior (set_covariance_regularizer) lives on
-                # the covariance layer's tensor layer. It is added explicitly:
-                # Keras 3 doesn't forward training=True through
-                # CovarianceMatricesLayer.call(**kwargs), so its add_loss
-                # never fires, and a custom loop ignores layer losses anyway
-                _cov_tensor_layer = _covs_layer.layers[0]
 
                 @tf.function
                 def _train_step(x_batch):
@@ -709,8 +703,6 @@ class Model(MarkovStateInferenceModelBase):
                         gamma_out, xi_out = _hid_state_inf(ll)
                         loss      = tf.reduce_mean(
                             _ll_loss_layer([ll, gamma_out]))
-                        if _cov_tensor_layer.regularizer is not None:
-                            loss = loss + _cov_tensor_layer.regularizer(_cov_tensor_layer.tensor)
                     grads = tape.gradient(loss, _obs_vars)
                     _optimizer.apply_gradients(zip(grads, _obs_vars))
                     return loss, gamma_out, xi_out
@@ -727,12 +719,6 @@ class Model(MarkovStateInferenceModelBase):
                 _ll_layer      = self.model.get_layer("ll")
                 _hid_state_inf = self.model.get_layer("hid_state_inf")
                 _ll_loss_layer = self.model.get_layer("ll_loss")
-                # The IW covariance prior (set_covariance_regularizer) lives on
-                # the covariance layer's tensor layer. It is added explicitly:
-                # Keras 3 doesn't forward training=True through
-                # CovarianceMatricesLayer.call(**kwargs), so its add_loss
-                # never fires, and a custom loop ignores layer losses anyway
-                _cov_tensor_layer = _covs_layer.layers[0]
 
                 @tf.function
                 def _train_step_sigma(x_batch, sigma_batch):
@@ -773,8 +759,6 @@ class Model(MarkovStateInferenceModelBase):
                         gamma_out, xi_out = _hid_state_inf(ll_corrected)
                         loss = tf.reduce_mean(
                             _ll_loss_layer([ll_corrected, gamma_out]))
-                        if _cov_tensor_layer.regularizer is not None:
-                            loss = loss + _cov_tensor_layer.regularizer(_cov_tensor_layer.tensor)
                     grads = tape.gradient(loss, _obs_vars)
                     _optimizer.apply_gradients(zip(grads, _obs_vars))
                     return loss, gamma_out, xi_out
