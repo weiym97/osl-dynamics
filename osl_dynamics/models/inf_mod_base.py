@@ -1014,8 +1014,10 @@ class MarkovStateInferenceModelConfig:
             if not np.isclose(np.sum(self.initial_state_probs), 1):
                 raise ValueError("initial_state_probs must sum to one.")
 
-        if self.baum_welch_implementation not in ["log", "rescale"]:
-            raise ValueError("baum_welch_implementation must be 'log' or 'rescale'.")
+        if self.baum_welch_implementation not in ["log", "rescale", "numba"]:
+            raise ValueError(
+                "baum_welch_implementation must be 'log', 'rescale' or 'numba'."
+            )
 
 
 class MarkovStateInferenceModelBase(ModelBase):

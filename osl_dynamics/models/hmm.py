@@ -104,7 +104,8 @@ class Config(BaseModelConfig, MarkovStateInferenceModelConfig):
         Should we make the initial state probabilities trainable?
     baum_welch_implementation : str
         Which implementation of the Baum-Welch algorithm should we use?
-        Either :code:`'log'` (default) or :code:`'rescale'`.
+        :code:`'log'` (default), :code:`'rescale'` or :code:`'numba'`
+        (compiled CPU loops, needs numba).
 
     init_method : str
         Initialization method. Defaults to 'random_state_time_course'.

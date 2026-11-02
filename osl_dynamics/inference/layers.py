@@ -1736,6 +1736,87 @@ class MultiLayerPerceptronLayer(layers.Layer):
         return inputs
 
 
+_NUMBA_FORWARD_BACKWARD = None
+
+
+@tf.autograph.experimental.do_not_convert   # numba must see the plain source
+def _numba_forward_backward():
+    """Scaled forward-backward recursions, compiled with numba on first use.
+
+    Takes log_B (n_sequences, S, K), the transition matrix and the initial
+    state probabilities (float64); returns gamma (n_sequences, S, K) and xi
+    (n_sequences, S - 1, K, K).
+    """
+    global _NUMBA_FORWARD_BACKWARD
+    if _NUMBA_FORWARD_BACKWARD is not None:
+        return _NUMBA_FORWARD_BACKWARD
+    import numba
+
+    @numba.njit
+    def forward_backward(log_B, P, Pi_0):
+        n_sequences, S, K = log_B.shape
+        gamma = np.empty((n_sequences, S, K))
+        xi = np.empty((n_sequences, S - 1, K, K))
+        alpha = np.empty((S, K))
+        beta = np.empty((S, K))
+        B = np.empty((S, K))
+        scale = np.empty(S)
+        for n in range(n_sequences):
+            # Likelihoods relative to each time point's largest
+            for t in range(S):
+                mx = log_B[n, t, 0]
+                for k in range(1, K):
+                    mx = max(mx, log_B[n, t, k])
+                for k in range(K):
+                    B[t, k] = np.exp(log_B[n, t, k] - mx)
+            # Forward pass, rescaled at every step
+            for t in range(S):
+                total = 0.0
+                for l in range(K):
+                    if t == 0:
+                        v = Pi_0[l]
+                    else:
+                        v = 0.0
+                        for k in range(K):
+                            v += alpha[t - 1, k] * P[k, l]
+                    alpha[t, l] = v * B[t, l]
+                    total += alpha[t, l]
+                for l in range(K):
+                    alpha[t, l] /= total
+                scale[t] = total
+            # Backward pass
+            for k in range(K):
+                beta[S - 1, k] = 1.0
+            for t in range(S - 2, -1, -1):
+                for k in range(K):
+                    v = 0.0
+                    for l in range(K):
+                        v += P[k, l] * B[t + 1, l] * beta[t + 1, l]
+                    beta[t, k] = v / scale[t + 1]
+            # Marginal and joint probabilities
+            for t in range(S):
+                total = 0.0
+                for k in range(K):
+                    gamma[n, t, k] = alpha[t, k] * beta[t, k]
+                    total += gamma[n, t, k]
+                for k in range(K):
+                    gamma[n, t, k] /= total
+            for t in range(S - 1):
+                total = 0.0
+                for k in range(K):
+                    for l in range(K):
+                        v = alpha[t, k] * P[k, l] * B[t + 1, l] * beta[t + 1, l]
+                        xi[n, t, k, l] = v
+                        total += v
+                for k in range(K):
+                    for l in range(K):
+                        xi[n, t, k, l] /= total
+        return gamma, xi
+
+    _NUMBA_FORWARD_BACKWARD = forward_backward
+    return forward_backward
+
+
 class HiddenMarkovStateInferenceLayer(layers.Layer):
     """Hidden Markov state inference layer.
 
@@ -1761,7 +1842,10 @@ class HiddenMarkovStateInferenceLayer(layers.Layer):
     learn_initial_state_probs : bool
         Should we learn the initial state probabilities?
     implementation : str, optional
-        'rescale' or 'log' implementation of the Baum-Welch algorithm.
+        'rescale', 'log' or 'numba' implementation of the Baum-Welch
+        algorithm.  'numba' runs the scaled recursions as compiled loops on
+        the CPU (through tf.numpy_function), several times faster than the
+        TensorFlow loops for few states; it needs numba.
     use_stationary_distribution : bool, optional
         Should we use the stationary distribution (estimated from the
         transition probability matrix) for the initial state probabilities?
@@ -1789,8 +1873,10 @@ class HiddenMarkovStateInferenceLayer(layers.Layer):
             self.use_stationary_distribution = use_stationary_distribution
 
             # Implementation for Baum-Welch algorithm
-            if implementation not in ["rescale", "log"]:
-                raise ValueError("implementation should be 'rescale' or 'log'.")
+            if implementation not in ["rescale", "log", "numba"]:
+                raise ValueError(
+                    "implementation should be 'rescale', 'log' or 'numba'."
+                )
             self.implementation = implementation
 
             # Initial state probabilities
@@ -1917,6 +2003,9 @@ class HiddenMarkovStateInferenceLayer(layers.Layer):
                 ],
                 axis=1,
             )
+
+        if self.implementation == "numba":
+            return self._baum_welch_numba(log_B)
 
         # Small error for improving the numerical stability of the log-likelihood
         eps = tf.experimental.numpy.finfo(self.compute_dtype).eps
@@ -2094,6 +2183,20 @@ class HiddenMarkovStateInferenceLayer(layers.Layer):
             xi = tf.transpose(tf.exp(log_xi), [1, 0, 2, 3])
 
         return gamma, xi
+
+    def _baum_welch_numba(self, log_B):
+        P = tf.cast(self.get_trans_prob(), tf.float64)
+        Pi_0 = tf.cast(self.get_initial_state_probs(), tf.float64)
+        gamma, xi = tf.numpy_function(
+            _numba_forward_backward(),
+            [tf.cast(log_B, tf.float64), P, Pi_0],
+            [tf.float64, tf.float64],
+            stateful=False,
+        )
+        gamma.set_shape(log_B.shape[:2].concatenate([self.n_states]))
+        n_transitions = None if log_B.shape[1] is None else log_B.shape[1] - 1
+        xi.set_shape([log_B.shape[0], n_transitions, self.n_states, self.n_states])
+        return tf.cast(gamma, self.compute_dtype), tf.cast(xi, self.compute_dtype)
 
     def _trans_prob_update(self, gamma, xi):
         if self.n_states == 1:
