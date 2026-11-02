@@ -843,14 +843,44 @@ class Model(MarkovStateInferenceModelBase):
         return session_lengths, session_n_seqs, batches
 
     def _profumo_log_likelihood(self, x_batch, sigma_batch):
-        """Emission log-likelihoods (B, S, K), with the sigma correction."""
+        """Emission log-likelihoods (B, S, K), with the sigma correction.
+
+        The Gaussian log density of each state, as the "ll" layer computes
+        it, but through the state precisions with plain matrix products:
+        the layer's TFP log_prob broadcasts the Cholesky factor to every
+        time point, which dominated the gradient (20x slower at 75 channels).
+        """
+        n_states   = self.config.n_states
+        n_channels = self.config.n_channels
         cov_matrices = self.model.get_layer("covs")(x_batch, training=True)    # (K,M,M)
         mu = self.model.get_layer("means")(x_batch, training=True)             # (K,M)
-        ll = self.model.get_layer("ll")([x_batch, mu, cov_matrices], training=True)
+        chol = tf.linalg.cholesky(cov_matrices)
+        prec = tf.linalg.cholesky_solve(
+            chol, tf.eye(n_channels, batch_shape=[n_states]))                  # (K,M,M)
+
+        # (x - mu_k)' Lambda_k (x - mu_k)
+        #   = x' Lambda_k x - 2 mu_k' Lambda_k x + mu_k' Lambda_k mu_k,
+        # with the contractions over time points as non-batched products
+        # (a batched product over them gave wrong gradients with oneDNN in
+        # TF 2.19)
+        batch_size, seq_len = tf.shape(x_batch)[0], tf.shape(x_batch)[1]
+        x = tf.reshape(x_batch, [-1, n_channels])                             # (N,M)
+        x_prec = tf.reshape(
+            tf.matmul(x, tf.reshape(tf.transpose(prec, [1, 0, 2]),
+                                    [n_channels, n_states * n_channels])),
+            [-1, n_states, n_channels])                                        # (N,K,M)
+        prec_mu = tf.einsum("kmn,kn->km", prec, mu)                            # (K,M)
+        quad = (tf.reduce_sum(x_prec * x[:, None, :], axis=-1)
+                - 2.0 * tf.matmul(x, prec_mu, transpose_b=True)
+                + tf.reduce_sum(prec_mu * mu, axis=-1))                        # (N,K)
+        log_det = 2.0 * tf.reduce_sum(
+            tf.math.log(tf.linalg.diag_part(chol)), axis=-1)                   # (K,)
+        ll = -0.5 * (float(n_channels * np.log(2.0 * np.pi)) + log_det + quad)
+        ll = tf.reshape(ll, [batch_size, seq_len, n_states])
+
         if sigma_batch is not None:
             # correction[b,s,k] = 0.5 * tr(Lambda_k * Sigma_{b,s})
-            ll = ll - 0.5 * tf.einsum(
-                "kmn,bsmn->bsk", tf.linalg.inv(cov_matrices), sigma_batch)
+            ll = ll - 0.5 * tf.einsum("kmn,bsmn->bsk", prec, sigma_batch)
         return ll
 
     def _profumo_e_step(self, batches, accumulate=False):
