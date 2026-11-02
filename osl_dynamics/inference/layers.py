@@ -2028,80 +2028,70 @@ class HiddenMarkovStateInferenceLayer(layers.Layer):
             xi /= tf.reduce_sum(xi, axis=(2, 3), keepdims=True)
 
         if self.implementation == "log":
-            # Temporary variables used in the calculation
-            log_alpha = tf.zeros(
-                [batch_size, self.sequence_length, self.n_states],
-                dtype=self.compute_dtype,
-            )
-            log_beta = tf.zeros(
-                [batch_size, self.sequence_length, self.n_states],
-                dtype=self.compute_dtype,
-            )
-
             # Calculate log probabilities
             log_P = tf.math.log(P + eps)
             log_Pi_0 = tf.math.log(Pi_0 + eps)
 
+            # Time-major so each step of the recursions is written once
+            # (scattering into the full (batch, time, state) tensor at every
+            # step made the passes quadratic in the sequence length)
+            log_B_t = tf.transpose(log_B, [1, 0, 2])
+
             # Forward pass
-            def cond(i, log_alpha):
-                return i < self.sequence_length
-
-            def body(i, log_alpha):
-                indices = _get_indices(i, batch_size)
-                values = tf.cond(
-                    tf.equal(i, 0),
-                    lambda: log_Pi_0 + log_B[:, 0],
-                    lambda: (
-                        tf.reduce_logsumexp(
-                            tf.expand_dims(log_alpha[:, i - 1], axis=1)
-                            + tf.transpose(log_P),
-                            axis=-1,
-                        )
-                        + log_B[:, i]
-                    ),
+            def forward(log_alpha_prev, log_B_i):
+                return (
+                    tf.reduce_logsumexp(
+                        tf.expand_dims(log_alpha_prev, axis=2) + log_P, axis=1
+                    )
+                    + log_B_i
                 )
-                log_alpha = tf.tensor_scatter_nd_update(log_alpha, indices, values)
-                return i + 1, log_alpha
 
-            i = tf.constant(0)
-            _, log_alpha = tf.while_loop(cond=cond, body=body, loop_vars=[i, log_alpha])
+            log_alpha_0 = log_Pi_0 + log_B_t[0]
+            log_alpha = tf.concat(
+                [
+                    tf.expand_dims(log_alpha_0, axis=0),
+                    tf.scan(forward, log_B_t[1:], initializer=log_alpha_0),
+                ],
+                axis=0,
+            )
 
             # Backward pass
-            def cond(i, log_beta):
-                return i > 0
-
-            def body(i, log_beta):
-                indices = _get_indices(i - 1, batch_size)
-                values = tf.cond(
-                    tf.equal(i, self.sequence_length),
-                    lambda: tf.zeros_like(log_beta[:, -1]),
-                    lambda: tf.reduce_logsumexp(
-                        tf.expand_dims(log_beta[:, i] + log_B[:, i], axis=1) + log_P,
-                        axis=-1,
-                    ),
+            def backward(log_beta_next, log_B_next):
+                return tf.reduce_logsumexp(
+                    tf.expand_dims(log_beta_next + log_B_next, axis=1) + log_P,
+                    axis=-1,
                 )
-                log_beta = tf.tensor_scatter_nd_update(log_beta, indices, values)
-                return i - 1, log_beta
 
-            i = tf.constant(self.sequence_length)
-            _, log_beta = tf.while_loop(cond=cond, body=body, loop_vars=[i, log_beta])
+            log_beta_last = tf.zeros_like(log_alpha_0)
+            log_beta = tf.concat(
+                [
+                    tf.scan(
+                        backward,
+                        log_B_t[1:],
+                        initializer=log_beta_last,
+                        reverse=True,
+                    ),
+                    tf.expand_dims(log_beta_last, axis=0),
+                ],
+                axis=0,
+            )
 
             # Marginal probabilities
             log_gamma = log_alpha + log_beta
             log_gamma -= tf.reduce_logsumexp(log_gamma, axis=-1, keepdims=True)
 
             # Joint probabilities
-            log_b = log_beta[:, 1:] + log_B[:, 1:]
+            log_b = log_beta[1:] + log_B_t[1:]
             log_xi = (
                 log_P
-                + tf.expand_dims(log_alpha[:, :-1], axis=3)
+                + tf.expand_dims(log_alpha[:-1], axis=3)
                 + tf.expand_dims(log_b, axis=2)
             )
             log_xi -= tf.reduce_logsumexp(log_xi, axis=(2, 3), keepdims=True)
 
-            # Convert from log probabilities to probabilities
-            gamma = tf.exp(log_gamma)
-            xi = tf.exp(log_xi)
+            # Convert from log probabilities to probabilities (batch-major)
+            gamma = tf.transpose(tf.exp(log_gamma), [1, 0, 2])
+            xi = tf.transpose(tf.exp(log_xi), [1, 0, 2, 3])
 
         return gamma, xi
 
