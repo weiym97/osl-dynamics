@@ -539,19 +539,28 @@ class Model(MarkovStateInferenceModelBase):
 
         return history
     
-    def fit_and_get_alpha(self, dataset, sigmas=None, epochs=None, zscore=False, verbose=1):
+    def fit_and_get_alpha(self, dataset, sigmas=None, epochs=None, zscore=False,
+                          verbose=1, m_step="gradient", m_step_iterations=1):
         """Fit the observation model and return state probabilities in one pass.
 
-        Runs a single custom training loop so that TF/Keras is invoked only
-        once per PROFUMO group-level VB update.  The full model (including
-        ``HiddenMarkovStateInferenceLayer``) is executed on every forward
-        pass, so Baum-Welch runs inside each batch.  Gamma outputs from the
-        **last epoch** are captured directly from ``model(batch)["gamma"]``
-        and returned to the caller — no second forward pass is needed.
+        Used by PROFUMO for each group-level VB update of the HMM.  Sessions
+        are cut into ``sequence_length`` windows.
 
-        The observation model (means / covariances) is updated via
-        ``GradientTape``; the TPM is updated at the end via the same manual
-        EMA as ``fit_with_gamma``.
+        With ``m_step="gradient"`` (default) a custom training loop runs
+        Baum-Welch inside every batch, takes a ``GradientTape`` step on the
+        observation model (means / covariances) and updates the TPM by the
+        same EMA as ``fit_with_gamma``.  Gamma from the **last epoch** is
+        returned directly — no second forward pass.
+
+        With ``m_step="closed_form"`` each iteration is one E-step (Baum-Welch
+        over all windows, accumulating the sufficient statistics) followed by
+        the exact M-step, i.e. the fixed point the gradient loop moves towards:
+
+            C_k = sum_t gamma_tk [(x_t - mu_k)(x_t - mu_k)' + Sigma_t]
+                  / sum_t gamma_tk,
+            TPM = (sum_t xi_t + prior) / (sum_t gamma_t + row sums of prior).
+
+        Gamma is then re-inferred under the updated parameters.
 
         Parameters
         ----------
@@ -565,12 +574,17 @@ class Model(MarkovStateInferenceModelBase):
             is added to the loss, preventing state-covariance collapse.
             Pass ``None`` (default) for the original first-order behaviour.
         epochs : int, optional
-            Number of training epochs.  Defaults to ``config.n_epochs``.
+            Number of training epochs (gradient M-step).  Defaults to
+            ``config.n_epochs``.
         zscore : bool, optional
             If True, z-score each session to zero mean / unit variance per
             channel before training.  Default False.
         verbose : int, optional
             Verbosity (0 = silent, 1 = per-epoch summary).
+        m_step : str, optional
+            ``"gradient"`` or ``"closed_form"``.
+        m_step_iterations : int, optional
+            E/M iterations per call for ``m_step="closed_form"``.
 
         Returns
         -------
@@ -580,23 +594,14 @@ class Model(MarkovStateInferenceModelBase):
         gamma_kls : list of float
             Per-session KL divergence of the state posterior from the HMM
             prior, ``KL[q(z_{1:T}) || p(z_{1:T} | pi_0, TPM)]``.  Computed
-            exactly from the last-epoch gamma and xi (pairwise marginals)
-            returned by Baum-Welch.  One scalar per session.
+            from gamma and the summed pairwise marginals (xi) returned by
+            Baum-Welch.  One scalar per session.
         """
+        if m_step not in ("gradient", "closed_form"):
+            raise ValueError("m_step must be 'gradient' or 'closed_form'.")
         if epochs is None:
             epochs = self.config.n_epochs
 
-        seq_len    = self.config.sequence_length
-        n_channels = self.config.n_channels
-        n_states   = self.config.n_states
-
-        # _t_total_start = time.perf_counter()
-
-        # ------------------------------------------------------------------
-        # 1. Slice sessions into (seq_len,) windows and build one TF dataset
-        #    covering all sessions concatenated.  Record per-session metadata
-        #    so we can reassemble per-session gammas afterwards.
-        # ------------------------------------------------------------------
         if zscore:
             def _zscore(x):
                 mu  = x.mean(axis=0, keepdims=True)
@@ -605,48 +610,23 @@ class Model(MarkovStateInferenceModelBase):
                 return (x - mu) / std
             dataset = [_zscore(x) for x in dataset]
 
-        # _t_prep_start  = time.perf_counter()
-        session_lengths = [x.shape[0] for x in dataset]
-        session_n_seqs  = [T // seq_len for T in session_lengths]
-
-        def _to_seqs(x):
-            n = x.shape[0] // seq_len
-            return x[:n * seq_len].reshape(n, seq_len, n_channels).astype(np.float32)
-
-        def _sigma_to_seqs(sigma):
-            n = sigma.shape[0] // seq_len
-            return sigma[:n * seq_len].reshape(
-                n, seq_len, n_channels, n_channels).astype(np.float32)
-
-        x_all = np.concatenate([_to_seqs(x) for x in dataset], axis=0)
-
-        if sigmas is not None:
-            # print('Sigmas provided')
-            sigma_all = np.concatenate(
-                [_sigma_to_seqs(s) for s in sigmas], axis=0)  # (N, seq_len, M, M)
-            # print('x_all shape: ',x_all.shape)
-            # print('sigma_all shape: ',sigma_all.shape)
-            tf_dataset = (
-                tf.data.Dataset
-                .from_tensor_slices({"data": x_all, "sigma": sigma_all})
-                .batch(self.config.batch_size)
-                .prefetch(tf.data.AUTOTUNE)
-            )
-        else:
-            tf_dataset = (
-                tf.data.Dataset
-                .from_tensor_slices({"data": x_all})
-                .batch(self.config.batch_size)
-                .prefetch(tf.data.AUTOTUNE)
-            )
-
-        # _t_prep_end = time.perf_counter()
-        # print(f"[fit_and_get_alpha] data prep:  {_t_prep_end - _t_prep_start:.3f}s", flush=True)
+        if m_step == "closed_form":
+            session_lengths, session_n_seqs, batches = self._profumo_batches(
+                dataset, sigmas, inference=True)
+            for _ in range(max(m_step_iterations, 1)):
+                _, _, stats = self._profumo_e_step(batches, accumulate=True)
+                self._profumo_closed_form_m_step(stats)
+            gamma_seqs, xi_sums, _ = self._profumo_e_step(batches)
+            self._profumo_diag("fit_and_get_alpha", gamma_seqs, len(dataset))
+            return self._profumo_gammas_and_kls(
+                gamma_seqs, xi_sums, session_lengths, session_n_seqs)
 
         # ------------------------------------------------------------------
-        # 2. Observation-model trainable variables only (means + covs).
-        #    The TPM is handled separately via manual EMA below.
+        # Gradient M-step.  Observation-model trainable variables only
+        # (means + covs); the TPM is handled separately via manual EMA below.
         # ------------------------------------------------------------------
+        session_lengths, session_n_seqs, batches = self._profumo_batches(
+            dataset, sigmas)
         obs_vars = (
             self.model.get_layer("means").trainable_variables +
             self.model.get_layer("covs").trainable_variables
@@ -667,106 +647,44 @@ class Model(MarkovStateInferenceModelBase):
         optimizer = self._profumo_obs_optimizer
 
         # ------------------------------------------------------------------
-        # 3. Compiled training step (@tf.function).
-        #    Traced once on the first call and cached on self so that
-        #    subsequent VB iterations reuse the compiled graph without
-        #    retracing.  Separate functions for the standard and sigma
-        #    paths avoid retracing on input-signature changes.
+        # Compiled training step (@tf.function), traced once and cached on
+        # self so that subsequent VB iterations reuse the compiled graph.
+        # Layer objects are captured in the closure at trace time; TF
+        # variables (weights, optimizer state) are updated in-place so the
+        # compiled graph always sees current values.  A missing sigma batch
+        # (first-order path) is a separate trace.
         #
-        #    Layer objects are captured in the closure at trace time;
-        #    TF variables (weights, optimizer state) are updated in-place
-        #    so the compiled graph always sees current values.
+        # Second-order (fully-Bayesian) path: E-step and M-step must use the
+        # SAME corrected emission log-likelihood:
         #
-        #    TPM update: still Python/NumPy per batch (negligible cost),
-        #    so it stays outside @tf.function to keep the compiled step
-        #    free of Python round-trips.
+        #   log p~(x_t | k) = log p(x_t | k) - 0.5 * tr(Lambda_k * Sigma_t)
         #
-        #    gamma is collected only on the last epoch to avoid
-        #    unnecessary .numpy() copies on intermediate epochs.
+        # Using uncorrected ll in Baum-Welch but corrected ll only in the
+        # gradient makes the E-step and M-step inconsistent: inflated
+        # covariances broaden the emission Gaussians, causing state
+        # assignments to leak across states and driving covariances further
+        # above C_k^sample + C_k^sigma.  Folding the correction into the
+        # emission LL before Baum-Welch makes the EM fixed point
+        # self-consistent at C_k = C_k^sample + C_k^sigma.
         # ------------------------------------------------------------------
-        if sigmas is None:
-            if not hasattr(self, "_profumo_train_step"):
-                _obs_vars      = obs_vars
-                _optimizer     = optimizer
-                _means_layer   = self.model.get_layer("means")
-                _covs_layer    = self.model.get_layer("covs")
-                _ll_layer      = self.model.get_layer("ll")
-                _hid_state_inf = self.model.get_layer("hid_state_inf")
-                _ll_loss_layer = self.model.get_layer("ll_loss")
+        if not hasattr(self, "_profumo_train_step"):
+            _obs_vars      = obs_vars
+            _optimizer     = optimizer
+            _hid_state_inf = self.model.get_layer("hid_state_inf")
+            _ll_loss_layer = self.model.get_layer("ll_loss")
 
-                @tf.function
-                def _train_step(x_batch):
-                    with tf.GradientTape() as tape:
-                        mu        = _means_layer(x_batch, training=True)
-                        D         = _covs_layer(x_batch, training=True)
-                        ll        = _ll_layer([x_batch, mu, D], training=True)
-                        gamma_out, xi_out = _hid_state_inf(ll)
-                        loss      = tf.reduce_mean(
-                            _ll_loss_layer([ll, gamma_out]))
-                    grads = tape.gradient(loss, _obs_vars)
-                    _optimizer.apply_gradients(zip(grads, _obs_vars))
-                    return loss, gamma_out, xi_out
+            @tf.function
+            def _train_step(x_batch, sigma_batch):
+                with tf.GradientTape() as tape:
+                    ll = self._profumo_log_likelihood(x_batch, sigma_batch)
+                    gamma_out, xi_out = _hid_state_inf(ll)
+                    loss = tf.reduce_mean(_ll_loss_layer([ll, gamma_out]))
+                grads = tape.gradient(loss, _obs_vars)
+                _optimizer.apply_gradients(zip(grads, _obs_vars))
+                return loss, gamma_out, tf.reduce_sum(xi_out, axis=1)
 
-                self._profumo_train_step = _train_step
-            train_step_fn = self._profumo_train_step
-
-        else:
-            if not hasattr(self, "_profumo_train_step_sigma"):
-                _obs_vars      = obs_vars
-                _optimizer     = optimizer
-                _means_layer   = self.model.get_layer("means")
-                _covs_layer    = self.model.get_layer("covs")
-                _ll_layer      = self.model.get_layer("ll")
-                _hid_state_inf = self.model.get_layer("hid_state_inf")
-                _ll_loss_layer = self.model.get_layer("ll_loss")
-
-                @tf.function
-                def _train_step_sigma(x_batch, sigma_batch):
-                    with tf.GradientTape() as tape:
-                        # --------------------------------------------------
-                        # Second-order (fully-Bayesian) path.
-                        #
-                        # E-step and M-step must use the SAME corrected
-                        # emission log-likelihood:
-                        #
-                        #   log p̃(x_t | k) = log p(x_t | k)
-                        #                    − 0.5 · tr(Λ_k · Σ_t)
-                        #
-                        # Using uncorrected ll in Baum-Welch but corrected
-                        # ll only in the gradient (old approach) makes the
-                        # E-step and M-step inconsistent: inflated covariances
-                        # broaden the emission Gaussians, causing state
-                        # assignments to leak across states and driving
-                        # covariances further above C_k^sample + C_k^sigma.
-                        #
-                        # By folding −0.5·tr(Λ_k·Σ_t) into the emission LL
-                        # before Baum-Welch, the E-step accounts for the
-                        # posterior uncertainty of the observations.  The
-                        # gradient of the corrected loss w.r.t. Λ_k then
-                        # automatically contains the sigma term — no separate
-                        # correction term is needed, and the EM fixed point is
-                        # self-consistent at C_k = C_k^sample + C_k^sigma.
-                        # --------------------------------------------------
-                        cov_matrices  = _covs_layer(x_batch, training=True)   # (K,M,M)
-                        mu            = _means_layer(x_batch, training=True)  # (K,M)
-                        ll_raw        = _ll_layer(
-                            [x_batch, mu, cov_matrices], training=True)       # (B,S,K)
-                        # Sigma correction: correction[b,s,k] = 0.5*tr(Λ_k·Σ_{b,s})
-                        prec_matrices = tf.linalg.inv(cov_matrices)           # (K,M,M)
-                        ll_sigma_corr = 0.5 * tf.einsum(
-                            "kmn,bsmn->bsk", prec_matrices, sigma_batch)
-                        ll_corrected  = ll_raw - ll_sigma_corr                # (B,S,K)
-                        gamma_out, xi_out = _hid_state_inf(ll_corrected)
-                        loss = tf.reduce_mean(
-                            _ll_loss_layer([ll_corrected, gamma_out]))
-                    grads = tape.gradient(loss, _obs_vars)
-                    _optimizer.apply_gradients(zip(grads, _obs_vars))
-                    return loss, gamma_out, xi_out
-
-                self._profumo_train_step_sigma = _train_step_sigma
-            train_step_fn = self._profumo_train_step_sigma
-
-        last_gamma_seqs = None
+            self._profumo_train_step = _train_step
+        train_step_fn = self._profumo_train_step
 
         for epoch in range(epochs):
             # LR and rho both use the local epoch so the schedule restarts
@@ -791,28 +709,26 @@ class Model(MarkovStateInferenceModelBase):
             epoch_loss    = 0.0
             n_batches     = 0
 
-            for batch in tf_dataset:
-                if sigmas is None:
-                    loss, gamma_out, xi_out = train_step_fn(batch["data"])
-                else:
-                    loss, gamma_out, xi_out = train_step_fn(
-                        batch["data"], tf.cast(batch["sigma"], tf.float32))
+            for x_batch, sigma_batch in batches:
+                loss, gamma_out, xi_sum = train_step_fn(x_batch, sigma_batch)
 
                 epoch_loss += float(loss)
                 n_batches  += 1
 
                 # Per-batch TPM EMA update — mirrors ExponentialMovingAverage
-                # in standard fit(): A ← (1−ρ)·A + ρ·φ_batch, where φ_batch
-                # is HiddenMarkovStateInferenceLayer._trans_prob_update(γ, ξ).
-                # rho is fixed for the epoch (computed above), matching the
-                # EMADecayCallback.on_epoch_end convention.
+                # in standard fit(): A <- (1-rho)*A + rho*phi_batch, where
+                # phi_batch is HiddenMarkovStateInferenceLayer._trans_prob_update
+                # (gamma, xi).  rho is fixed for the epoch (computed above),
+                # matching the EMADecayCallback.on_epoch_end convention.
+                g_b = gamma_out.numpy()
+                xi_b = xi_sum.numpy()
                 if self.config.learn_trans_prob:
-                    xi_b = xi_out.numpy().astype(np.float64)    # (B, S-1, K, K)
-                    g_b  = gamma_out.numpy().astype(np.float64) # (B, S,   K)
+                    n_trans = g_b.shape[0] * (g_b.shape[1] - 1)
                     current_tp = self.get_trans_prob().astype(np.float64)
-                    phi_num = xi_b.mean(axis=(0, 1)) + prior_np
+                    phi_num = xi_b.sum(axis=0).astype(np.float64) / n_trans + prior_np
                     phi_den = (
-                        g_b[:, :-1].mean(axis=(0, 1))[:, np.newaxis] + prior_row_sums
+                        g_b[:, :-1].sum(axis=(0, 1)).astype(np.float64)[:, np.newaxis]
+                        / n_trans + prior_row_sums
                     )
                     # A state with no occupancy in this batch (and no prior)
                     # has no evidence for its row: keep it rather than 0/0
@@ -824,26 +740,17 @@ class Model(MarkovStateInferenceModelBase):
                     self.set_trans_prob(new_tp.astype(np.float32))
 
                 if is_last_epoch:
-                    gamma_batches.append(gamma_out.numpy())
-                    xi_batches.append(xi_out.numpy())
+                    gamma_batches.append(g_b)
+                    xi_batches.append(xi_b)
 
             print(f"[fit_and_get_alpha] epoch {epoch + 1}/{epochs}  "
                   f"loss={epoch_loss / max(n_batches, 1):.4f}", flush=True)
 
-        last_gamma_seqs = np.concatenate(
-            gamma_batches, axis=0)                   # (N_total_seqs, seq_len, K)
-        last_xi_seqs    = np.concatenate(
-            xi_batches, axis=0)                      # (N_total_seqs, seq_len-1, K, K)
-
-        if os.environ.get("PROFUMO_HMM_DIAG"):
-            print("[fit_and_get_alpha] diag: TPM diag="
-                  f"{np.round(np.diag(self.get_trans_prob()), 3).tolist()} "
-                  f"pooled occupancy={np.round(last_gamma_seqs.mean(axis=(0, 1)), 3).tolist()} "
-                  f"cov trace={np.round(np.trace(self.get_covariances(), axis1=1, axis2=2), 1).tolist()}",
-                  flush=True)
-
+        last_gamma_seqs = np.concatenate(gamma_batches, axis=0)  # (N_seqs, S, K)
+        last_xi_sums    = np.concatenate(xi_batches, axis=0)     # (N_seqs, K, K)
+        self._profumo_diag("fit_and_get_alpha", last_gamma_seqs, len(dataset))
         return self._profumo_gammas_and_kls(
-            last_gamma_seqs, last_xi_seqs, session_lengths, session_n_seqs)
+            last_gamma_seqs, last_xi_sums, session_lengths, session_n_seqs)
 
     def infer_alpha(self, dataset, sigmas=None, trans_prob=None):
         """E-step only: state probabilities under the current HMM.
@@ -872,97 +779,186 @@ class Model(MarkovStateInferenceModelBase):
         gamma_kls : list of float
             Per-session ``KL[q(z_{1:T}) || p(z_{1:T} | pi_0, TPM)]``.
         """
-        seq_len    = self.config.sequence_length
-        n_channels = self.config.n_channels
-        n_states   = self.config.n_states
-
-        session_lengths = [x.shape[0] for x in dataset]
-        session_n_seqs  = [T // seq_len for T in session_lengths]
+        n_states = self.config.n_states
+        session_lengths, session_n_seqs, batches = self._profumo_batches(
+            dataset, sigmas, inference=True)
         if sum(session_n_seqs) == 0:
             return ([np.zeros((T, n_states), dtype=np.float32) for T in session_lengths],
                     [0.0] * len(session_lengths))
-
-        x_all = np.concatenate([
-            x[:n * seq_len].reshape(n, seq_len, n_channels)
-            for x, n in zip(dataset, session_n_seqs)
-        ], axis=0).astype(np.float32)
-        sigma_all = None
-        if sigmas is not None:
-            sigma_all = np.concatenate([
-                s[:n * seq_len].reshape(n, seq_len, n_channels, n_channels)
-                for s, n in zip(sigmas, session_n_seqs)
-            ], axis=0).astype(np.float32)
-
-        if not hasattr(self, "_profumo_infer_step"):
-            _means_layer   = self.model.get_layer("means")
-            _covs_layer    = self.model.get_layer("covs")
-            _ll_layer      = self.model.get_layer("ll")
-            _hid_state_inf = self.model.get_layer("hid_state_inf")
-
-            @tf.function(reduce_retracing=True)
-            def _infer_step(x_batch):
-                mu = _means_layer(x_batch)
-                D  = _covs_layer(x_batch)
-                ll = _ll_layer([x_batch, mu, D])
-                return _hid_state_inf(ll)
-
-            @tf.function(reduce_retracing=True)
-            def _infer_step_sigma(x_batch, sigma_batch):
-                D  = _covs_layer(x_batch)
-                mu = _means_layer(x_batch)
-                ll = _ll_layer([x_batch, mu, D])
-                ll = ll - 0.5 * tf.einsum(
-                    "kmn,bsmn->bsk", tf.linalg.inv(D), sigma_batch)
-                return _hid_state_inf(ll)
-
-            self._profumo_infer_step       = _infer_step
-            self._profumo_infer_step_sigma = _infer_step_sigma
 
         if trans_prob is not None:
             learnt_trans_prob = self.get_trans_prob()
             self.set_trans_prob(np.asarray(trans_prob, dtype=np.float32))
         try:
-            return self._profumo_infer_windows(x_all, sigma_all, dataset,
-                                               session_lengths, session_n_seqs)
+            gamma_seqs, xi_sums, _ = self._profumo_e_step(batches)
+            self._profumo_diag("infer_alpha", gamma_seqs, len(dataset))
+            return self._profumo_gammas_and_kls(
+                gamma_seqs, xi_sums, session_lengths, session_n_seqs)
         finally:
             if trans_prob is not None:
                 self.set_trans_prob(learnt_trans_prob)
 
-    def _profumo_infer_windows(self, x_all, sigma_all, dataset,
-                               session_lengths, session_n_seqs):
-        """Forward passes over the windows of infer_alpha."""
-        gamma_batches, xi_batches = [], []
+    def _profumo_batches(self, dataset, sigmas=None, inference=False):
+        """Cut sessions into sequence_length windows, batched as tensors.
+
+        Returns the session lengths, the number of windows per session and a
+        list of ``(x_batch, sigma_batch)`` pairs (``sigma_batch`` is None
+        without sigmas).  The trailing ``T % sequence_length`` samples of a
+        session are not used.  Training batches have ``config.batch_size``
+        windows; inference batches (no gradient) are as large as about
+        512 MB of input allows, so Baum-Welch runs over few, large batches.
+        """
+        seq_len    = self.config.sequence_length
+        n_channels = self.config.n_channels
         batch_size = self.config.batch_size
+        if inference:
+            floats_per_window = seq_len * n_channels * (
+                1 + (n_channels if sigmas is not None else 0))
+            batch_size = max(batch_size, (2 ** 27) // floats_per_window)
+
+        session_lengths = [x.shape[0] for x in dataset]
+        session_n_seqs  = [T // seq_len for T in session_lengths]
+        if sum(session_n_seqs) == 0:
+            return session_lengths, session_n_seqs, []
+
+        x_all = np.concatenate([
+            np.asarray(x[:n * seq_len], dtype=np.float32).reshape(n, seq_len, n_channels)
+            for x, n in zip(dataset, session_n_seqs)
+        ], axis=0)
+        sigma_all = None
+        if sigmas is not None:
+            sigma_all = np.concatenate([
+                np.asarray(s[:n * seq_len], dtype=np.float32).reshape(
+                    n, seq_len, n_channels, n_channels)
+                for s, n in zip(sigmas, session_n_seqs)
+            ], axis=0)
+
+        batches = []
         for start in range(0, x_all.shape[0], batch_size):
-            x_batch = tf.constant(x_all[start:start + batch_size])
-            if sigma_all is None:
-                gamma_out, xi_out = self._profumo_infer_step(x_batch)
-            else:
-                gamma_out, xi_out = self._profumo_infer_step_sigma(
-                    x_batch, tf.constant(sigma_all[start:start + batch_size]))
-            gamma_batches.append(gamma_out.numpy())
-            xi_batches.append(xi_out.numpy())
+            stop = start + batch_size
+            batches.append((
+                tf.constant(x_all[start:stop]),
+                None if sigma_all is None else tf.constant(sigma_all[start:stop]),
+            ))
+        return session_lengths, session_n_seqs, batches
 
-        if os.environ.get("PROFUMO_HMM_DIAG"):
-            occupancy = np.concatenate(gamma_batches, axis=0).mean(axis=(0, 1))
-            print(f"[infer_alpha] diag: n_sessions={len(dataset)} "
-                  f"pooled occupancy={np.round(occupancy, 3).tolist()}", flush=True)
+    def _profumo_log_likelihood(self, x_batch, sigma_batch):
+        """Emission log-likelihoods (B, S, K), with the sigma correction."""
+        cov_matrices = self.model.get_layer("covs")(x_batch, training=True)    # (K,M,M)
+        mu = self.model.get_layer("means")(x_batch, training=True)             # (K,M)
+        ll = self.model.get_layer("ll")([x_batch, mu, cov_matrices], training=True)
+        if sigma_batch is not None:
+            # correction[b,s,k] = 0.5 * tr(Lambda_k * Sigma_{b,s})
+            ll = ll - 0.5 * tf.einsum(
+                "kmn,bsmn->bsk", tf.linalg.inv(cov_matrices), sigma_batch)
+        return ll
 
-        return self._profumo_gammas_and_kls(
-            np.concatenate(gamma_batches, axis=0),
-            np.concatenate(xi_batches, axis=0),
-            session_lengths, session_n_seqs)
+    def _profumo_e_step(self, batches, accumulate=False):
+        """Baum-Welch over all windows.
 
-    def _profumo_gammas_and_kls(self, last_gamma_seqs, last_xi_seqs,
+        Returns gamma per window (N_seqs, S, K), xi summed over time per
+        window (N_seqs, K, K) and, with ``accumulate``, the sufficient
+        statistics for the closed-form M-step (else None).
+        """
+        if not hasattr(self, "_profumo_e_step_fn"):
+            _hid_state_inf = self.model.get_layer("hid_state_inf")
+
+            @tf.function(reduce_retracing=True)
+            def _e_step(x_batch, sigma_batch, accumulate):
+                ll = self._profumo_log_likelihood(x_batch, sigma_batch)
+                gamma, xi = _hid_state_inf(ll)
+                xi_sum = tf.reduce_sum(xi, axis=1)
+                if not accumulate:
+                    return gamma, xi_sum, ()
+                g = tf.cast(gamma, tf.float64)
+                x = tf.cast(x_batch, tf.float64)
+                stats = {
+                    "N": tf.reduce_sum(g, axis=(0, 1)),
+                    "N_trans": tf.reduce_sum(g[:, :-1], axis=(0, 1)),
+                    "S1": tf.einsum("bsk,bsm->km", g, x),
+                    "S2": tf.einsum("bskm,bsn->kmn", g[..., None] * x[..., None, :], x),
+                    "xi": tf.cast(tf.reduce_sum(xi_sum, axis=0), tf.float64),
+                }
+                if sigma_batch is not None:
+                    stats["S_sigma"] = tf.cast(tf.einsum(
+                        "bsk,bsmn->kmn", tf.cast(gamma, tf.float32), sigma_batch),
+                        tf.float64)
+                return gamma, xi_sum, stats
+
+            self._profumo_e_step_fn = _e_step
+
+        gamma_batches, xi_batches, stats = [], [], None
+        for x_batch, sigma_batch in batches:
+            gamma, xi_sum, batch_stats = self._profumo_e_step_fn(
+                x_batch, sigma_batch, accumulate)
+            gamma_batches.append(gamma.numpy())
+            xi_batches.append(xi_sum.numpy())
+            if accumulate:
+                batch_stats = {k: v.numpy() for k, v in batch_stats.items()}
+                if stats is None:
+                    stats = batch_stats
+                else:
+                    for k in stats:
+                        stats[k] += batch_stats[k]
+        return (np.concatenate(gamma_batches, axis=0),
+                np.concatenate(xi_batches, axis=0), stats)
+
+    def _profumo_closed_form_m_step(self, stats):
+        """Exact M-step from the statistics of _profumo_e_step."""
+        n_channels = self.config.n_channels
+        N = stats["N"]
+        active = N > 1e-6   # an empty state has no evidence: keep it
+
+        means = self.get_means().astype(np.float64)
+        covs  = self.get_covariances().astype(np.float64)
+        for k in np.flatnonzero(active):
+            mean_data = stats["S1"][k] / N[k]
+            mu = mean_data if self.config.learn_means else means[k]
+            C = (stats["S2"][k] / N[k] - np.outer(mu, mean_data)
+                 - np.outer(mean_data, mu) + np.outer(mu, mu))
+            if "S_sigma" in stats:
+                C += stats["S_sigma"][k] / N[k]
+            means[k] = mu
+            covs[k]  = 0.5 * (C + C.T)
+        if self.config.learn_means:
+            self.set_means(means, update_initializer=False)
+        if self.config.learn_covariances:
+            self.set_covariances(covs, update_initializer=False)
+
+        if self.config.learn_trans_prob:
+            prior = self.model.get_layer("hid_state_inf").trans_prob_prior.numpy(
+            ).astype(np.float64)
+            trans_prob = self.get_trans_prob().astype(np.float64)
+            den = stats["N_trans"] + prior.sum(axis=1)
+            rows = den > 0
+            trans_prob[rows] = (stats["xi"][rows] + prior[rows]) / den[rows, np.newaxis]
+            trans_prob /= trans_prob.sum(axis=1, keepdims=True)
+            self.set_trans_prob(trans_prob.astype(np.float32), update_initializer=False)
+
+    def _profumo_diag(self, name, gamma_seqs, n_sessions):
+        if not os.environ.get("PROFUMO_HMM_DIAG"):
+            return
+        occupancy = np.round(gamma_seqs.mean(axis=(0, 1)), 3).tolist()
+        print(f"[{name}] diag: n_sessions={n_sessions} "
+              f"TPM diag={np.round(np.diag(self.get_trans_prob()), 3).tolist()} "
+              f"pooled occupancy={occupancy} "
+              f"cov trace={np.round(np.trace(self.get_covariances(), axis1=1, axis2=2), 1).tolist()}",
+              flush=True)
+
+    def _profumo_gammas_and_kls(self, gamma_seqs, xi_sums,
                                 session_lengths, session_n_seqs):
-        """Reassemble windowed gamma/xi into per-session gammas and KLs."""
+        """Reassemble windowed gamma into per-session gammas and KLs.
+
+        ``xi_sums`` holds each window's pairwise marginals summed over time,
+        shaped (N_seqs, K, K).
+        """
         seq_len  = self.config.sequence_length
         n_states = self.config.n_states
 
         # ------------------------------------------------------------------
-        # 4. Reassemble per-session gamma arrays.
-        #    Trailing remainder rows (T % seq_len) are padded by repeating
-        #    the last valid row — same convention as get_alpha.
+        # Per-session gamma arrays.  Trailing remainder rows (T % seq_len)
+        # are padded by repeating the last valid row — same convention as
+        # get_alpha.
         # ------------------------------------------------------------------
         gammas     = []
         seq_offset = 0
@@ -971,7 +967,7 @@ class Model(MarkovStateInferenceModelBase):
                 gammas.append(np.zeros((T, n_states), dtype=np.float32))
                 continue
 
-            g = last_gamma_seqs[seq_offset: seq_offset + n_seqs]  # (n_seqs, seq_len, K)
+            g = gamma_seqs[seq_offset: seq_offset + n_seqs]  # (n_seqs, seq_len, K)
             g = g.reshape(n_seqs * seq_len, n_states)
 
             remainder = T - n_seqs * seq_len
@@ -983,7 +979,7 @@ class Model(MarkovStateInferenceModelBase):
             seq_offset += n_seqs
 
         # ------------------------------------------------------------------
-        # 5. Compute per-session gamma KL divergences.
+        # Per-session gamma KL divergences.
         #
         #    KL[q(z_{1:T}) || p(z_{1:T} | pi_0, TPM)]
         #      = sum_{t,k} gamma_{t,k} log gamma_{t,k}     (negative entropy)
@@ -992,10 +988,8 @@ class Model(MarkovStateInferenceModelBase):
         #
         #    For the windowed case, sequences are treated independently in
         #    Baum-Welch, so we sum over all windows within a session.
-        #    The xi arrays cover (seq_len-1) transitions per window and
-        #    already carry the correct Baum-Welch joint posteriors.
         # ------------------------------------------------------------------
-        eps      = np.finfo(np.float32).eps
+        eps        = np.finfo(np.float32).eps
         trans_prob = self.get_trans_prob().astype(np.float64)   # (K, K)
         pi0        = self.get_initial_state_probs().astype(np.float64)  # (K,)
         log_tpm    = np.log(trans_prob + eps)                   # (K, K)
@@ -1008,8 +1002,8 @@ class Model(MarkovStateInferenceModelBase):
                 gamma_kls.append(0.0)
                 continue
 
-            g = last_gamma_seqs[seq_offset: seq_offset + n_seqs].astype(np.float64)
-            x = last_xi_seqs[seq_offset: seq_offset + n_seqs].astype(np.float64)
+            g = gamma_seqs[seq_offset: seq_offset + n_seqs].astype(np.float64)
+            x = xi_sums[seq_offset: seq_offset + n_seqs].astype(np.float64)
 
             neg_entropy  = float(np.sum(g * np.log(g + eps)))
             initial_term = float(np.sum(g[:, 0, :] * log_pi0))
@@ -1017,9 +1011,6 @@ class Model(MarkovStateInferenceModelBase):
 
             gamma_kls.append(neg_entropy - initial_term - trans_term)
             seq_offset += n_seqs
-
-        # print(f"[fit_and_get_alpha] total:      "
-        #       f"{time.perf_counter() - _t_total_start:.2f}s", flush=True)
 
         return gammas, gamma_kls
 
