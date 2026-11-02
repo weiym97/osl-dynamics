@@ -809,12 +809,16 @@ class Model(MarkovStateInferenceModelBase):
                 if self.config.learn_trans_prob:
                     xi_b = xi_out.numpy().astype(np.float64)    # (B, S-1, K, K)
                     g_b  = gamma_out.numpy().astype(np.float64) # (B, S,   K)
-                    phi_batch = (
-                        xi_b.mean(axis=(0, 1)) + prior_np
-                    ) / (
+                    current_tp = self.get_trans_prob().astype(np.float64)
+                    phi_num = xi_b.mean(axis=(0, 1)) + prior_np
+                    phi_den = (
                         g_b[:, :-1].mean(axis=(0, 1))[:, np.newaxis] + prior_row_sums
                     )
-                    current_tp = self.get_trans_prob().astype(np.float64)
+                    # A state with no occupancy in this batch (and no prior)
+                    # has no evidence for its row: keep it rather than 0/0
+                    phi_batch = np.where(
+                        phi_den > 0, phi_num / np.where(phi_den > 0, phi_den, 1.0),
+                        current_tp)
                     new_tp     = (1.0 - rho) * current_tp + rho * phi_batch
                     new_tp     = new_tp / new_tp.sum(axis=1, keepdims=True)
                     self.set_trans_prob(new_tp.astype(np.float32))
