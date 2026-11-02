@@ -838,7 +838,8 @@ class Model(MarkovStateInferenceModelBase):
         if os.environ.get("PROFUMO_HMM_DIAG"):
             print("[fit_and_get_alpha] diag: TPM diag="
                   f"{np.round(np.diag(self.get_trans_prob()), 3).tolist()} "
-                  f"pooled occupancy={np.round(last_gamma_seqs.mean(axis=(0, 1)), 3).tolist()}",
+                  f"pooled occupancy={np.round(last_gamma_seqs.mean(axis=(0, 1)), 3).tolist()} "
+                  f"cov trace={np.round(np.trace(self.get_covariances(), axis1=1, axis2=2), 1).tolist()}",
                   flush=True)
 
         return self._profumo_gammas_and_kls(
@@ -925,6 +926,11 @@ class Model(MarkovStateInferenceModelBase):
                     x_batch, tf.constant(sigma_all[start:start + batch_size]))
             gamma_batches.append(gamma_out.numpy())
             xi_batches.append(xi_out.numpy())
+
+        if os.environ.get("PROFUMO_HMM_DIAG"):
+            occupancy = np.concatenate(gamma_batches, axis=0).mean(axis=(0, 1))
+            print(f"[infer_alpha] diag: n_sessions={len(dataset)} "
+                  f"pooled occupancy={np.round(occupancy, 3).tolist()}", flush=True)
 
         return self._profumo_gammas_and_kls(
             np.concatenate(gamma_batches, axis=0),
