@@ -807,6 +807,9 @@ class Model(MarkovStateInferenceModelBase):
         session are not used.  Training batches have ``config.batch_size``
         windows; inference batches (no gradient) are as large as about
         512 MB of input allows, so Baum-Welch runs over few, large batches.
+        Each batch is copied once from the session arrays (see
+        _profumo_tensor); the sigmas, n_channels times larger than the
+        data, are never concatenated as a whole.
         """
         seq_len    = self.config.sequence_length
         n_channels = self.config.n_channels
@@ -818,29 +821,55 @@ class Model(MarkovStateInferenceModelBase):
 
         session_lengths = [x.shape[0] for x in dataset]
         session_n_seqs  = [T // seq_len for T in session_lengths]
-        if sum(session_n_seqs) == 0:
+        n_seqs = sum(session_n_seqs)
+        if n_seqs == 0:
             return session_lengths, session_n_seqs, []
 
-        x_all = np.concatenate([
+        x_windows = [
             np.asarray(x[:n * seq_len], dtype=np.float32).reshape(n, seq_len, n_channels)
-            for x, n in zip(dataset, session_n_seqs)
-        ], axis=0)
-        sigma_all = None
+            for x, n in zip(dataset, session_n_seqs) if n > 0
+        ]
+        sigma_windows = None
         if sigmas is not None:
-            sigma_all = np.concatenate([
+            sigma_windows = [
                 np.asarray(s[:n * seq_len], dtype=np.float32).reshape(
                     n, seq_len, n_channels, n_channels)
-                for s, n in zip(sigmas, session_n_seqs)
-            ], axis=0)
+                for s, n in zip(sigmas, session_n_seqs) if n > 0
+            ]
 
         batches = []
-        for start in range(0, x_all.shape[0], batch_size):
-            stop = start + batch_size
+        for start in range(0, n_seqs, batch_size):
+            stop = min(start + batch_size, n_seqs)
             batches.append((
-                tf.constant(x_all[start:stop]),
-                None if sigma_all is None else tf.constant(sigma_all[start:stop]),
+                self._profumo_tensor(x_windows, start, stop),
+                None if sigma_windows is None
+                else self._profumo_tensor(sigma_windows, start, stop),
             ))
         return session_lengths, session_n_seqs, batches
+
+    @staticmethod
+    def _profumo_tensor(windows, start, stop):
+        """Windows start:stop, counted across the per-session arrays, as a tensor.
+
+        They are copied once into a 64-byte aligned buffer that TensorFlow
+        then shares through DLPack (tf.constant would copy again, and
+        DLPack needs the alignment).
+        """
+        parts, offset = [], 0
+        for w in windows:
+            lo, hi = max(start - offset, 0), min(stop - offset, w.shape[0])
+            if lo < hi:
+                parts.append(w[lo:hi])
+            offset += w.shape[0]
+            if offset >= stop:
+                break
+        shape = (stop - start,) + parts[0].shape[1:]
+        n_bytes = int(np.prod(shape)) * np.dtype(np.float32).itemsize
+        buffer = np.empty(n_bytes + 64, dtype=np.uint8)
+        offset = (-buffer.ctypes.data) % 64
+        out = buffer[offset:offset + n_bytes].view(np.float32).reshape(shape)
+        np.concatenate(parts, axis=0, out=out)
+        return tf.experimental.dlpack.from_dlpack(out.__dlpack__())
 
     def _profumo_log_likelihood(self, x_batch, sigma_batch):
         """Emission log-likelihoods (B, S, K), with the sigma correction.
