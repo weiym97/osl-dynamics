@@ -845,7 +845,7 @@ class Model(MarkovStateInferenceModelBase):
         return self._profumo_gammas_and_kls(
             last_gamma_seqs, last_xi_seqs, session_lengths, session_n_seqs)
 
-    def infer_alpha(self, dataset, sigmas=None):
+    def infer_alpha(self, dataset, sigmas=None, trans_prob=None):
         """E-step only: state probabilities under the current HMM.
 
         Same windowing and emission log-likelihood (including the
@@ -861,6 +861,9 @@ class Model(MarkovStateInferenceModelBase):
         sigmas : list of np.ndarray, optional
             Per-session posterior covariance cubes, each shaped
             ``(T_i, n_channels, n_channels)``.
+        trans_prob : np.ndarray, optional
+            Transition matrix to use for this E-step (and its KLs) instead of
+            the learnt one, which is restored afterwards.
 
         Returns
         -------
@@ -915,6 +918,19 @@ class Model(MarkovStateInferenceModelBase):
             self._profumo_infer_step       = _infer_step
             self._profumo_infer_step_sigma = _infer_step_sigma
 
+        if trans_prob is not None:
+            learnt_trans_prob = self.get_trans_prob()
+            self.set_trans_prob(np.asarray(trans_prob, dtype=np.float32))
+        try:
+            return self._profumo_infer_windows(x_all, sigma_all, dataset,
+                                               session_lengths, session_n_seqs)
+        finally:
+            if trans_prob is not None:
+                self.set_trans_prob(learnt_trans_prob)
+
+    def _profumo_infer_windows(self, x_all, sigma_all, dataset,
+                               session_lengths, session_n_seqs):
+        """Forward passes over the windows of infer_alpha."""
         gamma_batches, xi_batches = [], []
         batch_size = self.config.batch_size
         for start in range(0, x_all.shape[0], batch_size):
