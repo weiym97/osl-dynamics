@@ -1752,7 +1752,8 @@ def _numba_forward_backward():
         return _NUMBA_FORWARD_BACKWARD
     import numba
 
-    @numba.njit
+    # nogil: other Python threads (e.g. PROFUMO's main thread) run meanwhile
+    @numba.njit(nogil=True)
     def forward_backward(log_B, P, Pi_0):
         n_sequences, S, K = log_B.shape
         gamma = np.empty((n_sequences, S, K))
