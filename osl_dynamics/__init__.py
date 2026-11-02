@@ -1,7 +1,13 @@
 import logging
 from importlib.metadata import PackageNotFoundError, version
 
-from osl_dynamics.config_api.pipeline import run_pipeline
+
+def run_pipeline(*args, **kwargs):
+    """See osl_dynamics.config_api.pipeline.run_pipeline (imported on use,
+    as it pulls in the whole analysis and plotting stack)."""
+    from osl_dynamics.config_api.pipeline import run_pipeline as _run_pipeline
+    return _run_pipeline(*args, **kwargs)
+
 
 # Setup the version
 try:
