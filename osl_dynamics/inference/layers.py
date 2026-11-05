@@ -1152,29 +1152,45 @@ class LogLikelihoodLossLayer(layers.Layer):
     ----------
     calculation : str
         Operation for reducing the time dimension. Either 'mean' or 'sum'.
+    precision : bool, optional
+        Is a precision matrix passed instead of a covariance matrix?
     kwargs : keyword arguments, optional
         Keyword arguments to pass to the base class.
     """
 
-    def __init__(self, calculation, **kwargs):
+    def __init__(self, calculation, precision=False, **kwargs):
         super().__init__(**kwargs)
         self.calculation = calculation
+        self.precision = precision
 
     def call(self, inputs):
         """
-        The method takes the data, mean vector and covariance matrix.
+        The method takes the data, mean vector and covariance matrix (or
+        precision matrix if :code:`precision=True`).
         """
         x, mu, sigma = inputs
 
-        # Multivariate normal distribution
-        mvn = tfp.distributions.MultivariateNormalTriL(
-            loc=mu,
-            scale_tril=tf.linalg.cholesky(sigma),
-            allow_nan_stats=False,
-        )
+        if self.precision:
+            # Log-likelihood with the precision matrix P = LL^T:
+            # log|L| - 0.5 * |L^T (x - mu)|^2 - 0.5 * n_channels * log(2pi)
+            L = tf.linalg.cholesky(sigma)
+            z = tf.linalg.matvec(L, x - mu, adjoint_a=True)
+            n_channels = tf.cast(tf.shape(x)[-1], x.dtype)
+            ll_loss = (
+                tf.reduce_sum(tf.math.log(tf.linalg.diag_part(L)), axis=-1)
+                - 0.5 * tf.reduce_sum(tf.square(z), axis=-1)
+                - 0.5 * n_channels * np.log(2 * np.pi)
+            )
+        else:
+            # Multivariate normal distribution
+            mvn = tfp.distributions.MultivariateNormalTriL(
+                loc=mu,
+                scale_tril=tf.linalg.cholesky(sigma),
+                allow_nan_stats=False,
+            )
 
-        # Calculate the log-likelihood
-        ll_loss = mvn.log_prob(x)
+            # Calculate the log-likelihood
+            ll_loss = mvn.log_prob(x)
 
         if self.calculation == "sum":
             # Sum over time dimension and average over the batch dimension

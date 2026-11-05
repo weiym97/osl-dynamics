@@ -106,6 +106,19 @@ class Config(BaseModelConfig, VariationalInferenceModelConfig):
         Error added to mode covariances for numerical stability.
     diagonal_covariances : bool
         Should we learn diagonal mode covariances?
+    mix_precisions : bool
+        Should we mix the mode precision matrices instead of the covariances?
+        If :code:`True`, the precision matrix at each time point is
+        :code:`P_t = Sum_j alpha_jt P_j`, where :code:`P_j` is the inverse
+        of the covariance of mode :code:`j`. Mode covariances are still passed
+        and returned (e.g. :code:`initial_covariances`,
+        :code:`get_covariances`), but :code:`covariances_epsilon` is added to
+        the precisions. Defaults to :code:`False`.
+    second_order_alpha_gradient : bool
+        PROFUMO only (:code:`fit_and_get_alpha` with :code:`sigmas`): should
+        the second-order term :code:`0.5 tr(P_t Sigma_t)` also train the
+        inference network through alpha? If :code:`False` (default), alpha
+        is held fixed in it and only the mode matrices learn from it.
     means_regularizer : tf.keras.regularizers.Regularizer
         Regularizer for mean vectors.
     covariances_regularizer : tf.keras.regularizers.Regularizer
@@ -183,6 +196,8 @@ class Config(BaseModelConfig, VariationalInferenceModelConfig):
     initial_means: np.ndarray = None
     initial_covariances: np.ndarray = None
     diagonal_covariances: bool = False
+    mix_precisions: bool = False
+    second_order_alpha_gradient: bool = False
     covariances_epsilon: float = None
     means_regularizer: tf.keras.regularizers.Regularizer = None
     covariances_regularizer: tf.keras.regularizers.Regularizer = None
@@ -269,29 +284,40 @@ class Model(VariationalInferenceModelBase):
             config.means_regularizer,
             name="means",
         )
+        # If we mix precisions, the layer learns the mode precisions
+        if config.mix_precisions:
+            covs_name = "precs"
+            initial_covs = obs_mod.invert_matrices(
+                config.initial_covariances, config.diagonal_covariances
+            )
+        else:
+            covs_name = "covs"
+            initial_covs = config.initial_covariances
         if config.diagonal_covariances:
             covs_layer = DiagonalMatricesLayer(
                 config.n_modes,
                 config.n_channels,
                 config.learn_covariances,
-                config.initial_covariances,
+                initial_covs,
                 config.covariances_epsilon,
                 config.covariances_regularizer,
-                name="covs",
+                name=covs_name,
             )
         else:
             covs_layer = CovarianceMatricesLayer(
                 config.n_modes,
                 config.n_channels,
                 config.learn_covariances,
-                config.initial_covariances,
+                initial_covs,
                 config.covariances_epsilon,
                 config.covariances_regularizer,
-                name="covs",
+                name=covs_name,
             )
         mix_means_layer = MixVectorsLayer(name="mix_means")
-        mix_covs_layer = MixMatricesLayer(name="mix_covs")
-        ll_loss_layer = LogLikelihoodLossLayer(config.loss_calc, name="ll_loss")
+        mix_covs_layer = MixMatricesLayer(name="mix_" + covs_name)
+        ll_loss_layer = LogLikelihoodLossLayer(
+            config.loss_calc, config.mix_precisions, name="ll_loss"
+        )
         theta_drop_layer = tf.keras.layers.Dropout(
             config.model_dropout,
             name="theta_drop",
@@ -367,7 +393,21 @@ class Model(VariationalInferenceModelBase):
         covariances : np.ndarary
             Mode covariances.
         """
+        if self.config.mix_precisions:
+            return obs_mod.invert_matrices(self.get_precisions())
         return obs_mod.get_observation_model_parameter(self.model, "covs")
+
+    def get_precisions(self):
+        """Get the mode precisions (inverse covariances).
+
+        Returns
+        -------
+        precisions : np.ndarary
+            Mode precisions.
+        """
+        if self.config.mix_precisions:
+            return obs_mod.get_observation_model_parameter(self.model, "precs")
+        return obs_mod.invert_matrices(self.get_covariances())
 
     def get_means_covariances(self):
         """Get the mode means and covariances.
@@ -416,10 +456,17 @@ class Model(VariationalInferenceModelBase):
             Do we want to use the passed covariances when we re-initialize
             the model?
         """
+        if self.config.mix_precisions:
+            covariances = obs_mod.invert_matrices(
+                covariances, self.config.diagonal_covariances
+            )
+            layer_name = "precs"
+        else:
+            layer_name = "covs"
         obs_mod.set_observation_model_parameter(
             self.model,
             covariances,
-            layer_name="covs",
+            layer_name=layer_name,
             update_initializer=update_initializer,
             diagonal_covariances=self.config.diagonal_covariances,
         )
@@ -477,7 +524,9 @@ class Model(VariationalInferenceModelBase):
         if self.config.learn_means:
             obs_mod.set_means_regularizer(self.model, range_, scale_factor)
 
-        if self.config.learn_covariances:
+        if self.config.learn_covariances and self.config.mix_precisions:
+            _logger.warning("No regularizer is set for the mode precisions.")
+        elif self.config.learn_covariances:
             obs_mod.set_covariances_regularizer(
                 self.model,
                 range_,
@@ -487,7 +536,10 @@ class Model(VariationalInferenceModelBase):
             )
 
     def fit_and_get_alpha(self, dataset, sigmas=None, epochs=None, verbose=1,
-                          do_kl_annealing=None, n_kl_annealing_epochs=None):
+                          do_kl_annealing=None, n_kl_annealing_epochs=None,
+                          kl_factor=None, freeze_covariances=False,
+                          freeze_means=False, regress_means=False,
+                          coordinated_dropout=0.0):
         """Fit DyNeMo and return per-session mode mixing coefficients.
 
         Runs a custom GradientTape loop training all model parameters
@@ -513,13 +565,13 @@ class Model(VariationalInferenceModelBase):
 
             is added to the ELBO after the inference network has produced
             :math:`\\alpha_t` from the first-order data.  :math:`\\Lambda_t`
-            is the inverse of the *blended* covariance at each time step, not
-            a weighted sum of per-mode precisions.  A ``tf.stop_gradient`` is
-            applied to :math:`\\alpha_t` inside the blended covariance so
-            that only the mode-covariance parameters :math:`D_k` receive the
-            second-order gradient; the inference RNN is updated solely by the
-            standard ELBO.  Pass ``None`` (default) for the original
-            first-order behaviour.
+            is the mixed precision: the inverse of the blended covariance, or
+            with ``mix_precisions`` the blended precision
+            :math:`\\sum_k \\alpha_{t,k} P_k` (no inverse).  Unless
+            ``config.second_order_alpha_gradient``, :math:`\\alpha_t` is held
+            fixed in this term (``tf.stop_gradient``), so only the mode
+            matrices receive its gradient.  Pass ``None`` (default) for the
+            original first-order behaviour.
         epochs : int, optional
             Number of training epochs.  Defaults to ``config.n_epochs``.
         verbose : int, optional
@@ -530,6 +582,23 @@ class Model(VariationalInferenceModelBase):
         n_kl_annealing_epochs : int, optional
             Override ``config.n_kl_annealing_epochs`` for this call only.
             ``None`` (default) uses the config value.
+        kl_factor : float, optional
+            Fixed KL weight for the whole call (no annealing within it), for
+            a KL annealing schedule across calls. ``None`` (default): as set
+            by ``do_kl_annealing``.
+        freeze_covariances, freeze_means : bool, optional
+            Hold the mode matrices / means fixed in this call (their gradients
+            are zeroed; exact if they have not been trained before).
+        regress_means : bool, optional
+            Before training, set the means by ridge regression of the data on
+            the alpha the inference network gives for it.
+        coordinated_dropout : float, optional
+            Rate of conditional coordinated dropout: per sequence, each channel
+            is hidden from the inference network with this probability (at
+            least one hidden and one shown), and the log-likelihood (with its
+            second-order term) is that of the hidden channels given the shown
+            ones, rescaled by n_channels / n_hidden. The returned alpha is then
+            inferred from all channels after training (:code:`infer_alpha`).
 
         Returns
         -------
@@ -540,6 +609,8 @@ class Model(VariationalInferenceModelBase):
 
         print('KL annealing is', 'ON' if (do_kl_annealing if do_kl_annealing is not None else self.config.do_kl_annealing) else 'OFF')
         print('KL annealing epochs:', n_kl_annealing_epochs if n_kl_annealing_epochs is not None else self.config.n_kl_annealing_epochs)
+        if kl_factor is not None:
+            print('KL factor (fixed for this call):', kl_factor)
         print('##########################################################')
         if epochs is None:
             epochs = self.config.n_epochs
@@ -623,132 +694,50 @@ class Model(VariationalInferenceModelBase):
                          else (self.config.n_kl_annealing_epochs if do_kl else 0))
         decay_start   = n_kl if do_kl else 0
 
-        # Reset KL factor to 0 at the start of each fit call.
-        if do_kl:
+        # Reset KL factor to 0 at the start of each fit call, or hold the
+        # given factor for the whole call.
+        if kl_factor is not None:
+            do_kl, n_kl, decay_start = False, 0, 0
+            kl_loss_layer.annealing_factor.assign(float(kl_factor))
+        elif do_kl:
             kl_loss_layer.annealing_factor.assign(0.0)
 
         # ------------------------------------------------------------------
-        # 3a. Compiled sigma training step (built once, cached on self).
+        # 3a. Compiled training step (built once per variant, cached on self).
         #
-        #     Design rationale
-        #     ----------------
-        #     The inference RNN only sees first-order data x_t and infers
-        #     alpha_t.  The second-order correction
+        #     The inference RNN sees the first-order data x_t = E[A_t] only.
+        #     With sigmas, the expected log-likelihood under q(A) adds
         #
-        #         0.5 * tr(inv(sum_k alpha_k * D_k) * Sigma_t)
-        #           = 0.5 * tr(Lambda_t * Sigma_t)
+        #         0.5 * tr(Lambda_t Sigma_t)
         #
-        #     is added to the ELBO *after* alpha_t has been produced, with
-        #     tf.stop_gradient applied to alpha inside the blended covariance
-        #     so that only the mode covariance parameters D_k receive this
-        #     gradient.  The inference RNN is updated solely by the standard
-        #     NLL + KL ELBO.
-        #
-        #     We call all DyNeMo layers manually (rather than self.model(batch))
-        #     so that D_k's gradient accumulates correctly from two paths:
-        #       - NLL path: through C = mix_covs(alpha, D)
-        #       - correction path: through C_sg = mix_covs(stop_gradient(alpha), D)
-        #     Both contributions are correct and desired.
+        #     to the loss, where Lambda_t is the mixed precision: with
+        #     mix_precisions, Lambda_t = sum_k alpha_{t,k} P_k, so the term is
+        #     0.5 * sum_k alpha_{t,k} tr(P_k Sigma_t) and needs no inverse;
+        #     otherwise Lambda_t = (sum_k alpha_{t,k} D_k)^{-1}. The term
+        #     depends on alpha as well as on the mode matrices. With
+        #     config.second_order_alpha_gradient the encoder gets its gradient
+        #     (the exact ELBO, as the HMM folds the term into its E-step);
+        #     otherwise alpha is held fixed in it (stop_gradient) and only the
+        #     mode matrices learn from it.
         #
         #     kl_loss_layer.annealing_factor and optimizer.learning_rate are
         #     TF Variables, so per-epoch Python assignments outside @tf.function
         #     are visible inside the compiled graph without retracing.
         # ------------------------------------------------------------------
-        if sigmas is not None and not hasattr(self, "_profumo_train_step_sigma"):
-            _all_vars         = all_vars
-            _opt              = optimizer
-            _data_drop_layer  = self.model.get_layer("data_drop")
-            _inf_rnn_layer    = self.model.get_layer("inf_rnn")
-            _inf_mu_layer     = self.model.get_layer("inf_mu")
-            _inf_sigma_layer  = self.model.get_layer("inf_sigma")
-            _theta_layer      = self.model.get_layer("theta")
-            _alpha_layer      = alpha_layer
-            _means_layer      = self.model.get_layer("means")
-            _covs_layer       = self.model.get_layer("covs")
-            _mix_means_layer  = self.model.get_layer("mix_means")
-            _mix_covs_layer   = self.model.get_layer("mix_covs")
-            _ll_loss_layer    = self.model.get_layer("ll_loss")
-            _theta_drop_layer = self.model.get_layer("theta_drop")
-            _mod_rnn_layer    = self.model.get_layer("mod_rnn")
-            _mod_mu_layer     = self.model.get_layer("mod_mu")
-            _mod_sigma_layer  = self.model.get_layer("mod_sigma")
-            _kl_div_layer     = self.model.get_layer("kl_div")
-            _kl_loss_layer    = kl_loss_layer
-            _loss_calc        = self.config.loss_calc  # constant; baked in at trace time
-
-            @tf.function
-            def _train_step_sigma(x_batch, sigma_batch):
-                with tf.GradientTape() as tape:
-                    # ---- Encoder: first-order path (unchanged) ----------
-                    data_drop = _data_drop_layer(x_batch, training=True)
-                    inf_rnn   = _inf_rnn_layer(data_drop, training=True)
-                    inf_mu    = _inf_mu_layer(inf_rnn, training=True)
-                    inf_sigma = _inf_sigma_layer(inf_rnn, training=True)
-                    theta     = _theta_layer([inf_mu, inf_sigma], training=True)
-                    alpha     = _alpha_layer(theta, training=True)
-
-                    # ---- Observation model ------------------------------
-                    mu = _means_layer(x_batch, training=True)
-                    D  = _covs_layer(x_batch, training=True)   # (K, M, M)
-                    m  = _mix_means_layer([alpha, mu], training=True)
-                    C  = _mix_covs_layer([alpha, D], training=True)
-                    # LogLikelihoodLossLayer returns tf.expand_dims(nll, -1)
-                    nll = tf.squeeze(
-                        _ll_loss_layer([x_batch, m, C], training=True))
-
-                    # ---- KL prior (temporal model RNN) ------------------
-                    theta_drop = _theta_drop_layer(theta, training=True)
-                    mod_rnn    = _mod_rnn_layer(theta_drop, training=True)
-                    mod_mu     = _mod_mu_layer(mod_rnn, training=True)
-                    mod_sigma  = _mod_sigma_layer(mod_rnn, training=True)
-                    kl_div     = _kl_div_layer(
-                        [inf_mu, inf_sigma, mod_mu, mod_sigma], training=True)
-                    # KLLossLayer applies annealing_factor; returns expand_dims(kl, -1)
-                    kl = tf.squeeze(_kl_loss_layer(kl_div, training=True))
-
-                    # ---- Second-order Bayesian correction ---------------
-                    # Correct term: 0.5 * tr(Λ_t Σ_t) where
-                    # Λ_t = (sum_k α_{t,k} D_k)^{-1}  (blended precision).
-                    # Recompute blended covariance with stop_gradient(alpha)
-                    # so the inference RNN receives no gradient from this
-                    # term; only D_k is updated.  MixMatricesLayer has no
-                    # trainable params, so calling it twice is safe — the
-                    # D gradients from both C and C_sg accumulate correctly.
-                    alpha_sg = tf.stop_gradient(alpha)                    # (B, S, K)
-                    C_sg     = _mix_covs_layer([alpha_sg, D],
-                                               training=True)             # (B, S, M, M)
-                    Lambda_t = tf.linalg.inv(C_sg)                       # (B, S, M, M)
-                    corr     = tf.einsum("bsmn,bsmn->bs",
-                                         Lambda_t, sigma_batch)           # (B, S)
-                    if _loss_calc == "sum":
-                        sigma_corr = 0.5 * tf.reduce_mean(
-                            tf.reduce_sum(corr, axis=1))
-                    else:
-                        sigma_corr = 0.5 * tf.reduce_mean(corr)
-
-                    loss = nll + kl + sigma_corr
-
-                grads = tape.gradient(loss, _all_vars)
-                _opt.apply_gradients(zip(grads, _all_vars))
-                return loss, theta
-
-            self._profumo_train_step_sigma = _train_step_sigma
-
-        if sigmas is None and not hasattr(self, "_profumo_train_step"):
-            _all_vars = all_vars
-            _opt      = optimizer
-            _model    = self.model
-
-            @tf.function
-            def _train_step(x_batch):
-                with tf.GradientTape() as tape:
-                    outputs = _model({"data": x_batch}, training=True)
-                    loss = tf.add_n(_model.losses)
-                grads = tape.gradient(loss, _all_vars)
-                _opt.apply_gradients(zip(grads, _all_vars))
-                return loss, outputs["theta"]
-
-            self._profumo_train_step = _train_step
+        use_sigma  = sigmas is not None
+        alpha_grad = bool(self.config.second_order_alpha_gradient)
+        if not hasattr(self, "_profumo_train_steps"):
+            self._profumo_train_steps = {}
+        cd_rate    = float(coordinated_dropout)
+        step_key = (use_sigma, alpha_grad, cd_rate)
+        if step_key not in self._profumo_train_steps:
+            self._profumo_train_steps[step_key] = self._make_profumo_train_step(
+                optimizer, use_sigma, alpha_grad, cd_rate)
+        train_step = self._profumo_train_steps[step_key]
+        self._profumo_grad_scales["mats"].assign(0.0 if freeze_covariances else 1.0)
+        self._profumo_grad_scales["means"].assign(0.0 if freeze_means else 1.0)
+        if regress_means:
+            self._profumo_regress_means(dataset)
 
         # ------------------------------------------------------------------
         # 3b. Custom GradientTape training loop.
@@ -784,23 +773,22 @@ class Model(VariationalInferenceModelBase):
             )
             optimizer.learning_rate = cur_lr
 
-            theta_batches = []
-            epoch_loss    = 0.0
-            n_batches     = 0
+            inf_mu_batches = []
+            inf_sigma_batches = []
+            epoch_loss     = 0.0
+            n_batches      = 0
 
             for batch in tf_dataset:
-                if sigmas is None:
-                    loss, theta_out = self._profumo_train_step(batch["data"])
-                else:
-                    loss, theta_out = self._profumo_train_step_sigma(
-                        batch["data"],
-                        tf.cast(batch["sigma"], tf.float32))
+                sigma_batch = (tf.cast(batch["sigma"], tf.float32)
+                               if use_sigma else None)
+                loss, inf_mu_out, inf_sigma_out = train_step(batch["data"], sigma_batch)
 
                 epoch_loss += float(loss)
                 n_batches  += 1
 
                 if epoch == epochs - 1:
-                    theta_batches.append(theta_out.numpy())  # (B, seq_len, K)
+                    inf_mu_batches.append(inf_mu_out.numpy())  # (B, seq_len, K)
+                    inf_sigma_batches.append(inf_sigma_out.numpy())
 
             avg_loss = epoch_loss / max(n_batches, 1)
             epoch_losses.append(avg_loss)
@@ -811,12 +799,19 @@ class Model(VariationalInferenceModelBase):
 
         # Store history so get_free_energy() can read it.
         self.history = {"loss": epoch_losses}
+        if cd_rate > 0:
+            # The last epoch's alpha saw masked inputs
+            return self.infer_alpha(dataset)
 
         # ------------------------------------------------------------------
-        # 4. Recover alpha from last-epoch theta.
+        # 4. Recover alpha from the last epoch: its posterior expectation
+        #    E_q[alpha] = E[softmax(theta)], theta ~ N(inf_mu, inf_sigma),
+        #    which is what PROFUMO's update needs (Lambda_t is linear in
+        #    alpha); not softmax(inf_mu) (sharper) nor a single sample.
         # ------------------------------------------------------------------
-        last_theta_seqs = np.concatenate(theta_batches, axis=0)  # (N, S, K)
-        last_alpha_seqs = alpha_layer(last_theta_seqs).numpy()    # (N, S, K)
+        last_alpha_seqs = self._expected_alpha(
+            np.concatenate(inf_mu_batches, axis=0),
+            np.concatenate(inf_sigma_batches, axis=0))            # (N, S, K)
 
         # ------------------------------------------------------------------
         # 5. Reassemble per-session alpha with remainder padding.
@@ -841,6 +836,373 @@ class Model(VariationalInferenceModelBase):
             seq_offset += n_seqs
 
         return alphas
+
+    def infer_alpha(self, dataset, batch_size=256):
+        """Per-session alpha from the inference network alone (no training).
+
+        PROFUMO's E-step without an M-step (subject-only updates, e.g. in
+        bigData batches): alpha is its posterior expectation
+        :code:`E[softmax(theta)]` (see :code:`_expected_alpha`), with sessions
+        cut into :code:`sequence_length` windows and the remainder padded as
+        in :code:`fit_and_get_alpha`.
+
+        Parameters
+        ----------
+        dataset : list of np.ndarray
+            Per-session data arrays, each shaped ``(T_i, n_channels)``.
+        batch_size : int, optional
+            Number of windows per forward pass.
+
+        Returns
+        -------
+        alphas : list of np.ndarray
+            Per-session mode mixing coefficients, each ``(T_i, n_modes)``.
+        """
+        seq_len    = self.config.sequence_length
+        n_channels = self.config.n_channels
+        n_modes    = self.config.n_modes
+
+        if not hasattr(self, "_profumo_encoder"):
+            L = {name: self.model.get_layer(name) for name in
+                 ["data_drop", "inf_rnn", "inf_mu", "inf_sigma"]}
+
+            @tf.function
+            def encoder(x):
+                h = L["inf_rnn"](L["data_drop"](x, training=False), training=False)
+                return (L["inf_mu"](h, training=False),
+                        L["inf_sigma"](h, training=False))
+
+            self._profumo_encoder = encoder
+
+        lengths = [x.shape[0] for x in dataset]
+        n_seqs  = [T // seq_len for T in lengths]
+        seqs = [x[:n * seq_len].reshape(n, seq_len, n_channels).astype(np.float32)
+                for x, n in zip(dataset, n_seqs) if n > 0]
+        alpha_seqs = None
+        if seqs:
+            x_all = np.concatenate(seqs, axis=0)
+            outs = [self._profumo_encoder(x_all[i:i + batch_size])
+                    for i in range(0, x_all.shape[0], batch_size)]
+            alpha_seqs = self._expected_alpha(
+                np.concatenate([o[0].numpy() for o in outs], axis=0),
+                np.concatenate([o[1].numpy() for o in outs], axis=0))
+
+        alphas, offset = [], 0
+        for T, n in zip(lengths, n_seqs):
+            if n == 0:
+                alphas.append(np.full((T, n_modes), 1.0 / n_modes, dtype=np.float32))
+                continue
+            a = alpha_seqs[offset: offset + n].reshape(n * seq_len, n_modes)
+            if T > n * seq_len:
+                a = np.concatenate([a, np.tile(a[-1:], (T - n * seq_len, 1))], axis=0)
+            alphas.append(a.astype(np.float32))
+            offset += n
+        return alphas
+
+    def _expected_alpha(self, inf_mu, inf_sigma, n_samples=20, seed=0):
+        """Posterior expectation of alpha, E[softmax(theta)].
+
+        Monte Carlo over :code:`n_samples` draws of
+        :code:`theta ~ N(inf_mu, inf_sigma)` through the alpha layer (with its
+        temperature). Arrays are ``(..., n_modes)``. PROFUMO can override
+        :code:`n_samples` with :code:`self._profumo_alpha_samples`; 0 gives
+        softmax(inf_mu) instead (sharper than E[alpha]).
+        """
+        alpha_layer = self.model.get_layer("alpha")
+        n_samples = getattr(self, "_profumo_alpha_samples", n_samples)
+        if n_samples <= 0:
+            return alpha_layer(inf_mu).numpy()
+        rng = np.random.default_rng(seed)
+        total = np.zeros(inf_mu.shape, dtype=np.float64)
+        for _ in range(n_samples):
+            theta = inf_mu + inf_sigma * rng.standard_normal(inf_mu.shape).astype(np.float32)
+            total += alpha_layer(theta).numpy()
+        return (total / n_samples).astype(np.float32)
+
+    def profumo_nfindr_initialization(self, dataset, n_init=0, n_init_epochs=2,
+                                      window_length=None, n_restarts=10,
+                                      init_means=True):
+        """N-FINDR initialization for PROFUMO's DyNeMo.
+
+        The mode matrices are set to the N-FINDR vertices of the windows of
+        :code:`dataset` (:func:`osl_dynamics.models.nfindr.nfindr_covariances`;
+        window precisions with a maximum likelihood refit if the model mixes
+        precisions) and, if the means are learnt and :code:`init_means`, the
+        means to the N-FINDR vertices of the window means. With means, each
+        window is centred before its second moment is taken. The model is
+        then trained from there for :code:`n_init_epochs` epochs on
+        :code:`n_init` random subsets, keeping the best (none if
+        :code:`n_init` is 0).
+
+        Parameters
+        ----------
+        dataset : list of np.ndarray
+            Per-session data, each ``(T_i, n_channels)``.
+        n_init, n_init_epochs : int, optional
+            Short random-subset fits from the N-FINDR start.
+        window_length : int, optional
+            Window length. Defaults to max(20, n_channels) for precision
+            mixing and 20 otherwise, at most :code:`sequence_length`.
+        n_restarts : int, optional
+            Random starts of N-FINDR.
+        init_means : bool, optional
+            Also set the means with N-FINDR (if they are learnt).
+        """
+        from osl_dynamics.models.nfindr import nfindr_covariances, nfindr_means
+
+        precisions = self.config.mix_precisions
+        n_channels = self.config.n_channels
+        if window_length is None:
+            window_length = max(20, n_channels) if precisions else 20
+        window_length = min(window_length, self.config.sequence_length)
+        x = [np.asarray(d, dtype=np.float64) for d in dataset]
+        learn_means = self.config.learn_means
+        if learn_means:
+            # Centre each window, so the mode means do not enter its second moment
+            windows = []
+            for d in x:
+                n = d.shape[0] // window_length
+                w = d[: n * window_length].reshape(n, window_length, n_channels)
+                windows.extend(w - w.mean(axis=1, keepdims=True))
+            cov_input = windows
+        else:
+            cov_input = x
+        seed = np.random.randint(2**31 - 1)
+        covariances = nfindr_covariances(
+            cov_input, self.config.n_modes, window_length=window_length,
+            n_restarts=n_restarts, precisions=precisions, random_seed=seed)
+        self.set_covariances(covariances, update_initializer=True)
+        print(f"[profumo_nfindr_initialization] mode matrices from N-FINDR "
+              f"(window {window_length}, {'precisions' if precisions else 'covariances'})")
+        if learn_means and init_means:
+            means = nfindr_means(x, self.config.n_modes, random_seed=seed)
+            self.set_means(means, update_initializer=True)
+            print("[profumo_nfindr_initialization] means from N-FINDR")
+        if n_init > 0:
+            from osl_dynamics.data import Data
+            self.random_subset_initialization(Data(dataset), n_epochs=n_init_epochs,
+                                              n_init=n_init)
+
+    def profumo_hmm_initialization(self, dataset, n_init=0, n_init_epochs=2,
+                                   hmm_epochs=20, init_means=True, sigma_mean=None):
+        """HMM initialization for PROFUMO's DyNeMo.
+
+        A hidden Markov model with :code:`n_modes` states (full covariances,
+        and means if the model learns them and :code:`init_means`) is fitted
+        to :code:`dataset`, and DyNeMo's mode covariances (and means) are set
+        to its state covariances (and means). When the modes are often close
+        to pure, the HMM states sit near the mode matrices, and they are
+        estimated from every sample rather than from short windows (as in
+        N-FINDR). The model is then trained from there for
+        :code:`n_init_epochs` epochs on :code:`n_init` random subsets,
+        keeping the best (none if :code:`n_init` is 0).
+
+        Parameters
+        ----------
+        dataset : list of np.ndarray
+            Per-session data, each ``(T_i, n_channels)``.
+        n_init, n_init_epochs : int, optional
+            Short random-subset fits from the HMM start.
+        hmm_epochs : int, optional
+            Training epochs of the HMM.
+        init_means : bool, optional
+            Also set the means from the HMM (if they are learnt).
+        sigma_mean : np.ndarray, optional
+            Average posterior covariance of the data, ``(n_channels,
+            n_channels)``. If given, it is added to the HMM state
+            covariances: with uncertain data the M-step needs
+            :code:`E[x x'] = E[x] E[x]' + Sigma`, and the HMM only saw
+            :code:`E[x]`.
+        """
+        from osl_dynamics.data import Data
+        from osl_dynamics.models import hmm
+
+        means = bool(self.config.learn_means and init_means)
+        hmm_config = hmm.Config(
+            n_states=self.config.n_modes,
+            n_channels=self.config.n_channels,
+            sequence_length=self.config.sequence_length,
+            learn_means=means,
+            learn_covariances=True,
+            batch_size=self.config.batch_size,
+            learning_rate=0.01,
+            n_epochs=hmm_epochs,
+        )
+        hmm_model = hmm.Model(hmm_config)
+        data = Data([np.asarray(d, dtype=np.float32) for d in dataset])
+        hmm_model.random_state_time_course_initialization(data, n_epochs=2, n_init=3)
+        hmm_model.fit(data, verbose=0)
+        covariances = hmm_model.get_covariances()
+        if sigma_mean is not None:
+            covariances = covariances + np.asarray(sigma_mean, dtype=np.float32)[None]
+        self.set_covariances(covariances, update_initializer=True)
+        print(f"[profumo_hmm_initialization] mode covariances from a {hmm_epochs}-epoch HMM"
+              + (" + average posterior covariance" if sigma_mean is not None else ""))
+        if means:
+            self.set_means(hmm_model.get_means(), update_initializer=True)
+            print("[profumo_hmm_initialization] means from the HMM")
+        del hmm_model
+        if n_init > 0:
+            self.random_subset_initialization(data, n_epochs=n_init_epochs, n_init=n_init)
+
+    def _profumo_regress_means(self, dataset, ridge=1e-3):
+        """Set the means by ridge regression of the data on the inferred alpha.
+
+        Under :code:`m_t = sum_k alpha_tk mu_k`, the least-squares means given
+        alpha solve :code:`(A'A + ridge T I) mu = A'X` (pooled over sessions).
+        """
+        alphas = self.infer_alpha(dataset)
+        a = np.concatenate(alphas).astype(np.float64)
+        x = np.concatenate([np.asarray(d, dtype=np.float64) for d in dataset])
+        gram = a.T @ a + ridge * len(a) * np.eye(a.shape[1])
+        means = np.linalg.solve(gram, a.T @ x)
+        self.set_means(means.astype(np.float32), update_initializer=False)
+        print("[_profumo_regress_means] means regressed on alpha")
+
+    def _make_profumo_train_step(self, optimizer, use_sigma, alpha_grad, cd_rate=0.0):
+        """Compiled training step for :code:`fit_and_get_alpha`.
+
+        The layers are called one by one (rather than :code:`self.model`) so
+        that the second-order term can reuse alpha and the mode matrices.
+        Returns a function of :code:`(x_batch, sigma_batch)` giving the loss
+        and the inference network's posterior mean of theta.
+        """
+        model     = self.model
+        all_vars  = model.trainable_variables
+        mats_name = "precs" if self.config.mix_precisions else "covs"
+        names     = ["data_drop", "inf_rnn", "inf_mu", "inf_sigma", "theta",
+                     "alpha", "means", mats_name, "mix_means",
+                     "mix_" + mats_name, "ll_loss", "theta_drop", "mod_rnn",
+                     "mod_mu", "mod_sigma", "kl_div", "kl_loss"]
+        L              = {name: model.get_layer(name) for name in names}
+        mix_precisions = self.config.mix_precisions
+        loss_calc      = self.config.loss_calc
+
+        # Gradient multipliers (0 = frozen) for the mode matrices and means,
+        # shared by every compiled variant and set per call
+        if not hasattr(self, "_profumo_grad_scales"):
+            self._profumo_grad_scales = {
+                "mats": tf.Variable(1.0, trainable=False),
+                "means": tf.Variable(1.0, trainable=False),
+            }
+        mats_ids  = {id(v) for v in L[mats_name].trainable_variables}
+        means_ids = {id(v) for v in L["means"].trainable_variables}
+        mults = [self._profumo_grad_scales["mats"] if id(v) in mats_ids
+                 else self._profumo_grad_scales["means"] if id(v) in means_ids
+                 else None for v in all_vars]
+
+        # Conditional coordinated dropout helpers. With the hidden-channel mask
+        # h (B, 1, M), the shown channels' covariance is embedded in an M x M
+        # matrix with the identity on the hidden channels, so every sequence
+        # has the same shapes whatever its mask
+        log2pi = np.log(2 * np.pi)
+
+        def reduce_t(v):
+            # (B, S) -> scalar, as LogLikelihoodLossLayer
+            if loss_calc == "sum":
+                return tf.reduce_mean(tf.reduce_sum(v, axis=1))
+            return tf.reduce_mean(v)
+
+        def shown_covariance(Lam, h_mask):
+            v_mask = 1.0 - h_mask
+            vv = v_mask[..., :, None] * v_mask[..., None, :]
+            cov = tf.linalg.inv(Lam)
+            eye_h = tf.linalg.diag(tf.broadcast_to(h_mask, tf.shape(cov)[:-1]))
+            return cov * vv + eye_h, v_mask, vv
+
+        def conditional_ll(x, m, Lam, h_mask):
+            # log p(x_hidden | x_shown) = log p(x) - log p(x_shown), (B, S)
+            d = x - m
+            Lc = tf.linalg.cholesky(Lam)
+            z = tf.linalg.matvec(Lc, d, adjoint_a=True)
+            ll_full = (tf.reduce_sum(tf.math.log(tf.linalg.diag_part(Lc)), axis=-1)
+                       - 0.5 * tf.reduce_sum(tf.square(z), axis=-1))
+            cov_v, v_mask, _ = shown_covariance(Lam, h_mask)
+            Lv = tf.linalg.cholesky(cov_v)
+            zv = tf.linalg.triangular_solve(Lv, (d * v_mask)[..., None], lower=True)[..., 0]
+            ll_shown = (-tf.reduce_sum(tf.math.log(tf.linalg.diag_part(Lv)), axis=-1)
+                        - 0.5 * tf.reduce_sum(tf.square(zv), axis=-1))
+            n_hidden = tf.reduce_sum(h_mask, axis=-1)            # (B, 1)
+            return ll_full - ll_shown - 0.5 * n_hidden * log2pi
+
+        @tf.function
+        def train_step(x_batch, sigma_batch):
+            with tf.GradientTape() as tape:
+                # Encoder: first-order data only
+                if cd_rate > 0:
+                    u = tf.random.uniform(
+                        tf.stack([tf.shape(x_batch)[0], 1, tf.shape(x_batch)[-1]]))
+                    hidden = tf.logical_or(
+                        u < cd_rate, u <= tf.reduce_min(u, axis=-1, keepdims=True))
+                    hidden = tf.logical_and(
+                        hidden, u < tf.reduce_max(u, axis=-1, keepdims=True))
+                    h_mask = tf.cast(hidden, x_batch.dtype)       # (B, 1, M)
+                    cd_scale = (tf.cast(tf.shape(x_batch)[-1], x_batch.dtype)
+                                / tf.reduce_sum(h_mask, axis=-1))  # (B, 1)
+                    enc_in = x_batch * (1.0 - h_mask) / (1.0 - cd_rate)
+                else:
+                    enc_in = x_batch
+                data_drop = L["data_drop"](enc_in, training=True)
+                inf_rnn   = L["inf_rnn"](data_drop, training=True)
+                inf_mu    = L["inf_mu"](inf_rnn, training=True)
+                inf_sigma = L["inf_sigma"](inf_rnn, training=True)
+                theta     = L["theta"]([inf_mu, inf_sigma], training=True)
+                alpha     = L["alpha"](theta, training=True)
+
+                # Observation model (D: mode covariances or precisions)
+                mu  = L["means"](x_batch, training=True)
+                D   = L[mats_name](x_batch, training=True)        # (K, M, M)
+                m   = L["mix_means"]([alpha, mu], training=True)
+                C   = L["mix_" + mats_name]([alpha, D], training=True)
+                if cd_rate > 0:
+                    Lam = C if mix_precisions else tf.linalg.inv(C)
+                    nll = -reduce_t(cd_scale * conditional_ll(x_batch, m, Lam, h_mask))
+                else:
+                    nll = tf.squeeze(L["ll_loss"]([x_batch, m, C], training=True))
+
+                # Temporal prior (model RNN)
+                theta_drop = L["theta_drop"](theta, training=True)
+                mod_rnn    = L["mod_rnn"](theta_drop, training=True)
+                mod_mu     = L["mod_mu"](mod_rnn, training=True)
+                mod_sigma  = L["mod_sigma"](mod_rnn, training=True)
+                kl_div     = L["kl_div"](
+                    [inf_mu, inf_sigma, mod_mu, mod_sigma], training=True)
+                kl = tf.squeeze(L["kl_loss"](kl_div, training=True))
+
+                loss = nll + kl
+                reg = L["means"].losses + L[mats_name].losses
+                if reg:
+                    loss = loss + tf.add_n(reg)
+
+                # Second-order term 0.5 * tr(Lambda_t Sigma_t)
+                if use_sigma:
+                    a = alpha if alpha_grad else tf.stop_gradient(alpha)
+                    if mix_precisions:
+                        tr_k = tf.einsum("kmn,bsmn->bsk", D, sigma_batch)
+                        corr = tf.reduce_sum(a * tr_k, axis=-1)       # (B, S)
+                    else:
+                        C_a  = L["mix_" + mats_name]([a, D], training=True)
+                        corr = tf.einsum("bsmn,bsmn->bs",
+                                         tf.linalg.inv(C_a), sigma_batch)
+                    if cd_rate > 0:
+                        # E_q log p(x_h | x_v): minus 0.5 tr(C_vv^-1 Sigma_vv) too
+                        if mix_precisions:
+                            Lam_a = L["mix_" + mats_name]([a, D], training=True)
+                        else:
+                            Lam_a = tf.linalg.inv(L["mix_" + mats_name]([a, D], training=True))
+                        cov_v_a, _, vv = shown_covariance(Lam_a, h_mask)
+                        corr_v = tf.einsum("bsmn,bsmn->bs", tf.linalg.inv(cov_v_a),
+                                           sigma_batch * vv)
+                        corr = cd_scale * (corr - corr_v)
+                    loss = loss + 0.5 * reduce_t(corr)
+
+            grads = tape.gradient(loss, all_vars)
+            grads = [g if (m is None or g is None) else g * m
+                     for g, m in zip(grads, mults)]
+            optimizer.apply_gradients(zip(grads, all_vars))
+            return loss, inf_mu, inf_sigma
+
+        return train_step
 
     def sample_alpha(self, n_samples, theta=None):
         """Uses the model RNN to sample mode mixing factors, :code:`alpha`.
