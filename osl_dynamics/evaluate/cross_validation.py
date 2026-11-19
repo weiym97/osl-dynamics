@@ -1657,7 +1657,10 @@ class NCV():
         if self.model == 'swc':
             prepare_config['log_likelihood'] = {'static_FC': False,'infer_alpha':True}
         else:
+            # Held-out free energy (ncv_free_energy.json) and model evidence (ncv_evidence.json).
+            # Separate pipeline steps, so a failure in one does not lose the other.
             prepare_config['free_energy'] = {}
+            prepare_config['evidence'] = {}
         prepare_config['keep_list'] = self.row_test
 
         with open(f'{self.save_dir}/prepared_ncv_config.yaml', 'w') as file:

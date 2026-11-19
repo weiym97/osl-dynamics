@@ -1414,6 +1414,42 @@ def free_energy(data, output_dir):
         json.dump([free_energy], f)
 
 
+def evidence(data, output_dir):
+    """Model evidence (marginal log-likelihood) of the data.
+
+    This function expects a model has already been trained and the following
+    directories to exist:
+
+    - :code:`<output_dir>/model`, which contains the trained model.
+
+    This function will create the following file:
+
+    - :code:`<output_dir>/ncv_evidence.json`, which contains :code:`[evidence]`,
+      averaged over sequences like :code:`ncv_free_energy.json`.
+
+    Only models with an :code:`evidence()` method (HMM-type models) are supported.
+    For other models (e.g. DyNeMo) a warning is logged and no file is written.
+
+    Parameters
+    ----------
+    data : osl_dynamics.data.Data
+        Data object.
+    output_dir : str
+        Path to output directory.
+    """
+    from osl_dynamics import models
+    if data is None:
+        raise ValueError("data must be passed.")
+
+    model = models.load(f"{output_dir}/model/")
+    if not hasattr(model, "evidence"):
+        _logger.warning(f"{type(model).__name__} has no evidence(): ncv_evidence.json not written.")
+        return
+    evidence = float(model.evidence(data))
+    with open(os.path.join(output_dir, 'ncv_evidence.json'), 'w') as f:
+        json.dump([evidence], f)
+
+
 def multitaper_spectra(data, output_dir, kwargs, nnmf_components=None):
     """Calculate multitaper spectra.
 
