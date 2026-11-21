@@ -1485,16 +1485,12 @@ class BatchAnalysis:
         matrices = {}
 
         # Spatial: compare with the full-data covariances restricted to the same channels
-        split_covs = {'Y': np.load(f'{bcv_dir}/Y_train/inf_params/covs.npy'),
-                      'X': np.load(f'{bcv_dir}/X_train/dual_estimates/covs.npy')}
-        for block in ['Y', 'X']:
-            column = indices[f'column_{block}']
-            full_block = full_covs[:, column][:, :, column]
-            matrices[f'riem_{block}'] = twopair_riemannian_distance(full_block, split_covs[block])
+        for block, (full_block, split_block) in self._bcv_split_covs(bcv_dir, indices, full_covs).items():
+            matrices[f'riem_{block}'] = twopair_riemannian_distance(full_block, split_block)
             # Correlation of the off-diagonal FC entries, which ignores the scale of the covariances
-            iu = np.triu_indices(len(column), k=1)
+            iu = np.triu_indices(full_block.shape[-1], k=1)
             full_fc = cov2corr(full_block)[:, iu[0], iu[1]]
-            split_fc = cov2corr(split_covs[block])[:, iu[0], iu[1]]
+            split_fc = cov2corr(split_block)[:, iu[0], iu[1]]
             matrices[f'fc_corr_{block}'] = np.corrcoef(full_fc, split_fc)[:n_state, n_state:]
 
         # Temporal: compare with the full-data time courses of the same subjects
@@ -1551,6 +1547,90 @@ class BatchAnalysis:
             print(f'  state agreement: train {metrics["state_agreement_train"]:.3f}, '
                   f'test {metrics["state_agreement_test"]:.3f}')
         return metrics
+
+    @staticmethod
+    def _bcv_split_covs(bcv_dir, indices, full_covs):
+        '''
+        Covariances of one bi-cross-validation fold (cv_variant 1) next to the full-data covariances
+        restricted to the same channels: {'Y': (full_Y, Y_train covs), 'X': (full_X, X_train dual-estimated covs)}.
+        '''
+        split_covs = {'Y': np.load(f'{bcv_dir}/Y_train/inf_params/covs.npy'),
+                      'X': np.load(f'{bcv_dir}/X_train/dual_estimates/covs.npy')}
+        pairs = {}
+        for block in ['Y', 'X']:
+            column = indices[f'column_{block}']
+            pairs[block] = (full_covs[:, column][:, :, column], split_covs[block])
+        return pairs
+
+    def bcv_state_matching_summary(self, model='hmm', n_state=6, repeat_index=1, statistic='mean'):
+        '''
+        Spatial state matching across every bi-cross-validation fold.
+        For each fold, the fold's states are matched to the full-data fit (repeat_{repeat_index}) by the
+        Hungarian algorithm on the Riemannian distance of the Y_train covariances, as in bcv_state_matching,
+        and the same pairing is applied to the X_train dual-estimated covariances.
+        Each fold then gives four numbers: the mean (or median) distance over the matched pairs and over the
+        unmatched pairs, on the Y and on the X channels.
+        Note that Y matched <= Y unmatched holds in every fold by construction (the pairing minimises the
+        Y distance), so only the X comparison is a test of the matching.
+        Only covariances and fold indices are read, no time courses.
+        Saves the per-fold values (csv) and a box plot (svg, pdf) in analysis/state_matching/.
+        '''
+        summarise = {'mean': np.mean, 'median': np.median}[statistic]
+        model_dir = f'{self.config_path}/{model}_state_{n_state}'
+        save_dir = f'{self.analysis_path}/state_matching/'
+        os.makedirs(save_dir, exist_ok=True)
+        full_covs = np.load(f'{model_dir}/repeat_{repeat_index}/inf_params/covs.npy')
+
+        n_folds = len([f for f in os.listdir(f'{self.config_path}/bcv_partition')
+                       if f.startswith('fold_indices_') and f.endswith('.json')])
+        off_diagonal = ~np.eye(n_state, dtype=bool)
+        rows = []
+        for bcv_index in range(1, n_folds + 1):
+            with open(f'{self.config_path}/bcv_partition/fold_indices_{bcv_index}.json', 'r') as file:
+                indices = json.load(file)
+            pairs = self._bcv_split_covs(f'{model_dir}/bcv_{bcv_index}', indices, full_covs)
+            riem = {block: twopair_riemannian_distance(*pairs[block]) for block in ['Y', 'X']}
+            order, _ = hungarian_pair(riem['Y'], distance=True)
+            perm = order['col']
+            row = {'bcv_index': bcv_index,
+                   'split_state': ' '.join(str(j + 1) for j in perm)}
+            for block in ['Y', 'X']:
+                matrix_reorder = riem[block][:, perm]
+                row[f'{block}_matched'] = float(summarise(np.diagonal(matrix_reorder)))
+                row[f'{block}_unmatched'] = float(summarise(matrix_reorder[off_diagonal]))
+            rows.append(row)
+        df = pd.DataFrame(rows)
+
+        base = f'{save_dir}/{model}_state_{n_state}_repeat_{repeat_index}_riem_{statistic}_summary'
+        df.to_csv(f'{base}.csv', index=False)
+
+        import matplotlib.pyplot as plt
+        columns = ['Y_matched', 'Y_unmatched', 'X_matched', 'X_unmatched']
+        labels = [c.replace('_', ' ') for c in columns]
+        # Draw once so the svg and pdf have the same jitter; the 15 pt tick labels are rotated so they don't collide
+        fig, ax = plt.subplots(figsize=(5, 5))
+        plot_box(data=[df[c].tolist() for c in columns],
+                 labels=labels,
+                 mark_best=False,
+                 demean=False,
+                 y_label=f'{statistic.capitalize()} Riemannian distance',
+                 xtick_step=1,
+                 ax=ax)
+        ax.set_xticklabels(labels, rotation=30, ha='right', rotation_mode='anchor')
+        fig.tight_layout()
+        for ext in ['svg', 'pdf']:
+            fig.savefig(f'{base}.{ext}')
+        plt.close(fig)
+
+        print(f'{model}_state_{n_state} vs repeat_{repeat_index}, {len(df)} folds, '
+              f'{statistic} Riemannian distance per fold (median [IQR] across folds):')
+        for c in columns:
+            q1, q2, q3 = np.percentile(df[c], [25, 50, 75])
+            print(f'  {c:12s} {q2:.3f} [{q1:.3f}, {q3:.3f}]')
+        for block in ['Y', 'X']:
+            frac = float(np.mean(df[f'{block}_matched'] < df[f'{block}_unmatched']))
+            print(f'  {block} matched < unmatched in {frac:.0%} of folds')
+        return df
 
     def plot_bcv_state_matching(self, model='hmm', n_state=6, bcv_index=1, repeat_index=1,
                                 tick_fontsize=15, annot_fontsize=14):
