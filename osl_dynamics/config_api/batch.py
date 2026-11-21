@@ -1561,9 +1561,11 @@ class BatchAnalysis:
         Each heatmap is a 5 x 5 in panel with fixed axes geometry (the same size and fonts as the BCV box plots),
         rows are the full-data states, columns the matched split-derived states, the matched value is written
         on the diagonal and there is no title. Saved as {key}.svg and {key}.pdf next to the matrices.
+        DyNeMo axes are labelled as modes, other models as states.
         '''
         import matplotlib.pyplot as plt
 
+        unit = 'modes' if 'dynemo' in model else 'states'
         plot_dir = f'{self.analysis_path}/state_matching/{model}_state_{n_state}_bcv_{bcv_index}_repeat_{repeat_index}/'
         matrices = np.load(f'{plot_dir}/matrices.npz')
         with open(f'{plot_dir}/metrics.json', 'r') as file:
@@ -1585,8 +1587,8 @@ class BatchAnalysis:
             sns_kwargs['cbar_ax'] = cax
             plot_mode_pairing(matrix_reorder,
                               {'row': row, 'col': perm},
-                              x_label='Split-derived states',
-                              y_label='Full-data states',
+                              x_label=f'Split-derived {unit}',
+                              y_label=f'Full-data {unit}',
                               sns_kwargs=sns_kwargs,
                               ax=ax,
                               annotate_diagonal=True,
