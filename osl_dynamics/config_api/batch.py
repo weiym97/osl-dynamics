@@ -1526,19 +1526,6 @@ class BatchAnalysis:
             metrics[f'{key}_mean'] = float(np.mean(np.diagonal(matrix_reorder)))
             metrics[f'{key}_off_diagonal_mean'] = float(np.mean(matrix_reorder[off_diagonal]))
 
-            if key.startswith('riem'):
-                sns_kwargs = None
-            else:
-                sns_kwargs = {"vmin": -1, "vmax": 1, "center": 0}
-            plot_mode_pairing(matrix_reorder,
-                              {'row': order['row'], 'col': perm},
-                              x_label=f'bcv_{bcv_index} states',
-                              y_label=f'repeat_{repeat_index} states',
-                              title=key,
-                              sns_kwargs=sns_kwargs,
-                              annotate_diagonal=True,
-                              filename=f'{plot_dir}/{key}.svg')
-
         if model == 'hmm':
             # Fraction of time points assigned to the matched state
             inverse_perm = np.argsort(perm)
@@ -1551,6 +1538,9 @@ class BatchAnalysis:
         with open(f'{plot_dir}/metrics.json', 'w') as file:
             json.dump(metrics, file, indent=4)
 
+        self.plot_bcv_state_matching(model=model, n_state=n_state,
+                                     bcv_index=bcv_index, repeat_index=repeat_index)
+
         print(f'{model}_state_{n_state} bcv_{bcv_index} vs repeat_{repeat_index}: '
               f'matched split states {metrics["split_state"]}, '
               f'temporal matching agrees: {metrics["matchings_agree"]}')
@@ -1561,6 +1551,53 @@ class BatchAnalysis:
             print(f'  state agreement: train {metrics["state_agreement_train"]:.3f}, '
                   f'test {metrics["state_agreement_test"]:.3f}')
         return metrics
+
+    def plot_bcv_state_matching(self, model='hmm', n_state=6, bcv_index=1, repeat_index=1,
+                                tick_fontsize=15, annot_fontsize=14):
+        '''
+        Plot the state-matching heatmaps saved by bcv_state_matching.
+        Only matrices.npz and metrics.json are read, so the figures can be redrawn
+        without loading any time courses again.
+        Each heatmap is a 5 x 5 in panel with fixed axes geometry (the same size and fonts as the BCV box plots),
+        rows are the full-data states, columns the matched split-derived states, the matched value is written
+        on the diagonal and there is no title. Saved as {key}.svg and {key}.pdf next to the matrices.
+        '''
+        import matplotlib.pyplot as plt
+
+        plot_dir = f'{self.analysis_path}/state_matching/{model}_state_{n_state}_bcv_{bcv_index}_repeat_{repeat_index}/'
+        matrices = np.load(f'{plot_dir}/matrices.npz')
+        with open(f'{plot_dir}/metrics.json', 'r') as file:
+            metrics = json.load(file)
+        row = [i - 1 for i in metrics['full_state']]
+        perm = [j - 1 for j in metrics['split_state']]
+
+        for key in matrices.files:
+            matrix_reorder = matrices[key][:, perm]
+            if key.startswith('riem'):
+                sns_kwargs = {}
+            else:
+                sns_kwargs = {"vmin": -1, "vmax": 1, "center": 0}
+            # Fixed square heatmap and colour bar of the same height, so every panel lines up;
+            # the space above the heatmap is left for the title added in the figure layout
+            fig = plt.figure(figsize=(5, 5))
+            ax = fig.add_axes([0.15, 0.15, 0.66, 0.66])
+            cax = fig.add_axes([0.84, 0.15, 0.035, 0.66])
+            sns_kwargs['cbar_ax'] = cax
+            plot_mode_pairing(matrix_reorder,
+                              {'row': row, 'col': perm},
+                              x_label='Split-derived states',
+                              y_label='Full-data states',
+                              sns_kwargs=sns_kwargs,
+                              ax=ax,
+                              annotate_diagonal=True,
+                              annot_fontsize=annot_fontsize,
+                              label_fontsize=20,
+                              tick_fontsize=tick_fontsize,
+                              cbar_tick_fontsize=15)
+            ax.tick_params(axis='y', labelrotation=0)
+            for ext in ['svg', 'pdf']:
+                fig.savefig(f'{plot_dir}/{key}.{ext}')
+            plt.close(fig)
             
 
         

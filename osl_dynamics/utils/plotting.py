@@ -2398,6 +2398,9 @@ def plot_mode_pairing(
         annotate_diagonal: bool = False,
         annot_fmt: str = ".2f",
         annot_fontsize: int = 12,
+        label_fontsize: int = 20,
+        tick_fontsize: int = 20,
+        cbar_tick_fontsize: int = 20,
 
 ):
     """
@@ -2423,6 +2426,18 @@ def plot_mode_pairing(
         Axis object to plot on.
     filename : str, optional
         Output filename.
+    annotate_diagonal : bool, optional
+        Write the value of each diagonal cell on the heatmap.
+    annot_fmt : str, optional
+        Format of the diagonal annotations.
+    annot_fontsize : int, optional
+        Font size of the diagonal annotations.
+    label_fontsize : int, optional
+        Font size of the title and axis labels.
+    tick_fontsize : int, optional
+        Font size of the x and y tick labels.
+    cbar_tick_fontsize : int, optional
+        Font size of the colour bar tick labels.
 
     Returns
     -------
@@ -2502,19 +2517,19 @@ def plot_mode_pairing(
             )
     # Set xticks and yticks
     if indices is not None:
-        ax.set_xticks(np.arange(len(indices["col"])) + 0.5, np.array(indices["col"]) + 1, fontsize=20)
-        ax.set_yticks(np.arange(len(indices["row"])) + 0.5, np.array(indices["row"]) + 1, fontsize=20)
+        ax.set_xticks(np.arange(len(indices["col"])) + 0.5, np.array(indices["col"]) + 1, fontsize=tick_fontsize)
+        ax.set_yticks(np.arange(len(indices["row"])) + 0.5, np.array(indices["row"]) + 1, fontsize=tick_fontsize)
     else:
-        ax.set_xticks(np.arange(metrics.shape[1]) + 0.5, np.arange(metrics.shape[1]) + 1, fontsize=20)
-        ax.set_yticks(np.arange(metrics.shape[0]) + 0.5, np.arange(metrics.shape[0]) + 1, fontsize=20)
+        ax.set_xticks(np.arange(metrics.shape[1]) + 0.5, np.arange(metrics.shape[1]) + 1, fontsize=tick_fontsize)
+        ax.set_yticks(np.arange(metrics.shape[0]) + 0.5, np.arange(metrics.shape[0]) + 1, fontsize=tick_fontsize)
 
     # Set title and axis labels
-    ax.set_title(title, fontsize=20)
-    ax.set_xlabel(x_label, fontsize=20)
-    ax.set_ylabel(y_label, fontsize=20)
+    ax.set_title(title, fontsize=label_fontsize)
+    ax.set_xlabel(x_label, fontsize=label_fontsize)
+    ax.set_ylabel(y_label, fontsize=label_fontsize)
 
     cbar = ax.collections[0].colorbar
-    cbar.ax.tick_params(labelsize=20)  # Set colorbar tick label font size
+    cbar.ax.tick_params(labelsize=cbar_tick_fontsize)  # Set colorbar tick label font size
 
     # Save the figure if a filename has been pass
     if filename is not None:
