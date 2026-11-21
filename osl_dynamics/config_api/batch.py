@@ -1603,25 +1603,10 @@ class BatchAnalysis:
 
         base = f'{save_dir}/{model}_state_{n_state}_repeat_{repeat_index}_riem_{statistic}_summary'
         df.to_csv(f'{base}.csv', index=False)
+        self.plot_bcv_state_matching_summary(model=model, n_state=n_state,
+                                             repeat_index=repeat_index, statistic=statistic)
 
-        import matplotlib.pyplot as plt
         columns = ['Y_matched', 'Y_unmatched', 'X_matched', 'X_unmatched']
-        labels = [c.replace('_', ' ') for c in columns]
-        # Draw once so the svg and pdf have the same jitter; the 15 pt tick labels are rotated so they don't collide
-        fig, ax = plt.subplots(figsize=(5, 5))
-        plot_box(data=[df[c].tolist() for c in columns],
-                 labels=labels,
-                 mark_best=False,
-                 demean=False,
-                 y_label=f'{statistic.capitalize()} Riemannian distance',
-                 xtick_step=1,
-                 ax=ax)
-        ax.set_xticklabels(labels, rotation=30, ha='right', rotation_mode='anchor')
-        fig.tight_layout()
-        for ext in ['svg', 'pdf']:
-            fig.savefig(f'{base}.{ext}')
-        plt.close(fig)
-
         print(f'{model}_state_{n_state} vs repeat_{repeat_index}, {len(df)} folds, '
               f'{statistic} Riemannian distance per fold (median [IQR] across folds):')
         for c in columns:
@@ -1631,6 +1616,36 @@ class BatchAnalysis:
             frac = float(np.mean(df[f'{block}_matched'] < df[f'{block}_unmatched']))
             print(f'  {block} matched < unmatched in {frac:.0%} of folds')
         return df
+
+    def plot_bcv_state_matching_summary(self, model='hmm', n_state=6, repeat_index=1, statistic='mean',
+                                        figsize=(8, 5), xtick_rotation=0):
+        '''
+        Box plot of the per-fold matched/unmatched Riemannian distances saved by bcv_state_matching_summary.
+        Only the csv is read. Labels 20 pt and ticks 15 pt as in the BCV box plots; for a narrow figsize,
+        set xtick_rotation (e.g. 30) so the tick labels don't collide. Saved as svg and pdf next to the csv.
+        '''
+        import matplotlib.pyplot as plt
+
+        base = (f'{self.analysis_path}/state_matching/'
+                f'{model}_state_{n_state}_repeat_{repeat_index}_riem_{statistic}_summary')
+        df = pd.read_csv(f'{base}.csv')
+        columns = ['Y_matched', 'Y_unmatched', 'X_matched', 'X_unmatched']
+        labels = [c.replace('_', ' ') for c in columns]
+        # Draw once so the svg and pdf have the same jitter
+        fig, ax = plt.subplots(figsize=figsize)
+        plot_box(data=[df[c].tolist() for c in columns],
+                 labels=labels,
+                 mark_best=False,
+                 demean=False,
+                 y_label=f'{statistic.capitalize()} Riemannian distance',
+                 xtick_step=1,
+                 ax=ax)
+        if xtick_rotation:
+            ax.set_xticklabels(labels, rotation=xtick_rotation, ha='right', rotation_mode='anchor')
+        fig.tight_layout()
+        for ext in ['svg', 'pdf']:
+            fig.savefig(f'{base}.{ext}')
+        plt.close(fig)
 
     def plot_bcv_state_matching(self, model='hmm', n_state=6, bcv_index=1, repeat_index=1,
                                 tick_fontsize=15, annot_fontsize=14):
