@@ -1618,11 +1618,12 @@ class BatchAnalysis:
         return df
 
     def plot_bcv_state_matching_summary(self, model='hmm', n_state=6, repeat_index=1, statistic='mean',
-                                        figsize=(8, 5), xtick_rotation=0):
+                                        figsize=(8, 5), xtick_rotation=0, label_fontsize=24, tick_fontsize=19):
         '''
         Box plot of the per-fold matched/unmatched Riemannian distances saved by bcv_state_matching_summary.
-        Only the csv is read. Labels 20 pt and ticks 15 pt as in the BCV box plots; for a narrow figsize,
-        set xtick_rotation (e.g. 30) so the tick labels don't collide. Saved as svg and pdf next to the csv.
+        Only the csv is read. Labels 24 pt and ticks 19 pt (the BCV box plots' 20/15 + 4); for a narrow
+        figsize, set xtick_rotation (e.g. 30) so the tick labels don't collide. Saved as svg and pdf next
+        to the csv.
         '''
         import matplotlib.pyplot as plt
 
@@ -1642,21 +1643,25 @@ class BatchAnalysis:
                  ax=ax)
         if xtick_rotation:
             ax.set_xticklabels(labels, rotation=xtick_rotation, ha='right', rotation_mode='anchor')
+        # plot_box fixes labels at 20 pt and ticks at 15 pt; override here
+        ax.yaxis.label.set_size(label_fontsize)
+        ax.tick_params(axis='both', labelsize=tick_fontsize)
         fig.tight_layout()
         for ext in ['svg', 'pdf']:
             fig.savefig(f'{base}.{ext}')
         plt.close(fig)
 
     def plot_bcv_state_matching(self, model='hmm', n_state=6, bcv_index=1, repeat_index=1,
-                                tick_fontsize=15, annot_fontsize=14):
+                                tick_fontsize=15, annot_fontsize=14, annotate_diagonal=True):
         '''
         Plot the state-matching heatmaps saved by bcv_state_matching.
         Only matrices.npz and metrics.json are read, so the figures can be redrawn
         without loading any time courses again.
         Each heatmap is a 5 x 5 in panel with fixed axes geometry (the same size and fonts as the BCV box plots),
         rows are the full-data states, columns the matched split-derived states, the matched value is written
-        on the diagonal and there is no title. Saved as {key}.svg and {key}.pdf next to the matrices.
-        DyNeMo axes are labelled as modes, other models as states.
+        on the diagonal (annotate_diagonal=False leaves it out, e.g. when the matched/unmatched summary across
+        folds already reports it, or with many states) and there is no title. Saved as {key}.svg and {key}.pdf
+        next to the matrices. DyNeMo axes are labelled as modes, other models as states.
         '''
         import matplotlib.pyplot as plt
 
@@ -1686,7 +1691,7 @@ class BatchAnalysis:
                               y_label=f'Full-data {unit}',
                               sns_kwargs=sns_kwargs,
                               ax=ax,
-                              annotate_diagonal=True,
+                              annotate_diagonal=annotate_diagonal,
                               annot_fontsize=annot_fontsize,
                               label_fontsize=20,
                               tick_fontsize=tick_fontsize,
