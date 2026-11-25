@@ -475,9 +475,10 @@ class BatchAnalysis:
         But for sanity check, and potentiall understand how the method work, we are also interested in
         the folder Y_train/metrics, X_test/metrics.
         Figure style (2026-11-25, larger fonts and inset for readers): axis labels label_fontsize, ticks
-        tick_fontsize, inset ticks inset_tick_fontsize, * / dagger mark_fontsize (the "p = ..." text uses
-        tick_fontsize). The inset is attached to the main axes; inset_bounds='auto' sizes it to fit below the
-        boxes' lower whiskers, or pass [left, bottom, width, height] in axes fractions (see plot_box).
+        tick_fontsize, inset ticks inset_tick_fontsize, * / dagger mark_fontsize. The figure shows no p-value
+        text; the p-value of the selected (dagger) model is in the TXT/JSON summary. The inset is attached
+        to the main axes; inset_bounds='auto' sizes it to fit below the boxes' lower whiskers, or pass
+        [left, bottom, width, height] in axes fractions (see plot_box).
         The inset labels inset_n_xticks x ticks from its first to its last box (3: e.g. 6, 11, 16).
         '''
         models = self.config_root['model'].keys()
@@ -528,7 +529,6 @@ class BatchAnalysis:
                              tick_fontsize=tick_fontsize,
                              inset_tick_fontsize=inset_tick_fontsize,
                              text_kwargs={'fontsize': mark_fontsize},
-                             p_fontsize=tick_fontsize,
                              inset_bounds=inset_bounds,
                              inset_n_xticks=inset_n_xticks,
                              filename=os.path.join(self.analysis_path, f'{model}_{folder.split("/")[0]}_{object}{suffix}.{ext}')

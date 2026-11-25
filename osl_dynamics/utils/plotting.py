@@ -2836,7 +2836,6 @@ def plot_box(
         label_fontsize=20,
         tick_fontsize=15,
         inset_tick_fontsize=None,
-        p_fontsize='large',
         inset_bounds=None,
         inset_n_xticks=None,
 ):
@@ -2901,9 +2900,6 @@ def plot_box(
         Font size of the main tick labels. Defaults to 15.
     inset_tick_fontsize : float, optional
         Font size of the inset tick labels. Defaults to the matplotlib default.
-    p_fontsize : float or str, optional
-        Font size of the "p = ..." text under the dagger. Defaults to 'large'.
-        The * and dagger themselves take their size from :code:`text_kwargs`.
     inset_bounds : str or list, optional
         Where the inset goes. None (default) keeps the original inset: a fixed
         :code:`[0.65, 0.3, 0.3, 0.3]` in figure coordinates with x ticks rotated 45 degrees.
@@ -3029,18 +3025,7 @@ def plot_box(
             y_min, y_max = ax.get_ylim()
             dagger_y = (y_max - 0.04 * (y_max - y_min)) if candidate_index == max_median_index else y_max
             ax.text(candidate_index + 1, dagger_y, '†', **text_kwargs)
-
-            # If a simpler model was selected, add p-value slightly below the dagger
-            if candidate_index != max_median_index and p_candidate is not None:
-                p_text_y = dagger_y - 0.04 * (y_max - y_min)  # offset below dagger
-                ax.text(
-                    candidate_index + 1,
-                    p_text_y,
-                    f"p = {p_candidate:.2g}",
-                    fontsize=p_fontsize,
-                    ha='center',
-                    va='top'
-                )
+            # The p-value of the selected simpler model is reported in the TXT/JSON summary, not on the figure
         best_index_for_report = candidate_index if (p_value is not None) else max_median_index
 
         # Per-group stats (NaN-safe); use sample std when n>1
