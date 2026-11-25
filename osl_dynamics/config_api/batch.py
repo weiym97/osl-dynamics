@@ -469,7 +469,7 @@ class BatchAnalysis:
 
     def compare(self, demean_index=-1,inset_start_index=None,y_range=None,inset_y_range=None,mark_best=True,p_value=None,plot_end_index=None,fig_kwargs=None,folder='Y_test/',object='log_likelihood',
                 label_fontsize=24, tick_fontsize=20, inset_tick_fontsize=18, mark_fontsize=24, inset_bounds='auto',
-                inset_n_xticks=3):
+                inset_n_xticks=3, models=None):
         '''
         By default of bi-cross validation, we should compare the final log_likelihood on the Y_test.
         But for sanity check, and potentiall understand how the method work, we are also interested in
@@ -480,13 +480,20 @@ class BatchAnalysis:
         to the main axes; inset_bounds='auto' sizes it to fit below the boxes' lower whiskers, or pass
         [left, bottom, width, height] in axes fractions (see plot_box).
         The inset labels inset_n_xticks x ticks from its first to its last box (3: e.g. 6, 11, 16).
+        models: list of model names to plot (e.g. ['hmm', 'swc']); None plots every model in config_root.yaml.
+        Only the listed models' figures and summaries are (re)written.
         '''
-        models = self.config_root['model'].keys()
+        if models is None:
+            models = list(self.config_root['model'].keys())
+        unknown = set(models) - set(self.config_root['model'].keys())
+        if unknown:
+            raise ValueError(f'models {sorted(unknown)} are not in config_root.yaml')
         n_states_list = self.config_root['n_states']
 
         metrics = {model: {str(int(num)): [] for num in n_states_list} for model in models}
         for i in range(len(self.config_list)):
-                    
+            if self.config_list.iloc[i]['model_index'] not in models:
+                continue
             config = self.indexparser.parse(i)
             model = next(iter(config['model']))
 
