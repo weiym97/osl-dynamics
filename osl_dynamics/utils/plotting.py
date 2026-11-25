@@ -2775,14 +2775,16 @@ def plot_IC_distribution(
         return fig, ax
 
 
-def _auto_inset_bounds(ax, whiskers, left=0.52, bottom=0.14, width=0.45, max_height=0.43,
+def _auto_inset_bounds(ax, whiskers, width=0.45, right=0.97, bottom=0.14, max_height=0.43,
                        label_pad=0.12, gap=0.04, min_height=0.25):
     """[left, bottom, width, height] in axes fractions for :code:`plot_box(inset_bounds='auto')`.
 
     The height is as large as fits (up to max_height) below the lowest lower whisker of the boxes
     that sit behind the inset or its y tick labels (taken as label_pad to the left of the inset),
     leaving gap. If the boxes leave less than min_height, returns None (no inset) and logs a warning.
+    The inset's right edge is at right, so a narrower inset starts further right.
     """
+    left = right - width
     x0, x1 = ax.get_xlim()
     y0, y1 = ax.get_ylim()
     lows = []
@@ -2838,6 +2840,7 @@ def plot_box(
         inset_tick_fontsize=None,
         inset_bounds=None,
         inset_n_xticks=None,
+        inset_width=0.45,
 ):
     """Basic box plot.
 
@@ -2906,7 +2909,7 @@ def plot_box(
         Otherwise the inset is attached to the main axes (:code:`ax.inset_axes`), so it
         moves with them when the labels grow, and its x ticks are not rotated:
         a list :code:`[left, bottom, width, height]` in axes fractions places it there;
-        :code:`'auto'` uses left 0.52, bottom 0.14, width 0.45 and as much height (up to 0.43)
+        :code:`'auto'` uses right edge 0.97, bottom 0.14, width `inset_width` and as much height (up to 0.43)
         as fits below the lower whiskers of the boxes behind the inset and its y tick labels;
         if less than 0.25 fits (e.g. non-demeaned data whose boxes fill the axes), no inset
         is drawn and a warning is logged. Single samples beyond the whiskers can still end up
@@ -2914,6 +2917,9 @@ def plot_box(
     inset_n_xticks : int, optional
         Number of labelled x ticks in the inset, evenly spread from its first to its last box
         (e.g. 3 gives first, middle and last). Defaults to None: every `xtick_step`-th box.
+    inset_width : float, optional
+        Width of the inset (axes fraction) for :code:`inset_bounds='auto'`; its right edge stays
+        at 0.97. Defaults to 0.45.
 
     Returns
     -------
@@ -3117,7 +3123,7 @@ def plot_box(
     if inset_start_index is not None and isinstance(inset_bounds, str):
         if inset_bounds != 'auto':
             raise ValueError("inset_bounds must be None, 'auto' or [left, bottom, width, height].")
-        inset_bounds = _auto_inset_bounds(ax, bp['whiskers'])
+        inset_bounds = _auto_inset_bounds(ax, bp['whiskers'], width=inset_width)
         if inset_bounds is None:
             inset_start_index = None  # no room below the boxes: no inset
 

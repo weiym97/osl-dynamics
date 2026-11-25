@@ -469,7 +469,7 @@ class BatchAnalysis:
 
     def compare(self, demean_index=-1,inset_start_index=None,y_range=None,inset_y_range=None,mark_best=True,p_value=None,plot_end_index=None,fig_kwargs=None,folder='Y_test/',object='log_likelihood',
                 label_fontsize=24, tick_fontsize=20, inset_tick_fontsize=18, mark_fontsize=24, inset_bounds='auto',
-                inset_n_xticks=3, models=None):
+                inset_n_xticks=3, models=None, xtick_step=2, inset_width=0.45):
         '''
         By default of bi-cross validation, we should compare the final log_likelihood on the Y_test.
         But for sanity check, and potentiall understand how the method work, we are also interested in
@@ -482,6 +482,8 @@ class BatchAnalysis:
         The inset labels inset_n_xticks x ticks from its first to its last box (3: e.g. 6, 11, 16).
         models: list of model names to plot (e.g. ['hmm', 'swc']); None plots every model in config_root.yaml.
         Only the listed models' figures and summaries are (re)written.
+        xtick_step: label every xtick_step-th K on the main x axis (e.g. 4 for K 1-25: 1, 5, ..., 25).
+        inset_width: width of the auto inset in axes fractions (right edge fixed); 0.45 by default.
         '''
         if models is None:
             models = list(self.config_root['model'].keys())
@@ -538,6 +540,8 @@ class BatchAnalysis:
                              text_kwargs={'fontsize': mark_fontsize},
                              inset_bounds=inset_bounds,
                              inset_n_xticks=inset_n_xticks,
+                             xtick_step=xtick_step,
+                             inset_width=inset_width,
                              filename=os.path.join(self.analysis_path, f'{model}_{folder.split("/")[0]}_{object}{suffix}.{ext}')
                              )
 
