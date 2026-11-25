@@ -2775,6 +2775,43 @@ def plot_IC_distribution(
         return fig, ax
 
 
+def _auto_inset_bounds(ax, whiskers, left=0.52, bottom=0.14, width=0.45, max_height=0.43,
+                       label_pad=0.12, gap=0.04, min_height=0.25):
+    """[left, bottom, width, height] in axes fractions for :code:`plot_box(inset_bounds='auto')`.
+
+    The height is as large as fits (up to max_height) below the lowest lower whisker of the boxes
+    that sit behind the inset or its y tick labels (taken as label_pad to the left of the inset),
+    leaving gap. If the boxes leave less than min_height, returns None (no inset) and logs a warning.
+    """
+    x0, x1 = ax.get_xlim()
+    y0, y1 = ax.get_ylim()
+    lows = []
+    # boxplot returns two whiskers per box: lower (q1 -> low end), then upper
+    for lower in whiskers[::2]:
+        right_edge = (np.mean(lower.get_xdata()) + 0.25 - x0) / (x1 - x0)  # boxes are at most 0.5 wide
+        if right_edge >= left - label_pad:
+            lows.append((np.min(lower.get_ydata()) - y0) / (y1 - y0))
+    height = max_height if not lows else min(max_height, min(lows) - gap - bottom)
+    if height < min_height:
+        _logger.warning(f"plot_box: only {height:.2f} of the axes height is free below the boxes, "
+                        f"so no inset is drawn. Pass inset_bounds to place one anyway.")
+        return None
+    return [left, bottom, width, height]
+
+
+def _n_samples_behind_inset(ax, data, bounds):
+    """Number of samples whose box centre and value fall inside the inset (axes fractions)."""
+    x0, x1 = ax.get_xlim()
+    y0, y1 = ax.get_ylim()
+    left, bottom, width, height = bounds
+    n = 0
+    for i, points in enumerate(data):
+        if left <= (i + 1 - x0) / (x1 - x0) <= left + width:
+            y = (np.asarray(points, dtype=float) - y0) / (y1 - y0)
+            n += int(np.sum((y >= bottom) & (y <= bottom + height)))
+    return n
+
+
 def plot_box(
         data,
         labels=None,
@@ -2796,6 +2833,12 @@ def plot_box(
         ax=None,
         filename=None,
         xtick_step=2,
+        label_fontsize=20,
+        tick_fontsize=15,
+        inset_tick_fontsize=None,
+        p_fontsize='large',
+        inset_bounds=None,
+        inset_n_xticks=None,
 ):
     """Basic box plot.
 
@@ -2852,6 +2895,29 @@ def plot_box(
         shown on the x-axis (e.g. `xtick_step=2` shows ticks at positions 1, 3, 5, ...).
         Applies to the main plot and — if `inset_start_index` is provided — to the inset
         plot as well. Defaults to 2.
+    label_fontsize : float, optional
+        Font size of the axis labels. Defaults to 20.
+    tick_fontsize : float, optional
+        Font size of the main tick labels. Defaults to 15.
+    inset_tick_fontsize : float, optional
+        Font size of the inset tick labels. Defaults to the matplotlib default.
+    p_fontsize : float or str, optional
+        Font size of the "p = ..." text under the dagger. Defaults to 'large'.
+        The * and dagger themselves take their size from :code:`text_kwargs`.
+    inset_bounds : str or list, optional
+        Where the inset goes. None (default) keeps the original inset: a fixed
+        :code:`[0.65, 0.3, 0.3, 0.3]` in figure coordinates with x ticks rotated 45 degrees.
+        Otherwise the inset is attached to the main axes (:code:`ax.inset_axes`), so it
+        moves with them when the labels grow, and its x ticks are not rotated:
+        a list :code:`[left, bottom, width, height]` in axes fractions places it there;
+        :code:`'auto'` uses left 0.52, bottom 0.14, width 0.45 and as much height (up to 0.43)
+        as fits below the lower whiskers of the boxes behind the inset and its y tick labels;
+        if less than 0.25 fits (e.g. non-demeaned data whose boxes fill the axes), no inset
+        is drawn and a warning is logged. Single samples beyond the whiskers can still end up
+        behind the inset; their number is logged.
+    inset_n_xticks : int, optional
+        Number of labelled x ticks in the inset, evenly spread from its first to its last box
+        (e.g. 3 gives first, middle and last). Defaults to None: every `xtick_step`-th box.
 
     Returns
     -------
@@ -2971,7 +3037,7 @@ def plot_box(
                     candidate_index + 1,
                     p_text_y,
                     f"p = {p_candidate:.2g}",
-                    fontsize='large',
+                    fontsize=p_fontsize,
                     ha='center',
                     va='top'
                 )
@@ -3063,15 +3129,41 @@ def plot_box(
             with open(base + ".json", "w", encoding="utf-8") as f_json:
                 json.dump(summary_dict, f_json, indent=2)
 
+    if inset_start_index is not None and isinstance(inset_bounds, str):
+        if inset_bounds != 'auto':
+            raise ValueError("inset_bounds must be None, 'auto' or [left, bottom, width, height].")
+        inset_bounds = _auto_inset_bounds(ax, bp['whiskers'])
+        if inset_bounds is None:
+            inset_start_index = None  # no room below the boxes: no inset
+
     if inset_start_index is not None:
-        small_ax = fig.add_axes([0.65, 0.3, 0.3, 0.3])  # Adjust these values as needed for positioning
+        if inset_bounds is None:
+            # Original inset: fixed position in figure coordinates
+            small_ax = fig.add_axes([0.65, 0.3, 0.3, 0.3])
+            inset_xtick_rotation = 45
+        else:
+            # Attached to the main axes, so it follows them when tight_layout makes room for the labels
+            small_ax = ax.inset_axes(inset_bounds)
+            inset_xtick_rotation = 0
+            n_behind = _n_samples_behind_inset(ax, data, inset_bounds)
+            if n_behind > 0:
+                _logger.warning(f"plot_box: {n_behind} samples lie behind the inset {np.round(inset_bounds, 2).tolist()}.")
         small_bp = small_ax.boxplot(data[inset_start_index:], labels=labels[inset_start_index:], **plot_kwargs)
 
-        # Apply xtick_step to the inset plot
+        # Inset x ticks: inset_n_xticks spread from first to last box, else every xtick_step-th box
         max_inset_position = len(data) - inset_start_index
-        inset_xtick_positions = list(range(1, max_inset_position + 1, xtick_step))
+        if inset_n_xticks is not None:
+            inset_xtick_positions = np.unique(np.round(np.linspace(1, max_inset_position, inset_n_xticks))).astype(int).tolist()
+        else:
+            inset_xtick_positions = list(range(1, max_inset_position + 1, xtick_step))
         small_ax.set_xticks(inset_xtick_positions)
-        small_ax.set_xticklabels([str(labels[inset_start_index + pos - 1]) for pos in inset_xtick_positions], rotation=45)
+        small_ax.set_xticklabels([str(labels[inset_start_index + pos - 1]) for pos in inset_xtick_positions],
+                                 rotation=inset_xtick_rotation)
+        if inset_bounds is not None:
+            from matplotlib.ticker import MaxNLocator
+            small_ax.yaxis.set_major_locator(MaxNLocator(nbins=3, steps=[1, 2, 5, 10]))
+        if inset_tick_fontsize is not None:
+            small_ax.tick_params(labelsize=inset_tick_fontsize)
 
         # Set y-axis range for the inset plot
         if inset_y_range is not None:
@@ -3087,10 +3179,10 @@ def plot_box(
 
     # Set title and axis labels
     ax.set_title(title, fontsize=20)
-    ax.xaxis.set_tick_params(labelsize=15)
-    ax.yaxis.set_tick_params(labelsize=15)
-    ax.set_xlabel(x_label, fontsize=20)
-    ax.set_ylabel(y_label, fontsize=20)
+    ax.xaxis.set_tick_params(labelsize=tick_fontsize)
+    ax.yaxis.set_tick_params(labelsize=tick_fontsize)
+    ax.set_xlabel(x_label, fontsize=label_fontsize)
+    ax.set_ylabel(y_label, fontsize=label_fontsize)
 
     # Save the figure if a filename has been pass
     if filename is not None:

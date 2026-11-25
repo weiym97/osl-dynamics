@@ -467,11 +467,18 @@ class BatchAnalysis:
         if not os.path.exists(self.analysis_path):
             os.makedirs(self.analysis_path)
 
-    def compare(self, demean_index=-1,inset_start_index=None,y_range=None,inset_y_range=None,mark_best=True,p_value=None,plot_end_index=None,fig_kwargs=None,folder='Y_test/',object='log_likelihood'):
+    def compare(self, demean_index=-1,inset_start_index=None,y_range=None,inset_y_range=None,mark_best=True,p_value=None,plot_end_index=None,fig_kwargs=None,folder='Y_test/',object='log_likelihood',
+                label_fontsize=24, tick_fontsize=20, inset_tick_fontsize=18, mark_fontsize=24, inset_bounds='auto',
+                inset_n_xticks=3):
         '''
         By default of bi-cross validation, we should compare the final log_likelihood on the Y_test.
         But for sanity check, and potentiall understand how the method work, we are also interested in
         the folder Y_train/metrics, X_test/metrics.
+        Figure style (2026-11-25, larger fonts and inset for readers): axis labels label_fontsize, ticks
+        tick_fontsize, inset ticks inset_tick_fontsize, * / dagger mark_fontsize (the "p = ..." text uses
+        tick_fontsize). The inset is attached to the main axes; inset_bounds='auto' sizes it to fit below the
+        boxes' lower whiskers, or pass [left, bottom, width, height] in axes fractions (see plot_box).
+        The inset labels inset_n_xticks x ticks from its first to its last box (3: e.g. 6, 11, 16).
         '''
         models = self.config_root['model'].keys()
         n_states_list = self.config_root['n_states']
@@ -503,62 +510,29 @@ class BatchAnalysis:
             if plot_end_index is not None:
                 n_states_list = n_states_list[:plot_end_index]
             temp_values = [metrics[model][str(key)] for key in n_states_list]
-            plot_box(data=temp_values,
-                     labels=n_states_list,
-                     demean=True,
-                     demean_index=demean_index,
-                     x_label=r'$N_{states}$',
-                     y_label='Bi-cross validated log likelihood',
-                     y_range=y_range,
-                     inset_y_range=inset_y_range,
-                     mark_best=mark_best,
-                     p_value=p_value,
-                     inset_start_index=inset_start_index,
-                     fig_kwargs=fig_kwargs,
-                     filename=os.path.join(self.analysis_path, f'{model}_{folder.split("/")[0]}_{object}_demean.pdf')
-                     )
-            plot_box(data=temp_values,
-                     labels=n_states_list,
-                     demean=True,
-                     demean_index=demean_index,
-                     x_label=r'$N_{states}$',
-                     y_label='Bi-cross validated log likelihood',
-                     y_range=y_range,
-                     inset_y_range=inset_y_range,
-                     mark_best=mark_best,
-                     p_value=p_value,
-                     inset_start_index=inset_start_index,
-                     fig_kwargs=fig_kwargs,
-                     filename=os.path.join(self.analysis_path, f'{model}_{folder.split("/")[0]}_{object}_demean.svg')
-                     )
-            plot_box(data=temp_values,
-                     labels=n_states_list,
-                     demean=False,
-                     demean_index=demean_index,
-                     x_label=r'$N_{states}$',
-                     y_label='Bi-cross validated log likelihood',
-                     y_range=y_range,
-                     inset_y_range=inset_y_range,
-                     mark_best=mark_best,
-                     p_value=p_value,
-                     inset_start_index=inset_start_index,
-                     fig_kwargs=fig_kwargs,
-                     filename=os.path.join(self.analysis_path, f'{model}_{folder.split("/")[0]}_{object}.pdf')
-                     )
-            plot_box(data=temp_values,
-                     labels=n_states_list,
-                     demean=False,
-                     demean_index=demean_index,
-                     x_label=r'$N_{states}$',
-                     y_label='Bi-cross validated log likelihood',
-                     y_range=y_range,
-                     inset_y_range=inset_y_range,
-                     mark_best=mark_best,
-                     p_value=p_value,
-                     inset_start_index=inset_start_index,
-                     fig_kwargs=fig_kwargs,
-                     filename=os.path.join(self.analysis_path, f'{model}_{folder.split("/")[0]}_{object}.svg')
-                     )
+            for demean, suffix in [(True, '_demean'), (False, '')]:
+                for ext in ['pdf', 'svg']:
+                    plot_box(data=temp_values,
+                             labels=n_states_list,
+                             demean=demean,
+                             demean_index=demean_index,
+                             x_label=r'$N_{states}$',
+                             y_label='Bi-cross-validated\nlog-likelihood',
+                             y_range=y_range,
+                             inset_y_range=inset_y_range,
+                             mark_best=mark_best,
+                             p_value=p_value,
+                             inset_start_index=inset_start_index,
+                             fig_kwargs=fig_kwargs,
+                             label_fontsize=label_fontsize,
+                             tick_fontsize=tick_fontsize,
+                             inset_tick_fontsize=inset_tick_fontsize,
+                             text_kwargs={'fontsize': mark_fontsize},
+                             p_fontsize=tick_fontsize,
+                             inset_bounds=inset_bounds,
+                             inset_n_xticks=inset_n_xticks,
+                             filename=os.path.join(self.analysis_path, f'{model}_{folder.split("/")[0]}_{object}{suffix}.{ext}')
+                             )
 
 
     def temporal_analysis(self,demean=False, inset_start_index=None,theme='reproducibility',normalisation=False):
