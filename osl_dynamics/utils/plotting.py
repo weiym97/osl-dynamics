@@ -2547,6 +2547,9 @@ def plot_mode_no_pairing(
         sns_kwargs=None,
         ax=None,
         filename=None,
+        label_fontsize: int = 20,
+        tick_fontsize: int = 20,
+        cbar_tick_fontsize: int = 20,
 
 ):
     """
@@ -2569,6 +2572,12 @@ def plot_mode_no_pairing(
         Axis object to plot on.
     filename : str, optional
         Output filename.
+    label_fontsize : int, optional
+        Font size of the title and axis labels.
+    tick_fontsize : int, optional
+        Font size of the x and y tick labels.
+    cbar_tick_fontsize : int, optional
+        Font size of the colour bar tick labels.
 
     Returns
     -------
@@ -2620,16 +2629,16 @@ def plot_mode_no_pairing(
     # Create a heatmap of the correlation matrix
     ax = sns.heatmap(data=metrics, ax=ax, **sns_kwargs)
     # Set xticks and yticks
-    ax.set_xticks(np.arange(metrics.shape[1]) + 0.5, np.arange(metrics.shape[1]) + 1, fontsize=20)
-    ax.set_yticks(np.arange(metrics.shape[0]) + 0.5, np.arange(metrics.shape[0]) + 1, fontsize=20)
+    ax.set_xticks(np.arange(metrics.shape[1]) + 0.5, np.arange(metrics.shape[1]) + 1, fontsize=tick_fontsize)
+    ax.set_yticks(np.arange(metrics.shape[0]) + 0.5, np.arange(metrics.shape[0]) + 1, fontsize=tick_fontsize)
 
     # Set title and axis labels
-    ax.set_title(title, fontsize=20)
-    ax.set_xlabel(x_label, fontsize=20)
-    ax.set_ylabel(y_label, fontsize=20)
+    ax.set_title(title, fontsize=label_fontsize)
+    ax.set_xlabel(x_label, fontsize=label_fontsize)
+    ax.set_ylabel(y_label, fontsize=label_fontsize)
 
     cbar = ax.collections[0].colorbar
-    cbar.ax.tick_params(labelsize=20)  # Set colorbar tick label font size
+    cbar.ax.tick_params(labelsize=cbar_tick_fontsize)  # Set colorbar tick label font size
 
     # Save the figure if a filename has been pass
     if filename is not None:

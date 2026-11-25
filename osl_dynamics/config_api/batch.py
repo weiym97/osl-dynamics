@@ -1209,6 +1209,77 @@ class BatchAnalysis:
             plot_mode_pairing(riem,fig_kwargs={'figsize':(12,9)},filename=f'{plot_dir}/riem.pdf')
             plot_mode_pairing(riem_reordered,indices,fig_kwargs={'figsize':(12,9)},filename=f'{plot_dir}/riem_reordered.svg')
 
+    def plot_post_hoc_ground_truth(self, model='hmm', n_state=6, ground_truth_dir=None, repeat_index=1,
+                                   tick_fontsize=20, cbar_tick_fontsize=None, riem_vmin=None,
+                                   riem_cbar_tick_step=None, plot_dir=None, recompute=False):
+        '''
+        The ground-truth comparison of post_hoc_analysis with adjustable font sizes:
+        - riem_ground_truth.svg: Riemannian distance between the ground-truth and inferred state covariances;
+        - alpha_ground_truth.svg: correlation between the ground-truth and inferred state time courses
+          (colour bar fixed to -1..1).
+        Rows are ground-truth states, columns inferred states. When n_state equals the number of ground-truth
+        states both are reordered by Hungarian matching (plot_mode_pairing); otherwise they are shown in the
+        fit's own order (plot_mode_no_pairing). Same calculation, order and figure size (about 1 in per cell)
+        as post_hoc_analysis; only the fonts change (20 pt there).
+
+        Reads {model}_state_{n_state}/repeat_{repeat_index}/inf_params/alp.pkl and covs.npy, and
+        state_covariances.npy and the *time_course.npy files in ground_truth_dir. The two matrices are saved
+        as ground_truth_comparison.npz in analysis/{model}_state_{n_state}/; if that file exists it is plotted
+        directly and nothing else is read (recompute=True reads the fit and ground truth again).
+        Figures go to plot_dir (default analysis/{model}_state_{n_state}/). Unlike post_hoc_analysis, no folder
+        is cleared.
+        riem_vmin sets the bottom of the Riemannian colour scale (None: the smallest distance, as in
+        post_hoc_analysis; 0 lets the colour bar start at 0). riem_cbar_tick_step puts the Riemannian colour bar
+        ticks at multiples of that step (None: matplotlib's automatic ticks).
+        '''
+        if cbar_tick_fontsize is None:
+            cbar_tick_fontsize = tick_fontsize
+        cache_dir = f'{self.analysis_path}/{model}_state_{n_state}'
+        os.makedirs(cache_dir, exist_ok=True)
+        cache_path = f'{cache_dir}/ground_truth_comparison.npz'
+        if os.path.exists(cache_path) and not recompute:
+            cache = np.load(cache_path)
+            riem, cor = cache['riem'], cache['cor']
+        else:
+            if ground_truth_dir is None:
+                raise ValueError('ground_truth_dir is needed to compute the comparison.')
+            fit_dir = f'{self.config_path}/{model}_state_{n_state}/repeat_{repeat_index}/inf_params'
+            with open(f'{fit_dir}/alp.pkl', 'rb') as file:
+                alpha = pickle.load(file)
+            covs = np.load(f'{fit_dir}/covs.npy')
+            ground_truth_covs = np.load(f'{ground_truth_dir}/state_covariances.npy')
+            alpha_truth_files = sorted(os.path.join(ground_truth_dir, f) for f in os.listdir(ground_truth_dir)
+                                       if f.endswith('time_course.npy'))
+            ground_truth_alpha = [np.load(file) for file in alpha_truth_files]
+            riem = twopair_riemannian_distance(ground_truth_covs, covs)
+            cor = alpha_correlation(ground_truth_alpha, alpha, return_diagonal=False)
+            del alpha, ground_truth_alpha
+            np.savez(cache_path, riem=riem, cor=cor)
+
+        if plot_dir is None:
+            plot_dir = cache_dir
+        os.makedirs(plot_dir, exist_ok=True)
+        fonts = dict(tick_fontsize=tick_fontsize, cbar_tick_fontsize=cbar_tick_fontsize)
+        alpha_kwargs = {"vmin": -1, "vmax": 1, "center": 0}
+        riem_kwargs = {}
+        if riem_vmin is not None:
+            riem_kwargs['vmin'] = riem_vmin
+        if riem_cbar_tick_step is not None:
+            from matplotlib.ticker import MultipleLocator
+            riem_kwargs['cbar_kws'] = {'ticks': MultipleLocator(riem_cbar_tick_step)}
+        if riem.shape[0] == riem.shape[1]:
+            order, riem_reorder = hungarian_pair(riem, distance=True)
+            plot_mode_pairing(riem_reorder, order, filename=f'{plot_dir}/riem_ground_truth.svg',
+                              sns_kwargs=riem_kwargs, **fonts)
+            order, cor_reorder = hungarian_pair(cor, distance=False)
+            plot_mode_pairing(cor_reorder, order, filename=f'{plot_dir}/alpha_ground_truth.svg',
+                              sns_kwargs=alpha_kwargs, **fonts)
+        else:
+            plot_mode_no_pairing(riem, filename=f'{plot_dir}/riem_ground_truth.svg', sns_kwargs=riem_kwargs,
+                                 **fonts)
+            plot_mode_no_pairing(cor, filename=f'{plot_dir}/alpha_ground_truth.svg',
+                                 sns_kwargs=alpha_kwargs, **fonts)
+
     def mode_contribution_analysis(self,model='dynemo',n_state=16,mode='bcv_1'):
         save_dir = (f'{self.config_path}/{model}_state_{n_state}/{mode}/')
         plot_dir = f'{self.analysis_path}/{model}_state_{n_state}_mode_contribution/'
