@@ -2850,6 +2850,8 @@ def plot_box(
         inset_bounds=None,
         inset_n_xticks=None,
         inset_width=0.45,
+        xtick_start=0,
+        xtick_label_first=False,
 ):
     """Basic box plot.
 
@@ -2929,6 +2931,12 @@ def plot_box(
     inset_width : float, optional
         Width of the inset (axes fraction) for :code:`inset_bounds='auto'`; its right edge stays
         at 0.97. Defaults to 0.45.
+    xtick_start : int, optional
+        Index of the first box with a labelled x tick on the main axes; every `xtick_step`-th box
+        after it is labelled too (e.g. labels 2..25 with `xtick_start=3`, `xtick_step=4` label
+        5, 9, ..., 25). Defaults to 0 (the first box).
+    xtick_label_first : bool, optional
+        Also label the first box when `xtick_start` skips it (e.g. 2, 5, 9, ..., 25). Defaults to False.
 
     Returns
     -------
@@ -3171,8 +3179,11 @@ def plot_box(
 
     # set x-ticks
     # Set x-ticks every two positions
-    xtick_positions = list(range(1, len(labels) + 1, xtick_step))  # 1, 3, 5, ...
-    xtick_labels = [labels[i] for i in range(0, len(labels), xtick_step)]  # label0, label2, label4, ...
+    xtick_positions = list(range(1 + xtick_start, len(labels) + 1, xtick_step))  # 1, 3, 5, ...
+    xtick_labels = [labels[i] for i in range(xtick_start, len(labels), xtick_step)]  # label0, label2, label4, ...
+    if xtick_label_first and xtick_start > 0:
+        xtick_positions = [1] + xtick_positions
+        xtick_labels = [labels[0]] + xtick_labels
 
     ax.set_xticks(xtick_positions)
     ax.set_xticklabels(xtick_labels)

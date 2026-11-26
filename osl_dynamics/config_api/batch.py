@@ -708,13 +708,24 @@ class BatchAnalysis:
                          title='Training loss',
                          filename=os.path.join(self.analysis_path, f'{model}_{metric}.pdf')
                          )
-    def plot_naive_cv(self, demean_index=0, inset_start_index=None):
+    def plot_naive_cv(self, demean_index=0, inset_start_index=None, models=None, plot_demeaned=True,
+                      y_label='Held-out free energy', title=None, fig_kwargs=None,
+                      label_fontsize=24, tick_fontsize=20, xtick_step=2):
         '''
         Plot the naive cross-validated free energy (log-likelihood for SWC), both raw and demeaned.
-        demean_index and inset_start_index index n_states_list after n_states = 1 is removed,
+        The free energy is that of the held-out subjects under the model trained on the training subjects
+        (lower is better). demean_index and inset_start_index index n_states_list after n_states = 1 is removed,
         so 0 is n_states = 2. The demeaned plot is saved as *_demean_K{reference n_states}.svg.
+        models: list of models to plot (default: all models in the batch); rows of other models are skipped.
+        plot_demeaned: whether to draw the demeaned plot as well.
+        The defaults match compare(): x label $N_{states}$ for every model, labels 24 / ticks 20, no title,
+        figsize (6, 5) unless fig_kwargs says otherwise. The x tick labels sit on 1, 1 + xtick_step, ...,
+        as in the BCV figures, plus the first box (n_states = 2, since 1 state has no dynamics), e.g. 2, 5, 9, ..., 25;
+        if that would label two neighbouring boxes (e.g. 2 and 3), the labels run 2, 2 + xtick_step, ... instead.
+        SWC's y label stays 'Log-likelihood'.
         '''
-        models = self.config_root['model'].keys()
+        if models is None:
+            models = list(self.config_root['model'].keys())
         n_states_list = self.config_root['n_states'].copy()
         # Remove the case where n_states = 1 because no dFC model
         if 1 in n_states_list:
@@ -724,6 +735,8 @@ class BatchAnalysis:
         for i in range(len(self.config_list)):
             config = self.indexparser.parse(i)
             model = next(iter(config['model']))
+            if model not in models:
+                continue
             if model == 'swc':
                 file_name = 'metrics.json'
             else:
@@ -743,37 +756,62 @@ class BatchAnalysis:
                     # Keep the folds aligned across n_states so demeaning stays paired
                     free_energy[model][str(int(n_states))].append(np.nan)
 
+        if fig_kwargs is None:
+            fig_kwargs = {'figsize': (6, 5)}
         for model in models:
             temp_keys = list(free_energy[model].keys())
             temp_values = [free_energy[model][key] for key in temp_keys]
-            x_label = {'hmm':'N_states','swc':'N_states','dynemo':'N_modes'}
+            # SWC stores the held-out log-likelihood, not a free energy
+            model_y_label = 'Log-likelihood' if model == 'swc' else y_label
+            style = dict(labels=temp_keys,
+                         mark_best=False,
+                         x_label=r'$N_{states}$',
+                         y_label=model_y_label,
+                         title=title,
+                         fig_kwargs=fig_kwargs,
+                         label_fontsize=label_fontsize,
+                         tick_fontsize=tick_fontsize,
+                         xtick_step=xtick_step,
+                         xtick_start=self._first_xtick_index(temp_keys[0], xtick_step),
+                         xtick_label_first=True)
             plot_box(data=temp_values,
-                     labels=temp_keys,
-                     mark_best=False,
                      demean=False,
-                     x_label=x_label[model],
-                     y_label='Free energy',
-                     title= 'Naive cross validation Analysis',
-                     filename=os.path.join(self.analysis_path, f'{model}_naive_free_energy.svg')
+                     filename=os.path.join(self.analysis_path, f'{model}_naive_free_energy.svg'),
+                     **style
                      )
-            plot_box(data=temp_values,
-                     labels=temp_keys,
-                     mark_best=False,
-                     demean=True,
-                     demean_index=demean_index,
-                     inset_start_index=inset_start_index,
-                     x_label=x_label[model],
-                     y_label='Free energy',
-                     title= 'Naive cross validation Analysis',
-                     filename=os.path.join(self.analysis_path, f'{model}_naive_free_energy_demean_K{temp_keys[demean_index]}.svg')
-                     )
+            if plot_demeaned:
+                plot_box(data=temp_values,
+                         demean=True,
+                         demean_index=demean_index,
+                         inset_start_index=inset_start_index,
+                         filename=os.path.join(self.analysis_path, f'{model}_naive_free_energy_demean_K{temp_keys[demean_index]}.svg'),
+                         **style
+                         )
 
-    def plot_naive_evidence(self, demean_index=0, inset_start_index=None):
+    @staticmethod
+    def _first_xtick_index(first_label, xtick_step):
+        '''
+        Index of the first labelled box so that the x tick labels sit on 1, 1 + xtick_step, ... as in the BCV
+        figures, for box plots that start at first_label (e.g. 2). When that would label the box right after the
+        first one (which is labelled too), start at the first box instead (e.g. 2, 4, 6 rather than 2, 3, 5).
+        '''
+        start = (1 - int(first_label)) % xtick_step
+        return 0 if start == 1 else start
+
+    def plot_naive_evidence(self, demean_index=0, inset_start_index=None, plot_raw=True, plot_demeaned=True,
+                            y_label='Held-out predictive\nlog-likelihood', fig_kwargs=None,
+                            label_fontsize=24, tick_fontsize=20, inset_tick_fontsize=18, xtick_step=2):
         '''
         Plot the HMM naive cross-validated held-out log evidence (ncv_evidence.json), both raw and demeaned.
         demean_index and inset_start_index index n_states_list after n_states = 1 is removed,
         so 0 is n_states = 2. Each fold is demeaned against its own value at the reference n_states.
-        The demeaned plot is saved as hmm_ncv_evidence_demean_K{reference n_states}.svg/.pdf.
+        The demeaned plot is saved as hmm_ncv_evidence_demean_K{reference n_states}.svg/.pdf,
+        with _inset_K{first inset n_states} appended when an inset is drawn.
+        plot_raw: whether to draw the raw (not demeaned) plot hmm_ncv_evidence.svg/.pdf.
+        plot_demeaned: whether to draw the demeaned plot.
+        The defaults match compare(): x label $N_{states}$, labels 24 / ticks 20 (inset ticks 18, auto inset
+        with 3 labelled ticks), no title, figsize (6, 5) unless fig_kwargs says otherwise; the first box (n_states = 2)
+        is labelled and the other labels follow _first_xtick_index.
         '''
         n_states_list = self.config_root['n_states'].copy()
         # Remove the case where n_states = 1 because no dFC model
@@ -797,30 +835,52 @@ class BatchAnalysis:
 
         temp_keys = list(evidence.keys())
         temp_values = [evidence[key] for key in temp_keys]
+        inset_suffix = '' if inset_start_index is None else f'_inset_K{temp_keys[inset_start_index]}'
+        if fig_kwargs is None:
+            fig_kwargs = {'figsize': (6, 5)}
+        style = dict(labels=temp_keys,
+                     mark_best=False,
+                     x_label=r'$N_{states}$',
+                     y_label=y_label,
+                     fig_kwargs=fig_kwargs,
+                     label_fontsize=label_fontsize,
+                     tick_fontsize=tick_fontsize,
+                     xtick_step=xtick_step,
+                     xtick_start=self._first_xtick_index(temp_keys[0], xtick_step),
+                     xtick_label_first=True)
         for ext in ['svg', 'pdf']:
-            plot_box(data=temp_values,
-                     labels=temp_keys,
-                     mark_best=False,
-                     demean=False,
-                     x_label='N_states',
-                     y_label='Held-out log evidence',
-                     title='Naive cross validation Analysis',
-                     filename=os.path.join(self.analysis_path, f'hmm_ncv_evidence.{ext}')
-                     )
-            plot_box(data=temp_values,
-                     labels=temp_keys,
-                     mark_best=False,
-                     demean=True,
-                     demean_index=demean_index,
-                     inset_start_index=inset_start_index,
-                     x_label='N_states',
-                     y_label='Held-out log evidence',
-                     title='Naive cross validation Analysis',
-                     filename=os.path.join(self.analysis_path, f'hmm_ncv_evidence_demean_K{temp_keys[demean_index]}.{ext}')
-                     )
+            if plot_raw:
+                plot_box(data=temp_values,
+                         demean=False,
+                         filename=os.path.join(self.analysis_path, f'hmm_ncv_evidence.{ext}'),
+                         **style
+                         )
+            if plot_demeaned:
+                plot_box(data=temp_values,
+                         demean=True,
+                         demean_index=demean_index,
+                         inset_start_index=inset_start_index,
+                         inset_bounds='auto',
+                         inset_n_xticks=3,
+                         inset_tick_fontsize=inset_tick_fontsize,
+                         filename=os.path.join(self.analysis_path, f'hmm_ncv_evidence_demean_K{temp_keys[demean_index]}{inset_suffix}.{ext}'),
+                         **style
+                         )
 
-    def plot_split_half_reproducibility(self):
-        models = self.config_root['model'].keys()
+    def plot_split_half_reproducibility(self, models=None, plot_pairing=True, y_label='Riemannian distance',
+                                        title=None, fig_kwargs=None, label_fontsize=24, tick_fontsize=20,
+                                        xtick_step=2):
+        '''
+        Box plot of split-half reproducibility: for every split, the Riemannian distance between the state
+        covariances fitted to the two halves, averaged over the Hungarian-paired states (lower is more
+        reproducible). Saved as {model}_reproducibility.svg and .pdf (same figure) in the analysis folder.
+        models: list of models to plot (default: all models in the batch); rows of other models are skipped.
+        plot_pairing: whether to (re)draw the pairing heatmap of every split in analysis/rep/.
+        The defaults match compare(): x label $N_{states}$ for every model, labels 24 / ticks 20, no title,
+        figsize (6, 5) unless fig_kwargs says otherwise.
+        '''
+        if models is None:
+            models = list(self.config_root['model'].keys())
         n_states_list = self.config_root['n_states'].copy()
         rep = {model: {str(int(num)): [] for num in n_states_list} for model in models}
         rep_path = os.path.join(self.analysis_path,'rep')
@@ -830,6 +890,8 @@ class BatchAnalysis:
         for i in range(len(self.config_list)):
             config = self.indexparser.parse(i)
             model = next(iter(config['model']))
+            if model not in models:
+                continue
             if model != 'dynemo':
                 n_states = config['n_states']
             else:
@@ -841,30 +903,33 @@ class BatchAnalysis:
                 try:
                     cov_1 = np.load(f'{save_dir}/partition_1/inf_params/covs.npy')
                     cov_2 = np.load(f'{save_dir}/partition_2/inf_params/covs.npy')
-                    rep[model][str(int(n_states))].append(self._reproducibility_analysis(cov_1,cov_2,
-                                                          filename=os.path.join(rep_path,f'{model}_state_{n_states}_{mode}.svg')))
+                    pairing_file = os.path.join(rep_path, f'{model}_state_{n_states}_{mode}.svg') if plot_pairing else None
+                    rep[model][str(int(n_states))].append(self._reproducibility_analysis(cov_1, cov_2,
+                                                                                         filename=pairing_file))
                 except Exception:
                     print(f'save_dir {save_dir} fails!')
                     rep[model][str(int(n_states))].append(np.nan)
 
+        if fig_kwargs is None:
+            fig_kwargs = {'figsize': (6, 5)}
         for model in models:
             temp_values = [rep[model][str(key)] for key in n_states_list]
-            plot_box(data=temp_values,
-                     labels=n_states_list,
-                     mark_best=False,
-                     demean=False,
-                     x_label='N_states',
-                     y_label='Average Riemannian distance',
-                     title= 'Reproducibility Analysis',
-                     filename=os.path.join(self.analysis_path, f'{model}_reproducibility.svg')
-                     )
-            plot_box(data=temp_values,
-                     labels=n_states_list,
-                     x_label='N_states',
-                     y_label='Average Riemannian distance',
-                     title='Reproducibility Analysis',
-                     filename=os.path.join(self.analysis_path, f'{model}_reproducibility.pdf')
-                     )
+            for ext in ['svg', 'pdf']:
+                plot_box(data=temp_values,
+                         labels=n_states_list,
+                         mark_best=False,
+                         demean=False,
+                         x_label=r'$N_{states}$',
+                         y_label=y_label,
+                         title=title,
+                         fig_kwargs=fig_kwargs,
+                         label_fontsize=label_fontsize,
+                         tick_fontsize=tick_fontsize,
+                         xtick_step=xtick_step,
+                         xtick_start=(1 - int(n_states_list[0])) % xtick_step,
+                         xtick_label_first=True,
+                         filename=os.path.join(self.analysis_path, f'{model}_reproducibility.{ext}')
+                         )
 
 
     def plot_fo(self, plot_mode='repeat_1'):
@@ -902,8 +967,10 @@ class BatchAnalysis:
         from osl_dynamics.utils.plotting import plot_mode_pairing
         riem = twopair_riemannian_distance(cov_1,cov_2)
         indice,riem_reorder = hungarian_pair(riem,distance=True)
-        plot_mode_pairing(riem_reorder,indice,x_label='2nd half states',y_label='1st half states',
-                          filename=filename)
+        # No filename: return the distance without drawing the pairing heatmap
+        if filename is not None:
+            plot_mode_pairing(riem_reorder,indice,x_label='2nd half states',y_label='1st half states',
+                              filename=filename)
         return np.mean(np.diagonal(riem_reorder))
 
     def _spatial_reproducibility(self,cov_1,cov_2,normalisation=False,filename=None):
@@ -1209,6 +1276,219 @@ class BatchAnalysis:
             plot_mode_pairing(riem,fig_kwargs={'figsize':(12,9)},filename=f'{plot_dir}/riem.pdf')
             plot_mode_pairing(riem_reordered,indices,fig_kwargs={'figsize':(12,9)},filename=f'{plot_dir}/riem_reordered.svg')
 
+    def plot_post_hoc_riem(self, model='hmm', n_state=6, repeat_index=1, tick_fontsize=None, label_fontsize=20,
+                           cbar_tick_fontsize=15, riem_cbar_tick_step=None):
+        '''
+        Paper-style version of post_hoc_analysis's riem.pdf: the Riemannian distance between every pair of
+        state (mode) covariances of one full-data fit, in the fit's own state order.
+        Reads only {model}_state_{n_state}/repeat_{repeat_index}/inf_params/covs.npy.
+        Same 5 x 5 in panel as plot_bcv_state_matching (labels 20 pt, colour bar ticks 15 pt, no title);
+        tick labels 15 pt, or 12 pt for more than 10 states so they don't crowd.
+        label_fontsize / cbar_tick_fontsize set the axis labels and colour bar ticks (defaults 20 / 15);
+        riem_cbar_tick_step puts the colour bar ticks every that many units (default automatic).
+        Saved as riem.pdf and riem.svg in analysis/{model}_state_{n_state}/. Unlike post_hoc_analysis,
+        the folder is not cleared first.
+        '''
+        unit = 'Modes' if 'dynemo' in model else 'States'
+        if tick_fontsize is None:
+            tick_fontsize = 15 if n_state <= 10 else 12
+        covs = np.load(f'{self.config_path}/{model}_state_{n_state}/repeat_{repeat_index}/inf_params/covs.npy')
+        riem = twopair_riemannian_distance(covs, covs)
+        plot_dir = f'{self.analysis_path}/{model}_state_{n_state}'
+        os.makedirs(plot_dir, exist_ok=True)
+        sns_kwargs = {}
+        if riem_cbar_tick_step is not None:
+            from matplotlib.ticker import MultipleLocator
+            sns_kwargs['cbar_kws'] = {'ticks': MultipleLocator(riem_cbar_tick_step)}
+        self._plot_square_heatmap(riem, None, x_label=unit, y_label=unit, sns_kwargs=sns_kwargs,
+                                  filename_base=f'{plot_dir}/riem', tick_fontsize=tick_fontsize,
+                                  label_fontsize=label_fontsize, cbar_tick_fontsize=cbar_tick_fontsize)
+
+    def plot_post_hoc_riem_reordered(self, model='hmm', n_state=6, repeat_index=1, x_label='States',
+                                     y_label='States', label_fontsize=28, cbar_tick_fontsize=28,
+                                     figsize=(12, 9)):
+        '''
+        Redraw post_hoc_analysis's riem_reordered.svg on its own: the Riemannian distance between every pair of
+        state (mode) covariances of one full-data fit, with states sorted by descending median fractional
+        occupancy (HMM) or median std of the reweighted alpha (DyNeMo) across subjects.
+        Reads {model}_state_{n_state}/repeat_{repeat_index}/inf_params/covs.npy and the per-subject values
+        saved by plot_post_hoc_fo (analysis/{model}_state_{n_state}/fo.npy or std_norm_alpha.npy; run that
+        first). No tick labels (the state numbers crowd at large fonts), x/y labels as given, colour bar ticks
+        cbar_tick_fontsize. Same 12 x 9 in figure as post_hoc_analysis. Saved as riem_reordered.svg in
+        analysis/{model}_state_{n_state}/; unlike post_hoc_analysis, the folder is not cleared first.
+        '''
+        import matplotlib.pyplot as plt
+        from ..utils.plotting import save as save_figure
+
+        plot_dir = f'{self.analysis_path}/{model}_state_{n_state}'
+        name = 'std_norm_alpha' if 'dynemo' in model else 'fo'
+        values_path = f'{plot_dir}/{name}.npy'
+        if not os.path.exists(values_path):
+            raise FileNotFoundError(f'{values_path} not found; run plot_post_hoc_fo first.')
+        index = np.argsort(np.median(np.load(values_path), axis=0))[::-1]
+        covs = np.load(f'{self.config_path}/{model}_state_{n_state}/repeat_{repeat_index}/inf_params/covs.npy')
+        riem = twopair_riemannian_distance(covs, covs)
+        riem_reordered = riem[index, :][:, index]
+        fig, ax = plot_mode_pairing(riem_reordered, x_label=x_label, y_label=y_label,
+                                    fig_kwargs={'figsize': figsize}, label_fontsize=label_fontsize,
+                                    cbar_tick_fontsize=cbar_tick_fontsize)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        save_figure(fig, f'{plot_dir}/riem_reordered.svg', tight_layout=True)
+        plt.close(fig)
+
+    def plot_post_hoc_covs(self, model='dynemo', n_state=25, repeat_index=1, percentile=99, width_cm=16,
+                           height_cm=13, title_fontsize=8, tick_fontsize=7, cbar_tick_fontsize=7,
+                           label_fontsize=10, axis_label='ICA component', filename=None):
+        '''
+        Paper-style grid of the state (mode) covariances of one full-data fit, drawn at its printed size
+        (16 x 13 cm by default, the text width of an A4 page) so the font sizes are the printed sizes.
+        One panel per mode (DyNeMo) or state (other models), titled "Mode k" / "State k" in the model's order
+        (the same numbering as plot_post_hoc_fo); each panel is a channel x channel covariance with shared
+        axis labels axis_label and ticks 1 and n_channels on the outer panels only.
+        Red-blue colour map centred on zero; each panel has its own symmetric colour bar (-m, 0, m), so the
+        magnitudes stay readable. m is the given percentile of the panel's absolute values (99 by default),
+        rounded up to 2 significant figures; entries beyond +-m are drawn in the darkest colour and the colour
+        bar gets arrow ends. percentile=None uses the largest absolute value instead (no clipping).
+        Reads only {model}_state_{n_state}/repeat_{repeat_index}/inf_params/covs.npy (group-level parameters).
+        Saved as {filename}.svg and .pdf in analysis/{model}_state_{n_state}/; filename defaults to
+        covs_p{percentile} (covs_max for percentile=None). The folder is not cleared.
+        '''
+        import matplotlib.pyplot as plt
+
+        def round_up_2sf(x):
+            power = 10 ** np.floor(np.log10(x))
+            return np.ceil(x / power * 10) / 10 * power
+
+        plot_dir = f'{self.analysis_path}/{model}_state_{n_state}'
+        os.makedirs(plot_dir, exist_ok=True)
+        if filename is None:
+            filename = 'covs_max' if percentile is None else f'covs_p{percentile:g}'
+        unit = 'Mode' if 'dynemo' in model else 'State'
+        covs = np.load(f'{self.config_path}/{model}_state_{n_state}/repeat_{repeat_index}/inf_params/covs.npy')
+        n_modes, n_channels = covs.shape[0], covs.shape[1]
+        n_cols = int(np.ceil(np.sqrt(n_modes)))
+        n_rows = int(np.ceil(n_modes / n_cols))
+
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(width_cm / 2.54, height_cm / 2.54),
+                                 layout='constrained', squeeze=False)
+        fig.get_layout_engine().set(w_pad=0.02, h_pad=0.02, wspace=0.03, hspace=0.03)
+        for k, ax in enumerate(axes.ravel()):
+            if k >= n_modes:
+                ax.remove()
+                continue
+            absval = np.abs(covs[k])
+            m = round_up_2sf(absval.max() if percentile is None else np.percentile(absval, percentile))
+            im = ax.imshow(covs[k], cmap='RdBu_r', vmin=-m, vmax=m, interpolation='nearest')
+            ax.set_title(f'{unit} {k + 1}', fontsize=title_fontsize)
+            bottom_of_column = k + n_cols >= n_modes
+            left_column = k % n_cols == 0
+            ax.set_xticks([0, n_channels - 1] if bottom_of_column else [])
+            ax.set_xticklabels(['1', str(n_channels)] if bottom_of_column else [], fontsize=tick_fontsize)
+            ax.set_yticks([0, n_channels - 1] if left_column else [])
+            ax.set_yticklabels(['1', str(n_channels)] if left_column else [], fontsize=tick_fontsize)
+            cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.03, ticks=[-m, 0, m],
+                                extend='both' if absval.max() > m else 'neither')
+            cbar.ax.set_yticklabels([f'{-m:.2g}'.replace('-', '−'), '0', f'{m:.2g}'],
+                                    fontsize=cbar_tick_fontsize)
+            cbar.outline.set_linewidth(0.4)
+            cbar.ax.tick_params(length=2, width=0.4, pad=1)
+        fig.supxlabel(axis_label, fontsize=label_fontsize)
+        fig.supylabel(axis_label, fontsize=label_fontsize)
+        for ext in ['svg', 'pdf']:
+            fig.savefig(f'{plot_dir}/{filename}.{ext}')
+        plt.close(fig)
+
+    def plot_post_hoc_fo(self, model='hmm', n_state=6, repeat_index=1, recompute=False, figsize=(5, 5),
+                         label_fontsize=20, tick_fontsize=15, x_tick_fontsize=None, xtick_step=1,
+                         publication_style=False, y_below_zero=0.0):
+        '''
+        Paper-style version of post_hoc_analysis's occupancy box plots, one box per state (mode) across subjects:
+        - HMM: fractional occupancy of the argmax state time courses (fo.svg / fo.pdf);
+        - DyNeMo: standard deviation over time of the reweighted alpha (reweight_alphas, i.e. alpha scaled
+          by the trace of each mode covariance and renormalised), as std_norm_alpha in post_hoc_analysis
+          (std_norm_alpha.svg / std_norm_alpha.pdf).
+        By default 5 x 5 in, labels 20 pt, ticks 15 pt (x ticks 12 pt for more than 10 states), every state
+        labelled, outliers shown. x_tick_fontsize sets the x tick labels (None: as just described) and
+        xtick_step labels every xtick_step-th state.
+        publication_style=True draws a cleaner box plot: no top/right spines, light filled boxes with dark
+        outlines, dark medians, no mean markers, small grey semi-transparent outliers, a tick mark on every box
+        (labels every xtick_step-th), y axis from 0 with at most 6 ticks. y_below_zero > 0 (publication style
+        only) starts the y axis that fraction of its top below 0 (e.g. 0.03), so boxes at or near 0 are not
+        hidden by the x axis line; the ticks stay at 0 and above.
+        The per-subject values are saved as {name}.npy (n_subjects x n_states) next to the
+        figure; if that file exists it is plotted directly and alp.pkl is not read (recompute=True reads
+        alp.pkl again). Saved in analysis/{model}_state_{n_state}/; the folder is not cleared first.
+        '''
+        import matplotlib.pyplot as plt
+        from matplotlib.ticker import MaxNLocator
+
+        if 'dynemo' in model:
+            name, x_label, y_label = 'std_norm_alpha', 'Mode', 'Std of reweighted alpha'
+        elif model == 'hmm':
+            name, x_label, y_label = 'fo', 'State', 'Fractional occupancy'
+        else:
+            raise NotImplementedError(f'No occupancy measure defined for {model}.')
+        fit_dir = f'{self.config_path}/{model}_state_{n_state}/repeat_{repeat_index}/inf_params'
+        plot_dir = f'{self.analysis_path}/{model}_state_{n_state}'
+        os.makedirs(plot_dir, exist_ok=True)
+        values_path = f'{plot_dir}/{name}.npy'
+        if os.path.exists(values_path) and not recompute:
+            values = np.load(values_path)
+        else:
+            with open(f'{fit_dir}/alp.pkl', 'rb') as file:
+                alpha = pickle.load(file)
+            if name == 'fo':
+                values = fractional_occupancies(argmax_time_courses(alpha))
+            else:
+                norm_alpha = reweight_alphas(alpha, np.load(f'{fit_dir}/covs.npy'))
+                values = np.array([np.std(a, axis=0) for a in norm_alpha])
+            del alpha
+            np.save(values_path, values)
+
+        n_boxes = values.shape[1]
+        if x_tick_fontsize is None:
+            x_tick_fontsize = 12 if n_boxes > 10 else tick_fontsize
+        plot_kwargs = {'showfliers': True}
+        if publication_style:
+            edge, line = '0.15', 1.5
+            plot_kwargs = {'showfliers': True, 'showmeans': False, 'patch_artist': True, 'widths': 0.6,
+                           'boxprops': {'facecolor': '#c6dbef', 'edgecolor': edge, 'linewidth': line},
+                           'medianprops': {'color': edge, 'linewidth': 2.0},
+                           'whiskerprops': {'color': edge, 'linewidth': line},
+                           'capprops': {'color': edge, 'linewidth': line},
+                           'flierprops': {'marker': 'o', 'markersize': 3, 'markerfacecolor': '0.45',
+                                          'markeredgecolor': 'none', 'alpha': 0.5}}
+
+        # Draw once so the svg and pdf are identical
+        fig, ax = plt.subplots(figsize=figsize)
+        plot_box(values.T.tolist(),
+                 labels=list(range(1, n_boxes + 1)),
+                 plot_samples=False,
+                 mark_best=False,
+                 plot_kwargs=plot_kwargs,
+                 x_label=x_label,
+                 y_label=y_label,
+                 xtick_step=xtick_step,
+                 label_fontsize=label_fontsize,
+                 tick_fontsize=tick_fontsize,
+                 ax=ax)
+        ax.tick_params(axis='x', labelsize=x_tick_fontsize)
+        if publication_style:
+            ax.spines[['top', 'right']].set_visible(False)
+            ax.spines[['left', 'bottom']].set_linewidth(1.2)
+            ax.tick_params(which='major', width=1.2, length=5)
+            ax.set_xticks(range(1, n_boxes + 1), minor=True)
+            ax.tick_params(axis='x', which='minor', width=1.0, length=3)
+            ax.yaxis.set_major_locator(MaxNLocator(nbins=5))
+            ax.set_ylim(bottom=0)
+            if y_below_zero > 0:
+                ax.set_ylim(bottom=-y_below_zero * ax.get_ylim()[1])
+        fig.tight_layout()
+        for ext in ['svg', 'pdf']:
+            fig.savefig(f'{plot_dir}/{name}.{ext}')
+        plt.close(fig)
+
     def plot_post_hoc_ground_truth(self, model='hmm', n_state=6, ground_truth_dir=None, repeat_index=1,
                                    tick_fontsize=20, cbar_tick_fontsize=None, riem_vmin=None,
                                    riem_cbar_tick_step=None, plot_dir=None, recompute=False):
@@ -1279,6 +1559,36 @@ class BatchAnalysis:
                                  **fonts)
             plot_mode_no_pairing(cor, filename=f'{plot_dir}/alpha_ground_truth.svg',
                                  sns_kwargs=alpha_kwargs, **fonts)
+
+    @staticmethod
+    def _plot_square_heatmap(matrix, indices, x_label, y_label, sns_kwargs, filename_base,
+                             tick_fontsize=15, annotate_diagonal=False, annot_fontsize=14,
+                             label_fontsize=20, cbar_tick_fontsize=15):
+        '''
+        One 5 x 5 in heatmap panel with fixed axes geometry, so every panel lines up in a figure: square heatmap
+        and a colour bar of the same height, labels 20 pt, colour bar ticks 15 pt by default, no title (the space above
+        is left for the title added in the figure layout). Saved as {filename_base}.svg and .pdf.
+        '''
+        import matplotlib.pyplot as plt
+
+        fig = plt.figure(figsize=(5, 5))
+        ax = fig.add_axes([0.15, 0.15, 0.66, 0.66])
+        cax = fig.add_axes([0.84, 0.15, 0.035, 0.66])
+        plot_mode_pairing(matrix,
+                          indices,
+                          x_label=x_label,
+                          y_label=y_label,
+                          sns_kwargs={**sns_kwargs, 'cbar_ax': cax},
+                          ax=ax,
+                          annotate_diagonal=annotate_diagonal,
+                          annot_fontsize=annot_fontsize,
+                          label_fontsize=label_fontsize,
+                          tick_fontsize=tick_fontsize,
+                          cbar_tick_fontsize=cbar_tick_fontsize)
+        ax.tick_params(axis='y', labelrotation=0)
+        for ext in ['svg', 'pdf']:
+            fig.savefig(f'{filename_base}.{ext}')
+        plt.close(fig)
 
     def mode_contribution_analysis(self,model='dynemo',n_state=16,mode='bcv_1'):
         save_dir = (f'{self.config_path}/{model}_state_{n_state}/{mode}/')
@@ -1708,7 +2018,9 @@ class BatchAnalysis:
         plt.close(fig)
 
     def plot_bcv_state_matching(self, model='hmm', n_state=6, bcv_index=1, repeat_index=1,
-                                tick_fontsize=15, annot_fontsize=14, annotate_diagonal=True):
+                                tick_fontsize=15, annot_fontsize=14, annotate_diagonal=True,
+                                label_fontsize=20, cbar_tick_fontsize=15, keys=None, corr_cbar_ticks=None,
+                                riem_cbar_tick_step=None):
         '''
         Plot the state-matching heatmaps saved by bcv_state_matching.
         Only matrices.npz and metrics.json are read, so the figures can be redrawn
@@ -1718,9 +2030,11 @@ class BatchAnalysis:
         on the diagonal (annotate_diagonal=False leaves it out, e.g. when the matched/unmatched summary across
         folds already reports it, or with many states) and there is no title. Saved as {key}.svg and {key}.pdf
         next to the matrices. DyNeMo axes are labelled as modes, other models as states.
+        label_fontsize / cbar_tick_fontsize set the axis labels and colour bar ticks (defaults 20 / 15);
+        keys lists the panels to draw (e.g. ['riem_Y', 'alpha_corr_test']; default: every matrix saved).
+        corr_cbar_ticks sets the colour bar ticks of the correlation panels (e.g. [-1, 0, 1]; default automatic);
+        riem_cbar_tick_step puts the Riemannian colour bar ticks every that many units (e.g. 5; default automatic).
         '''
-        import matplotlib.pyplot as plt
-
         unit = 'modes' if 'dynemo' in model else 'states'
         plot_dir = f'{self.analysis_path}/state_matching/{model}_state_{n_state}_bcv_{bcv_index}_repeat_{repeat_index}/'
         matrices = np.load(f'{plot_dir}/matrices.npz')
@@ -1729,33 +2043,28 @@ class BatchAnalysis:
         row = [i - 1 for i in metrics['full_state']]
         perm = [j - 1 for j in metrics['split_state']]
 
-        for key in matrices.files:
+        for key in (matrices.files if keys is None else keys):
             matrix_reorder = matrices[key][:, perm]
             if key.startswith('riem'):
                 sns_kwargs = {}
+                if riem_cbar_tick_step is not None:
+                    from matplotlib.ticker import MultipleLocator
+                    sns_kwargs['cbar_kws'] = {'ticks': MultipleLocator(riem_cbar_tick_step)}
             else:
                 sns_kwargs = {"vmin": -1, "vmax": 1, "center": 0}
-            # Fixed square heatmap and colour bar of the same height, so every panel lines up;
-            # the space above the heatmap is left for the title added in the figure layout
-            fig = plt.figure(figsize=(5, 5))
-            ax = fig.add_axes([0.15, 0.15, 0.66, 0.66])
-            cax = fig.add_axes([0.84, 0.15, 0.035, 0.66])
-            sns_kwargs['cbar_ax'] = cax
-            plot_mode_pairing(matrix_reorder,
-                              {'row': row, 'col': perm},
-                              x_label=f'Split-derived {unit}',
-                              y_label=f'Full-data {unit}',
-                              sns_kwargs=sns_kwargs,
-                              ax=ax,
-                              annotate_diagonal=annotate_diagonal,
-                              annot_fontsize=annot_fontsize,
-                              label_fontsize=20,
-                              tick_fontsize=tick_fontsize,
-                              cbar_tick_fontsize=15)
-            ax.tick_params(axis='y', labelrotation=0)
-            for ext in ['svg', 'pdf']:
-                fig.savefig(f'{plot_dir}/{key}.{ext}')
-            plt.close(fig)
+                if corr_cbar_ticks is not None:
+                    sns_kwargs['cbar_kws'] = {'ticks': corr_cbar_ticks}
+            self._plot_square_heatmap(matrix_reorder,
+                                      {'row': row, 'col': perm},
+                                      x_label=f'Split-derived {unit}',
+                                      y_label=f'Full-data {unit}',
+                                      sns_kwargs=sns_kwargs,
+                                      filename_base=f'{plot_dir}/{key}',
+                                      tick_fontsize=tick_fontsize,
+                                      annotate_diagonal=annotate_diagonal,
+                                      annot_fontsize=annot_fontsize,
+                                      label_fontsize=label_fontsize,
+                                      cbar_tick_fontsize=cbar_tick_fontsize)
             
 
         
